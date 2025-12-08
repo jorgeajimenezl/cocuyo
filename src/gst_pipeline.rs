@@ -2,6 +2,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use pipewire::spa;
+use std::os::fd::RawFd;
 
 #[derive(Debug)]
 pub enum GstError {
@@ -133,6 +134,30 @@ impl GstVideoConverter {
             .map_err(|e| GstError::ConversionError(format!("Failed to push buffer: {:?}", e)))?;
 
         Ok(())
+    }
+
+    pub fn push_dmabuf(
+        &self,
+        _fd: RawFd,
+        _width: u32,
+        _height: u32,
+        _stride: u32,
+        _offset: u32,
+        _format_str: &str,
+    ) -> Result<(), GstError> {
+        // Create a GStreamer buffer wrapping the DMA-BUF file descriptor
+        // This avoids CPU copies - GStreamer will access GPU memory directly
+
+        // For now, we'll use a workaround: create an empty buffer and push it
+        // A full DMA-BUF implementation would use gstreamer-allocators crate
+        // to create a proper DMA-BUF memory object, but that's complex
+
+        // Simplified approach: Just signal that we have DMA-BUF capability
+        // The actual import would require gstreamer-allocators dependency
+
+        Err(GstError::ConversionError(
+            "Direct DMA-BUF import not yet implemented - requires gstreamer-allocators".to_string()
+        ))
     }
 
     pub fn pull_rgba_frame(&self) -> Result<Vec<u8>, GstError> {

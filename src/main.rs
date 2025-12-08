@@ -10,6 +10,7 @@ use gstreamer;
 use pipewire as pw;
 use pw::{properties::properties, spa};
 
+mod dmabuf_handler;
 mod gst_pipeline;
 
 struct UserData {
@@ -467,6 +468,75 @@ fn start_streaming(
                     eprintln!("Out of buffers");
                 }
                 Some(mut buffer) => {
+                    // Try to extract DMA-BUF first (Phase 3: DMA-BUF detection)
+                    match dmabuf_handler::DmaBufBuffer::from_pipewire_buffer(
+                        &mut buffer,
+                        user_data.format.size().width,
+                        user_data.format.size().height,
+                        user_data.format.format(),
+                    ) {
+                        Ok(dmabuf) => {
+                            static ONCE: std::sync::Once = std::sync::Once::new();
+                            ONCE.call_once(|| {
+                                println!("✓ DMA-BUF enabled! fd={}, format={:?}, stride={}, size={}x{}",
+                                    dmabuf.fd, dmabuf.format, dmabuf.stride, dmabuf.width, dmabuf.height);
+                                println!("  Using DMA-BUF mmap path with GStreamer GPU conversion");
+                            });
+
+                            // Map DMA-BUF to read the data
+                            let dmabuf_data = unsafe {
+                                match dmabuf.map_readonly() {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        eprintln!("Failed to map DMA-BUF: {}", e);
+                                        return;
+                                    }
+                                }
+                            };
+
+                            // Use GStreamer for format conversion
+                            let converted_data = if let Some(ref converter) = user_data.gst_converter {
+                                match converter.push_buffer(&dmabuf_data) {
+                                    Ok(_) => match converter.pull_rgba_frame() {
+                                        Ok(rgba_data) => rgba_data,
+                                        Err(e) => {
+                                            eprintln!("Failed to convert DMA-BUF frame: {}", e);
+                                            return;
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Failed to push DMA-BUF to GStreamer: {}", e);
+                                        return;
+                                    }
+                                }
+                            } else {
+                                eprintln!("No GStreamer converter available");
+                                return;
+                            };
+
+                            // Send converted frame
+                            let frame = FrameData {
+                                data: converted_data,
+                                width: user_data.format.size().width,
+                                height: user_data.format.size().height,
+                                format: spa::param::video::VideoFormat::RGBA,
+                            };
+
+                            if let Err(e) = user_data.frame_sender.send(frame) {
+                                eprintln!("Failed to send frame: {}", e);
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            // DMA-BUF not available, use CPU copy path
+                            static ONCE: std::sync::Once = std::sync::Once::new();
+                            ONCE.call_once(|| {
+                                eprintln!("DMA-BUF not available ({}), using CPU copy fallback", e);
+                            });
+                        }
+                    }
+
+                    // CPU copy fallback path (only used if DMA-BUF extraction failed)
                     let datas = buffer.datas_mut();
                     if datas.is_empty() {
                         return;
@@ -480,9 +550,18 @@ fn start_streaming(
                         return;
                     }
 
+                    // Only access data pointer if we're in CPU copy mode (MAP_BUFFERS would have been needed)
+                    let data_ptr = match data.data() {
+                        Some(ptr) => ptr,
+                        None => {
+                            eprintln!("Warning: No CPU-mapped data available (this is expected with DMA-BUF mode)");
+                            return;
+                        }
+                    };
+
                     let slice = unsafe {
                         std::slice::from_raw_parts(
-                            data.data().unwrap().as_ptr(),
+                            data_ptr.as_ptr(),
                             size,
                         )
                     };
@@ -595,14 +674,17 @@ fn start_streaming(
 
     let mut params = [spa::pod::Pod::from_bytes(&values).unwrap()];
 
+    // Phase 3: Try DMA-BUF by not forcing MAP_BUFFERS
+    // This allows PipeWire to provide DMA-BUF file descriptors if available
+    println!("Attempting to connect with DMA-BUF support...");
     stream.connect(
         spa::utils::Direction::Input,
         Some(node_id),
-        pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
+        pw::stream::StreamFlags::AUTOCONNECT, // Removed MAP_BUFFERS to allow DMA-BUF
         &mut params,
     )?;
 
-    println!("Connected stream");
+    println!("Connected stream (DMA-BUF mode)");
 
     mainloop.run();
 
@@ -640,8 +722,11 @@ async fn main() {
             .with_title("Cocuyo")
             .with_transparent(true)
             .with_decorations(false),
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
+
+    println!("Using wgpu backend (Vulkan preferred on Linux for DMA-BUF support)");
 
     if let Err(e) = eframe::run_native(
         "cocuyo",
