@@ -6,12 +6,16 @@ use ashpd::desktop::{
     PersistMode,
 };
 use eframe::egui;
+use gstreamer;
 use pipewire as pw;
 use pw::{properties::properties, spa};
+
+mod gst_pipeline;
 
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    gst_converter: Option<gst_pipeline::GstVideoConverter>,
 }
 
 #[derive(Clone)]
@@ -51,41 +55,13 @@ impl CocuyoApp {
     }
 
     fn convert_to_rgba(&self, frame: &FrameData) -> Option<Vec<u8>> {
-        match frame.format {
-            spa::param::video::VideoFormat::RGB => {
-                let mut rgba = Vec::with_capacity((frame.width * frame.height * 4) as usize);
-                for chunk in frame.data.chunks(3) {
-                    if chunk.len() == 3 {
-                        rgba.extend_from_slice(chunk);
-                        rgba.push(255);
-                    }
-                }
-                Some(rgba)
-            }
-            spa::param::video::VideoFormat::RGBA => Some(frame.data.clone()),
-            spa::param::video::VideoFormat::RGBx | spa::param::video::VideoFormat::BGRx => {
-                let mut rgba = Vec::with_capacity((frame.width * frame.height * 4) as usize);
-                for chunk in frame.data.chunks(4) {
-                    if chunk.len() == 4 {
-                        if frame.format == spa::param::video::VideoFormat::BGRx {
-                            rgba.push(chunk[2]);
-                            rgba.push(chunk[1]);
-                            rgba.push(chunk[0]);
-                            rgba.push(255);
-                        } else {
-                            rgba.push(chunk[0]);
-                            rgba.push(chunk[1]);
-                            rgba.push(chunk[2]);
-                            rgba.push(255);
-                        }
-                    }
-                }
-                Some(rgba)
-            }
-            _ => {
-                eprintln!("Unsupported format: {:?}", frame.format);
-                None
-            }
+        // GStreamer handles all format conversions now
+        // This method just returns the data which should already be in RGBA format
+        if frame.format == spa::param::video::VideoFormat::RGBA {
+            Some(frame.data.clone())
+        } else {
+            eprintln!("Unexpected format: {:?} (should be RGBA from GStreamer)", frame.format);
+            None
         }
     }
 }
@@ -410,6 +386,7 @@ fn start_streaming(
     let data = UserData {
         format: Default::default(),
         frame_sender,
+        gst_converter: None,
     };
 
     let stream = pw::stream::Stream::new(
@@ -468,6 +445,21 @@ fn start_streaming(
                 user_data.format.framerate().num,
                 user_data.format.framerate().denom
             );
+
+            // Initialize GStreamer converter with the detected format
+            let width = user_data.format.size().width;
+            let height = user_data.format.size().height;
+            let format = user_data.format.format();
+
+            match gst_pipeline::GstVideoConverter::new(width, height, format) {
+                Ok(converter) => {
+                    println!("GStreamer converter initialized successfully");
+                    user_data.gst_converter = Some(converter);
+                }
+                Err(e) => {
+                    eprintln!("Failed to create GStreamer converter: {}", e);
+                }
+            }
         })
         .process(|stream, user_data| {
             match stream.dequeue_buffer() {
@@ -495,11 +487,35 @@ fn start_streaming(
                         )
                     };
 
+                    // Use GStreamer for format conversion if available
+                    let converted_data = if let Some(ref converter) = user_data.gst_converter {
+                        match converter.push_buffer(slice) {
+                            Ok(_) => match converter.pull_rgba_frame() {
+                                Ok(rgba_data) => rgba_data,
+                                Err(e) => {
+                                    eprintln!("Failed to pull RGBA frame: {}", e);
+                                    return;
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to push buffer to GStreamer: {}", e);
+                                return;
+                            }
+                        }
+                    } else {
+                        // Fallback: send raw data if converter not ready
+                        slice.to_vec()
+                    };
+
                     let frame_data = FrameData {
-                        data: slice.to_vec(),
+                        data: converted_data,
                         width: user_data.format.size().width,
                         height: user_data.format.size().height,
-                        format: user_data.format.format(),
+                        format: if user_data.gst_converter.is_some() {
+                            spa::param::video::VideoFormat::RGBA
+                        } else {
+                            user_data.format.format()
+                        },
                     };
 
                     if user_data.frame_sender.send(frame_data).is_err() {
@@ -595,6 +611,10 @@ fn start_streaming(
 
 #[tokio::main]
 async fn main() {
+    // Initialize GStreamer
+    gstreamer::init().expect("Failed to initialize GStreamer");
+    println!("GStreamer initialized successfully");
+
     let (stream, fd) = open_portal()
         .await
         .expect("Failed to open portal. Make sure you're running on a Wayland session with XDG Desktop Portal support.");
