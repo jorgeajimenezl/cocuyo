@@ -22,18 +22,24 @@ struct FrameData {
     format: spa::param::video::VideoFormat,
 }
 
-struct ScreenRecorderApp {
+struct CocuyoApp {
     frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
     current_frame: Option<FrameData>,
     texture: Option<egui::TextureHandle>,
+    screen_window_open: bool,
+    info_window_open: bool,
+    content_rect: Option<egui::Rect>,
 }
 
-impl ScreenRecorderApp {
+impl CocuyoApp {
     fn new(frame_receiver: tokio::sync::mpsc::UnboundedReceiver<FrameData>) -> Self {
         Self {
             frame_receiver: Arc::new(Mutex::new(frame_receiver)),
             current_frame: None,
             texture: None,
+            screen_window_open: true,
+            info_window_open: true,
+            content_rect: None,
         }
     }
 
@@ -84,56 +90,283 @@ impl ScreenRecorderApp {
     }
 }
 
-impl eframe::App for ScreenRecorderApp {
+impl eframe::App for CocuyoApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Rgba::TRANSPARENT.to_array() // Make sure we don't paint anything behind the rounded corners
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_frame();
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Screen Recorder");
-
-            if let Some(ref frame) = self.current_frame {
-                if let Some(rgba_data) = self.convert_to_rgba(frame) {
-                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [frame.width as usize, frame.height as usize],
-                        &rgba_data,
-                    );
-
-                    let texture = self.texture.get_or_insert_with(|| {
-                        ui.ctx().load_texture(
-                            "screen_frame",
-                            color_image.clone(),
-                            egui::TextureOptions::LINEAR,
-                        )
-                    });
-
-                    texture.set(color_image, egui::TextureOptions::LINEAR);
-
-                    let available_size = ui.available_size();
-                    let aspect_ratio = frame.width as f32 / frame.height as f32;
-
-                    let display_size = if available_size.x / available_size.y > aspect_ratio {
-                        egui::vec2(available_size.y * aspect_ratio, available_size.y)
+        let content_rect = custom_window_frame(ctx, "Cocuyo", |ui| {
+            // Bottom panel for status information
+            egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Status:");
+                    if self.current_frame.is_some() {
+                        ui.colored_label(egui::Color32::GREEN, "● Streaming");
                     } else {
-                        egui::vec2(available_size.x, available_size.x / aspect_ratio)
-                    };
+                        ui.colored_label(egui::Color32::YELLOW, "● Waiting for frames...");
+                    }
 
-                    ui.centered_and_justified(|ui| {
-                        ui.image((texture.id(), display_size));
-                    });
-
-                    ui.label(format!(
-                        "Resolution: {}x{} | Format: {:?}",
-                        frame.width, frame.height, frame.format
-                    ));
-                }
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label("Waiting for frames...");
+                    if let Some(ref frame) = self.current_frame {
+                        ui.separator();
+                        ui.label(format!(
+                            "{}x{} | {:?}",
+                            frame.width, frame.height, frame.format
+                        ));
+                    }
                 });
-            }
+            });
+
+            // Central panel
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.heading("Cocuyo");
+                    ui.label("Screen capture via PipeWire");
+                    ui.add_space(20.0);
+
+                    if ui.button("Show Screen Preview").clicked() {
+                        self.screen_window_open = true;
+                    }
+
+                    ui.add_space(10.0);
+
+                    if ui.button("Show Stream Information").clicked() {
+                        self.info_window_open = true;
+                    }
+                });
+            });
         });
 
+        self.content_rect = Some(content_rect);
+
+        // Screen preview window
+        let current_frame = self.current_frame.clone();
+        let mut window_open = self.screen_window_open;
+
+        let mut window = egui::Window::new("Screen Preview")
+            .open(&mut window_open)
+            .default_size([800.0, 600.0])
+            .resizable(true);
+
+        if let Some(content_rect) = self.content_rect {
+            window = window.constrain_to(content_rect);
+        }
+
+        window.show(ctx, |ui| {
+                egui::ScrollArea::both().show(ui, |ui| {
+                    if let Some(ref frame) = current_frame {
+                        if let Some(rgba_data) = self.convert_to_rgba(frame) {
+                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                [frame.width as usize, frame.height as usize],
+                                &rgba_data,
+                            );
+
+                            let texture = self.texture.get_or_insert_with(|| {
+                                ui.ctx().load_texture(
+                                    "screen_frame",
+                                    color_image.clone(),
+                                    egui::TextureOptions::LINEAR,
+                                )
+                            });
+
+                            texture.set(color_image, egui::TextureOptions::LINEAR);
+
+                            let available_size = ui.available_size();
+                            let aspect_ratio = frame.width as f32 / frame.height as f32;
+
+                            let display_size = if available_size.x / available_size.y > aspect_ratio {
+                                egui::vec2(available_size.y * aspect_ratio, available_size.y)
+                            } else {
+                                egui::vec2(available_size.x, available_size.x / aspect_ratio)
+                            };
+
+                            ui.image((texture.id(), display_size));
+                        }
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.spinner();
+                            ui.label("Waiting for frames...");
+                        });
+                    }
+                });
+            });
+
+        self.screen_window_open = window_open;
+
+        // Stream information window
+        let current_frame_info = self.current_frame.clone();
+        let mut info_window_open = self.info_window_open;
+
+        let mut info_window = egui::Window::new("Stream Information")
+            .open(&mut info_window_open)
+            .default_size([350.0, 250.0])
+            .resizable(true);
+
+        if let Some(content_rect) = self.content_rect {
+            info_window = info_window.constrain_to(content_rect);
+        }
+
+        info_window.show(ctx, |ui| {
+                ui.heading("Stream Details");
+                ui.separator();
+
+                if let Some(ref frame) = current_frame_info {
+                    ui.label(format!("Width: {} px", frame.width));
+                    ui.label(format!("Height: {} px", frame.height));
+                    ui.label(format!("Format: {:?}", frame.format));
+                    ui.label(format!("Data size: {} bytes", frame.data.len()));
+
+                    let aspect_ratio = frame.width as f32 / frame.height as f32;
+                    ui.label(format!("Aspect ratio: {:.2}", aspect_ratio));
+
+                    ui.add_space(10.0);
+                    ui.separator();
+
+                    ui.label(format!("Total pixels: {}", frame.width * frame.height));
+                    ui.label(format!("Bytes per pixel: {:.2}", frame.data.len() as f32 / (frame.width * frame.height) as f32));
+                } else {
+                    ui.label("No frame data available");
+                    ui.add_space(10.0);
+                    ui.colored_label(egui::Color32::YELLOW, "Waiting for first frame...");
+                }
+            });
+
+        self.info_window_open = info_window_open;
+
         ctx.request_repaint();
+    }
+}
+
+fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) -> egui::Rect {
+    use egui::{CentralPanel, UiBuilder};
+
+    let panel_frame = egui::Frame::new()
+        .fill(ctx.style().visuals.window_fill())
+        .corner_radius(10)
+        .stroke(ctx.style().visuals.widgets.noninteractive.fg_stroke)
+        .outer_margin(1); // so the stroke is within the bounds
+
+    let mut content_rect_result = egui::Rect::NOTHING;
+
+    CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
+        let app_rect = ui.max_rect();
+
+        let title_bar_height = 32.0;
+        let title_bar_rect = {
+            let mut rect = app_rect;
+            rect.max.y = rect.min.y + title_bar_height;
+            rect
+        };
+        title_bar_ui(ui, title_bar_rect, title);
+
+        // Add the contents:
+        let content_rect = {
+            let mut rect = app_rect;
+            rect.min.y = title_bar_rect.max.y;
+            rect
+        }
+        .shrink(4.0);
+        content_rect_result = content_rect;
+        let mut content_ui = ui.new_child(UiBuilder::new().max_rect(content_rect));
+        add_contents(&mut content_ui);
+    });
+
+    content_rect_result
+}
+
+fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: &str) {
+    use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, vec2};
+
+    let painter = ui.painter();
+
+    // Paint the title:
+    painter.text(
+        title_bar_rect.center(),
+        Align2::CENTER_CENTER,
+        title,
+        FontId::proportional(20.0),
+        ui.style().visuals.text_color(),
+    );
+
+    // Paint the line under the title:
+    painter.line_segment(
+        [
+            title_bar_rect.left_bottom() + vec2(1.0, 0.0),
+            title_bar_rect.right_bottom() + vec2(-1.0, 0.0),
+        ],
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
+
+    // Interact with the title bar first (for dragging)
+    let title_bar_response = ui.interact(
+        title_bar_rect,
+        Id::new("title_bar_drag"),
+        Sense::click_and_drag(),
+    );
+
+    // Handle dragging and double-click
+    if title_bar_response.double_clicked() {
+        let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+    }
+
+    if title_bar_response.drag_started_by(PointerButton::Primary) {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+
+    // Add buttons on top (they will consume clicks on their area)
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(title_bar_rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.visuals_mut().button_frame = false;
+            ui.add_space(8.0);
+            close_maximize_minimize(ui);
+        },
+    );
+}
+
+/// Show some close/maximize/minimize buttons for the native window.
+fn close_maximize_minimize(ui: &mut egui::Ui) {
+    use egui::{Button, RichText};
+
+    let button_height = 24.0;
+
+    let close_response = ui
+        .add(Button::new(RichText::new("❌").size(button_height)))
+        .on_hover_text("Close the window");
+    if close_response.clicked() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+    if is_maximized {
+        let maximized_response = ui
+            .add(Button::new(RichText::new("🗗").size(button_height)))
+            .on_hover_text("Restore window");
+        if maximized_response.clicked() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        }
+    } else {
+        let maximized_response = ui
+            .add(Button::new(RichText::new("🗗").size(button_height)))
+            .on_hover_text("Maximize window");
+        if maximized_response.clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+        }
+    }
+
+    let minimized_response = ui
+        .add(Button::new(RichText::new("🗕").size(button_height)))
+        .on_hover_text("Minimize the window");
+    if minimized_response.clicked() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
 }
 
@@ -384,14 +617,16 @@ async fn main() {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
-            .with_title("Cocuyo - Screen Recorder"),
+            .with_title("Cocuyo")
+            .with_transparent(true)
+            .with_decorations(false),
         ..Default::default()
     };
 
     if let Err(e) = eframe::run_native(
         "cocuyo",
         native_options,
-        Box::new(|_cc| Ok(Box::new(ScreenRecorderApp::new(frame_receiver)))),
+        Box::new(|_cc| Ok(Box::new(CocuyoApp::new(frame_receiver)))),
     ) {
         eprintln!("Failed to run eframe application: {}", e);
     }
