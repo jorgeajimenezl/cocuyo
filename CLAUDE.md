@@ -18,7 +18,7 @@ cargo check
 cargo test
 ```
 
-# Manage Dependencies
+## Manage Dependencies
 
 ```bash
 # Add a new dependency
@@ -47,22 +47,23 @@ Cocuyo is a Wayland screen capture application that displays real-time screen co
 1. **Portal Session** (`main.rs:open_portal`) - Uses ashpd to request screen capture permission via XDG Desktop Portal
 2. **PipeWire Stream** (`main.rs:start_streaming`) - Connects to PipeWire node using the portal-provided file descriptor
 3. **Frame Processing** - Two paths:
-   - **DMA-BUF path** (`dmabuf_handler.rs`) - Zero-copy GPU buffer access via mmap when available
+   - **DMA-BUF zero-copy path** - Uses `GstDmaBufAllocator` to wrap PipeWire's DMA-BUF fd directly into GStreamer buffers without CPU copies
    - **CPU copy fallback** - Traditional memory copy when DMA-BUF unavailable
-4. **Format Conversion** (`gst_pipeline.rs`) - GStreamer pipeline converts any input format to RGBA
+4. **Format Conversion** (`gst_pipeline.rs`) - GStreamer pipeline converts any input format to RGBA via `push_dmabuf()` or `push_buffer()`
 5. **Display** (`main.rs:CocuyoApp`) - egui/eframe renders frames using wgpu backend
 
 ### Key Components
 
 - **`main.rs`** - Application entry point, PipeWire stream setup, egui UI with custom window frame
-- **`gst_pipeline.rs`** - GStreamer-based video format converter (appsrc → videoconvert → appsink)
-- **`dmabuf_handler.rs`** - DMA-BUF extraction and mmap for efficient GPU buffer access
+- **`gst_pipeline.rs`** - GStreamer-based video format converter (appsrc → videoconvert → appsink), includes `DmaBufAllocator` for zero-copy buffer wrapping
+- **`dmabuf_handler.rs`** - DMA-BUF metadata extraction from PipeWire buffers (fd, stride, format, dimensions)
 
 ### Threading Model
 
 - Main thread: Tokio async runtime for portal communication, then egui event loop
 - Separate thread: PipeWire mainloop for frame capture (spawned in `main`)
 - Frame data sent via `tokio::sync::mpsc::unbounded_channel`
+- Graceful shutdown: When channel closes (window closed), PipeWire thread calls `mainloop.quit()`
 
 ### Supported Video Formats
 
