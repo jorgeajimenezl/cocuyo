@@ -28,8 +28,6 @@ pub struct GstVideoConverter {
     pipeline: gst::Pipeline,
     appsrc: gst_app::AppSrc,
     appsink: gst_app::AppSink,
-    width: u32,
-    height: u32,
     dmabuf_allocator: Option<DmaBufAllocator>,
 }
 
@@ -114,8 +112,6 @@ impl GstVideoConverter {
             pipeline,
             appsrc,
             appsink,
-            width,
-            height,
             dmabuf_allocator: None,
         })
     }
@@ -191,14 +187,6 @@ impl GstVideoConverter {
             .map_err(|e| GstError::ConversionError(format!("Failed to map buffer: {}", e)))?;
 
         Ok(map.as_slice().to_vec())
-    }
-
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height
     }
 }
 
