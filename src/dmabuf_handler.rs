@@ -3,6 +3,7 @@ use nix::sys::stat::fstat;
 use pipewire as pw;
 use std::os::fd::{RawFd, BorrowedFd};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DmaBufBuffer {
     pub fd: RawFd,
@@ -117,6 +118,7 @@ impl DmaBufBuffer {
     }
 
     /// Check if DMA-BUF is likely available (heuristic check)
+    #[allow(dead_code)]
     pub fn is_likely_available() -> bool {
         // Check if we're on a Wayland session (required for DMA-BUF)
         std::env::var("WAYLAND_DISPLAY").is_ok()
@@ -129,6 +131,7 @@ impl DmaBufBuffer {
     ///
     /// # Safety
     /// The file descriptor must remain valid for the lifetime of the returned slice
+    #[allow(dead_code)]
     pub unsafe fn map_readonly(&self) -> Result<Vec<u8>, DmaBufError> {
         use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 

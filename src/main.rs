@@ -1,6 +1,8 @@
 use std::os::fd::{IntoRawFd, OwnedFd};
 use std::sync::{Arc, Mutex};
 
+use tracing::{debug, error, info, warn};
+
 use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType, Stream as ScreencastStream},
     PersistMode,
@@ -62,7 +64,7 @@ impl CocuyoApp {
         if frame.format == spa::param::video::VideoFormat::RGBA {
             Some(frame.data.clone())
         } else {
-            eprintln!("Unexpected format: {:?} (should be RGBA from GStreamer)", frame.format);
+            warn!(format = ?frame.format, "Unexpected format (should be RGBA from GStreamer)");
             None
         }
     }
@@ -405,7 +407,7 @@ fn start_streaming(
     let _listener = stream
         .add_local_listener_with_user_data(data)
         .state_changed(|_, _, old, new| {
-            println!("State changed: {:?} -> {:?}", old, new);
+            debug!(?old, ?new, "Stream state changed");
         })
         .param_changed(|_, user_data, id, param| {
             let Some(param) = param else {
@@ -432,21 +434,14 @@ fn start_streaming(
                 .parse(param)
                 .expect("Failed to parse param changed to VideoInfoRaw");
 
-            println!("Got video format:");
-            println!(
-                "\tformat: {} ({:?})",
-                user_data.format.format().as_raw(),
-                user_data.format.format()
-            );
-            println!(
-                "\tsize: {}x{}",
-                user_data.format.size().width,
-                user_data.format.size().height
-            );
-            println!(
-                "\tframerate: {}/{}",
-                user_data.format.framerate().num,
-                user_data.format.framerate().denom
+            info!(
+                format_raw = user_data.format.format().as_raw(),
+                format = ?user_data.format.format(),
+                width = user_data.format.size().width,
+                height = user_data.format.size().height,
+                framerate_num = user_data.format.framerate().num,
+                framerate_denom = user_data.format.framerate().denom,
+                "Got video format"
             );
 
             // Initialize GStreamer converter with the detected format
@@ -456,18 +451,18 @@ fn start_streaming(
 
             match gst_pipeline::GstVideoConverter::new(width, height, format) {
                 Ok(converter) => {
-                    println!("GStreamer converter initialized successfully");
+                    info!("GStreamer converter initialized successfully");
                     user_data.gst_converter = Some(converter);
                 }
                 Err(e) => {
-                    eprintln!("Failed to create GStreamer converter: {}", e);
+                    error!(error = %e, "Failed to create GStreamer converter");
                 }
             }
         })
         .process(|stream, user_data| {
             match stream.dequeue_buffer() {
                 None => {
-                    eprintln!("Out of buffers");
+                    warn!("Out of buffers");
                 }
                 Some(mut buffer) => {
                     // Try to extract DMA-BUF first (Phase 3: DMA-BUF detection)
@@ -480,8 +475,14 @@ fn start_streaming(
                         Ok(dmabuf) => {
                             static ONCE: std::sync::Once = std::sync::Once::new();
                             ONCE.call_once(|| {
-                                println!("✓ DMA-BUF zero-copy enabled! fd={}, format={:?}, stride={}, size={}x{}",
-                                    dmabuf.fd, dmabuf.format, dmabuf.stride, dmabuf.width, dmabuf.height);
+                                info!(
+                                    fd = dmabuf.fd,
+                                    format = ?dmabuf.format,
+                                    stride = dmabuf.stride,
+                                    width = dmabuf.width,
+                                    height = dmabuf.height,
+                                    "DMA-BUF zero-copy enabled"
+                                );
                             });
 
                             // Calculate buffer size from stride and height
@@ -493,17 +494,17 @@ fn start_streaming(
                                     Ok(_) => match converter.pull_rgba_frame() {
                                         Ok(rgba_data) => rgba_data,
                                         Err(e) => {
-                                            eprintln!("Failed to convert DMA-BUF frame: {}", e);
+                                            error!(error = %e, "Failed to convert DMA-BUF frame");
                                             return;
                                         }
                                     },
                                     Err(e) => {
-                                        eprintln!("Failed to push DMA-BUF to GStreamer: {}", e);
+                                        error!(error = %e, "Failed to push DMA-BUF to GStreamer");
                                         return;
                                     }
                                 }
                             } else {
-                                eprintln!("No GStreamer converter available");
+                                error!("No GStreamer converter available");
                                 return;
                             };
 
@@ -525,7 +526,7 @@ fn start_streaming(
                             // DMA-BUF not available, use CPU copy path
                             static ONCE: std::sync::Once = std::sync::Once::new();
                             ONCE.call_once(|| {
-                                eprintln!("DMA-BUF not available ({}), using CPU copy fallback", e);
+                                warn!(error = %e, "DMA-BUF not available, using CPU copy fallback");
                             });
                         }
                     }
@@ -548,7 +549,7 @@ fn start_streaming(
                     let data_ptr = match data.data() {
                         Some(ptr) => ptr,
                         None => {
-                            eprintln!("Warning: No CPU-mapped data available (this is expected with DMA-BUF mode)");
+                            warn!("No CPU-mapped data available (this is expected with DMA-BUF mode)");
                             return;
                         }
                     };
@@ -566,12 +567,12 @@ fn start_streaming(
                             Ok(_) => match converter.pull_rgba_frame() {
                                 Ok(rgba_data) => rgba_data,
                                 Err(e) => {
-                                    eprintln!("Failed to pull RGBA frame: {}", e);
+                                    error!(error = %e, "Failed to pull RGBA frame");
                                     return;
                                 }
                             },
                             Err(e) => {
-                                eprintln!("Failed to push buffer to GStreamer: {}", e);
+                                error!(error = %e, "Failed to push buffer to GStreamer");
                                 return;
                             }
                         }
@@ -600,7 +601,7 @@ fn start_streaming(
         })
         .register()?;
 
-    println!("Created stream {:#?}", stream);
+    debug!(?stream, "Created stream");
 
     let obj = pw::spa::pod::object!(
         pw::spa::utils::SpaTypes::ObjectParamFormat,
@@ -671,7 +672,7 @@ fn start_streaming(
 
     // Phase 3: Try DMA-BUF by not forcing MAP_BUFFERS
     // This allows PipeWire to provide DMA-BUF file descriptors if available
-    println!("Attempting to connect with DMA-BUF support...");
+    info!("Attempting to connect with DMA-BUF support");
     stream.connect(
         spa::utils::Direction::Input,
         Some(node_id),
@@ -679,7 +680,7 @@ fn start_streaming(
         &mut params,
     )?;
 
-    println!("Connected stream (DMA-BUF mode)");
+    info!("Connected stream (DMA-BUF mode)");
 
     mainloop.run();
 
@@ -688,26 +689,34 @@ fn start_streaming(
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .init();
+
     // Initialize GStreamer
     gstreamer::init().expect("Failed to initialize GStreamer");
-    println!("GStreamer initialized successfully");
+    info!("GStreamer initialized successfully");
 
     let (stream, fd) = open_portal()
         .await
         .expect("Failed to open portal. Make sure you're running on a Wayland session with XDG Desktop Portal support.");
     let pipewire_node_id = stream.pipe_wire_node_id();
 
-    println!(
-        "PipeWire node id: {}, fd: {}",
-        pipewire_node_id,
-        &fd.try_clone().unwrap().into_raw_fd()
+    info!(
+        node_id = pipewire_node_id,
+        fd = fd.try_clone().unwrap().into_raw_fd(),
+        "PipeWire stream info"
     );
 
     let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     std::thread::spawn(move || {
         if let Err(e) = start_streaming(pipewire_node_id, fd, frame_sender) {
-            eprintln!("PipeWire streaming error: {}", e);
+            error!(error = %e, "PipeWire streaming error");
         }
     });
 
@@ -721,13 +730,13 @@ async fn main() {
         ..Default::default()
     };
 
-    println!("Using wgpu backend (Vulkan preferred on Linux for DMA-BUF support)");
+    info!("Using wgpu backend (Vulkan preferred on Linux for DMA-BUF support)");
 
     if let Err(e) = eframe::run_native(
         "cocuyo",
         native_options,
         Box::new(|_cc| Ok(Box::new(CocuyoApp::new(frame_receiver)))),
     ) {
-        eprintln!("Failed to run eframe application: {}", e);
+        error!(error = %e, "Failed to run eframe application");
     }
 }
