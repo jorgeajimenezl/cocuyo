@@ -84,9 +84,9 @@ impl eframe::App for CocuyoApp {
                 ui.horizontal(|ui| {
                     ui.label("Status:");
                     if self.current_frame.is_some() {
-                        ui.colored_label(egui::Color32::GREEN, "● Streaming");
+                        ui.colored_label(egui::Color32::GREEN, "[Streaming]");
                     } else {
-                        ui.colored_label(egui::Color32::YELLOW, "● Waiting for frames...");
+                        ui.colored_label(egui::Color32::YELLOW, "[Waiting for frames...]");
                     }
 
                     if let Some(ref frame) = self.current_frame {
