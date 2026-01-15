@@ -45,8 +45,8 @@ impl CocuyoApp {
             frame_receiver: Arc::new(Mutex::new(frame_receiver)),
             current_frame: None,
             texture: None,
-            screen_window_open: true,
-            info_window_open: true,
+            screen_window_open: false,
+            info_window_open: false,
             content_rect: None,
         }
     }
@@ -78,7 +78,12 @@ impl eframe::App for CocuyoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_frame();
 
-        let content_rect = custom_window_frame(ctx, "Cocuyo", |ui| {
+        let content_rect = custom_window_frame(
+            ctx,
+            "Cocuyo",
+            &mut self.screen_window_open,
+            &mut self.info_window_open,
+            |ui| {
             // Bottom panel for status information
             egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -104,17 +109,6 @@ impl eframe::App for CocuyoApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("Cocuyo");
                     ui.label("Screen capture via PipeWire");
-                    ui.add_space(20.0);
-
-                    if ui.button("Show Screen Preview").clicked() {
-                        self.screen_window_open = true;
-                    }
-
-                    ui.add_space(10.0);
-
-                    if ui.button("Show Stream Information").clicked() {
-                        self.info_window_open = true;
-                    }
                 });
             });
         });
@@ -219,7 +213,13 @@ impl eframe::App for CocuyoApp {
     }
 }
 
-fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) -> egui::Rect {
+fn custom_window_frame(
+    ctx: &egui::Context,
+    title: &str,
+    screen_window_open: &mut bool,
+    info_window_open: &mut bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> egui::Rect {
     use egui::{CentralPanel, UiBuilder};
 
     let panel_frame = egui::Frame::new()
@@ -239,7 +239,7 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
             rect.max.y = rect.min.y + title_bar_height;
             rect
         };
-        title_bar_ui(ui, title_bar_rect, title);
+        title_bar_ui(ui, title_bar_rect, title, screen_window_open, info_window_open);
 
         // Add the contents:
         let content_rect = {
@@ -256,7 +256,13 @@ fn custom_window_frame(ctx: &egui::Context, title: &str, add_contents: impl FnOn
     content_rect_result
 }
 
-fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: &str) {
+fn title_bar_ui(
+    ui: &mut egui::Ui,
+    title_bar_rect: eframe::epaint::Rect,
+    title: &str,
+    screen_window_open: &mut bool,
+    info_window_open: &mut bool,
+) {
     use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, vec2};
 
     let painter = ui.painter();
@@ -297,7 +303,27 @@ fn title_bar_ui(ui: &mut egui::Ui, title_bar_rect: eframe::epaint::Rect, title: 
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
 
-    // Add buttons on top (they will consume clicks on their area)
+    // Add menu on the left side
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(title_bar_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.add_space(8.0);
+            ui.menu_button("View", |ui| {
+                if ui.button("Screen Preview").clicked() {
+                    *screen_window_open = true;
+                    ui.close();
+                }
+                if ui.button("Stream Information").clicked() {
+                    *info_window_open = true;
+                    ui.close();
+                }
+            });
+        },
+    );
+
+    // Add window control buttons on the right side
     ui.scope_builder(
         UiBuilder::new()
             .max_rect(title_bar_rect)
