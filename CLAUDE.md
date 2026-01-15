@@ -18,6 +18,19 @@ cargo check
 cargo test
 ```
 
+# Manage Dependencies
+
+```bash
+# Add a new dependency
+cargo add <crate-name>
+
+# Update dependencies
+cargo update
+
+# Clean build artifacts
+cargo clean
+```
+
 ## System Requirements
 
 - **Wayland session** with XDG Desktop Portal support (not X11)
