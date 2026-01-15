@@ -357,7 +357,7 @@ async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd)> {
         .select_sources(
             &session,
             CursorMode::Hidden,
-            SourceType::Monitor.into(),
+            (SourceType::Monitor | SourceType::Window).into(),
             false,
             None,
             PersistMode::DoNot,
