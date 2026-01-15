@@ -1,5 +1,6 @@
 use gstreamer as gst;
 use gstreamer::prelude::*;
+use gstreamer_allocators::{DmaBufAllocator, FdMemoryFlags};
 use gstreamer_app as gst_app;
 use pipewire::spa;
 use std::os::fd::RawFd;
@@ -29,6 +30,7 @@ pub struct GstVideoConverter {
     appsink: gst_app::AppSink,
     width: u32,
     height: u32,
+    dmabuf_allocator: Option<DmaBufAllocator>,
 }
 
 impl GstVideoConverter {
@@ -114,6 +116,7 @@ impl GstVideoConverter {
             appsink,
             width,
             height,
+            dmabuf_allocator: None,
         })
     }
 
@@ -137,27 +140,40 @@ impl GstVideoConverter {
     }
 
     pub fn push_dmabuf(
-        &self,
-        _fd: RawFd,
-        _width: u32,
-        _height: u32,
-        _stride: u32,
-        _offset: u32,
-        _format_str: &str,
+        &mut self,
+        fd: RawFd,
+        size: usize,
     ) -> Result<(), GstError> {
-        // Create a GStreamer buffer wrapping the DMA-BUF file descriptor
-        // This avoids CPU copies - GStreamer will access GPU memory directly
+        // Get or create cached DMA-BUF allocator
+        let allocator = match &self.dmabuf_allocator {
+            Some(alloc) => alloc.clone(),
+            None => {
+                let alloc = DmaBufAllocator::new();
+                self.dmabuf_allocator = Some(alloc.clone());
+                alloc
+            }
+        };
 
-        // For now, we'll use a workaround: create an empty buffer and push it
-        // A full DMA-BUF implementation would use gstreamer-allocators crate
-        // to create a proper DMA-BUF memory object, but that's complex
+        // Wrap the DMA-BUF fd in GStreamer memory (ZERO COPY - no data copying!)
+        // Use DONT_CLOSE flag because PipeWire owns the fd and will close it
+        let memory = unsafe {
+            allocator.alloc_with_flags(fd, size, FdMemoryFlags::DONT_CLOSE)
+        }
+        .map_err(|e| GstError::ConversionError(format!("Failed to allocate DMA-BUF memory: {}", e)))?;
 
-        // Simplified approach: Just signal that we have DMA-BUF capability
-        // The actual import would require gstreamer-allocators dependency
+        // Create buffer and attach the DMA-BUF memory
+        let mut buffer = gst::Buffer::new();
+        {
+            let buffer_ref = buffer.get_mut().unwrap();
+            buffer_ref.append_memory(memory);
+        }
 
-        Err(GstError::ConversionError(
-            "Direct DMA-BUF import not yet implemented - requires gstreamer-allocators".to_string()
-        ))
+        // Push to pipeline - GStreamer will handle the rest
+        self.appsrc
+            .push_buffer(buffer)
+            .map_err(|e| GstError::ConversionError(format!("Failed to push DMA-BUF buffer: {:?}", e)))?;
+
+        Ok(())
     }
 
     pub fn pull_rgba_frame(&self) -> Result<Vec<u8>, GstError> {

@@ -17,6 +17,7 @@ struct UserData {
     format: spa::param::video::VideoInfoRaw,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
     gst_converter: Option<gst_pipeline::GstVideoConverter>,
+    mainloop: pw::main_loop::MainLoop,
 }
 
 #[derive(Clone)]
@@ -388,6 +389,7 @@ fn start_streaming(
         format: Default::default(),
         frame_sender,
         gst_converter: None,
+        mainloop: mainloop.clone(),
     };
 
     let stream = pw::stream::Stream::new(
@@ -478,25 +480,16 @@ fn start_streaming(
                         Ok(dmabuf) => {
                             static ONCE: std::sync::Once = std::sync::Once::new();
                             ONCE.call_once(|| {
-                                println!("✓ DMA-BUF enabled! fd={}, format={:?}, stride={}, size={}x{}",
+                                println!("✓ DMA-BUF zero-copy enabled! fd={}, format={:?}, stride={}, size={}x{}",
                                     dmabuf.fd, dmabuf.format, dmabuf.stride, dmabuf.width, dmabuf.height);
-                                println!("  Using DMA-BUF mmap path with GStreamer GPU conversion");
                             });
 
-                            // Map DMA-BUF to read the data
-                            let dmabuf_data = unsafe {
-                                match dmabuf.map_readonly() {
-                                    Ok(data) => data,
-                                    Err(e) => {
-                                        eprintln!("Failed to map DMA-BUF: {}", e);
-                                        return;
-                                    }
-                                }
-                            };
+                            // Calculate buffer size from stride and height
+                            let buffer_size = (dmabuf.stride * dmabuf.height) as usize;
 
-                            // Use GStreamer for format conversion
-                            let converted_data = if let Some(ref converter) = user_data.gst_converter {
-                                match converter.push_buffer(&dmabuf_data) {
+                            // Use GStreamer for format conversion with zero-copy DMA-BUF import
+                            let converted_data = if let Some(ref mut converter) = user_data.gst_converter {
+                                match converter.push_dmabuf(dmabuf.fd, buffer_size) {
                                     Ok(_) => match converter.pull_rgba_frame() {
                                         Ok(rgba_data) => rgba_data,
                                         Err(e) => {
@@ -522,8 +515,9 @@ fn start_streaming(
                                 format: spa::param::video::VideoFormat::RGBA,
                             };
 
-                            if let Err(e) = user_data.frame_sender.send(frame) {
-                                eprintln!("Failed to send frame: {}", e);
+                            if user_data.frame_sender.send(frame).is_err() {
+                                // Channel closed, receiver dropped - quit gracefully
+                                user_data.mainloop.quit();
                             }
                             return;
                         }
@@ -598,7 +592,8 @@ fn start_streaming(
                     };
 
                     if user_data.frame_sender.send(frame_data).is_err() {
-                        eprintln!("Failed to send frame data");
+                        // Channel closed, receiver dropped - quit gracefully
+                        user_data.mainloop.quit();
                     }
                 }
             }
