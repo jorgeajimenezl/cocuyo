@@ -1,4 +1,5 @@
 use std::os::fd::{IntoRawFd, OwnedFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tracing::{debug, error, info, warn};
@@ -14,6 +15,14 @@ use pw::{properties::properties, spa};
 
 mod dmabuf_handler;
 mod gst_pipeline;
+
+#[derive(Clone, PartialEq)]
+enum RecordingState {
+    Idle,
+    Starting,
+    Recording,
+    Error(String),
+}
 
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
@@ -37,17 +46,28 @@ struct CocuyoApp {
     screen_window_open: bool,
     info_window_open: bool,
     content_rect: Option<egui::Rect>,
+    recording_state: Arc<Mutex<RecordingState>>,
+    start_recording_tx: std::sync::mpsc::Sender<()>,
+    stop_flag: Arc<AtomicBool>,
 }
 
 impl CocuyoApp {
-    fn new(frame_receiver: tokio::sync::mpsc::UnboundedReceiver<FrameData>) -> Self {
+    fn new(
+        frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
+        recording_state: Arc<Mutex<RecordingState>>,
+        start_recording_tx: std::sync::mpsc::Sender<()>,
+        stop_flag: Arc<AtomicBool>,
+    ) -> Self {
         Self {
-            frame_receiver: Arc::new(Mutex::new(frame_receiver)),
+            frame_receiver,
             current_frame: None,
             texture: None,
             screen_window_open: false,
             info_window_open: false,
             content_rect: None,
+            recording_state,
+            start_recording_tx,
+            stop_flag,
         }
     }
 
@@ -88,10 +108,24 @@ impl eframe::App for CocuyoApp {
             egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Status:");
-                    if self.current_frame.is_some() {
-                        ui.colored_label(egui::Color32::GREEN, "[Streaming]");
-                    } else {
-                        ui.colored_label(egui::Color32::YELLOW, "[Waiting for frames...]");
+                    let state = self.recording_state.lock().unwrap().clone();
+                    match state {
+                        RecordingState::Idle => {
+                            ui.colored_label(egui::Color32::GRAY, "[Idle]");
+                        }
+                        RecordingState::Starting => {
+                            ui.colored_label(egui::Color32::YELLOW, "[Starting...]");
+                        }
+                        RecordingState::Recording => {
+                            if self.current_frame.is_some() {
+                                ui.colored_label(egui::Color32::GREEN, "[Recording]");
+                            } else {
+                                ui.colored_label(egui::Color32::YELLOW, "[Waiting for frames...]");
+                            }
+                        }
+                        RecordingState::Error(ref msg) => {
+                            ui.colored_label(egui::Color32::RED, format!("[Error: {}]", msg));
+                        }
                     }
 
                     if let Some(ref frame) = self.current_frame {
@@ -109,6 +143,34 @@ impl eframe::App for CocuyoApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("Cocuyo");
                     ui.label("Screen capture via PipeWire");
+                    ui.add_space(20.0);
+
+                    let state = self.recording_state.lock().unwrap().clone();
+                    match state {
+                        RecordingState::Idle => {
+                            if ui.button("Start Recording").clicked() {
+                                let _ = self.start_recording_tx.send(());
+                            }
+                        }
+                        RecordingState::Starting => {
+                            ui.spinner();
+                            ui.label("Requesting screen capture...");
+                        }
+                        RecordingState::Recording => {
+                            ui.label("Recording in progress");
+                            ui.add_space(10.0);
+                            if ui.button("Stop Recording").clicked() {
+                                self.stop_flag.store(true, Ordering::SeqCst);
+                            }
+                        }
+                        RecordingState::Error(ref msg) => {
+                            ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
+                            ui.add_space(10.0);
+                            if ui.button("Retry").clicked() {
+                                let _ = self.start_recording_tx.send(());
+                            }
+                        }
+                    }
                 });
             });
         });
@@ -406,12 +468,29 @@ fn start_streaming(
     node_id: u32,
     fd: OwnedFd,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    stop_flag: Arc<AtomicBool>,
 ) -> Result<(), pw::Error> {
-    pw::init();
-
     let mainloop = pw::main_loop::MainLoop::new(None)?;
     let context = pw::context::Context::new(&mainloop)?;
     let core = context.connect_fd(fd, None)?;
+
+    // Create a timer to periodically check the stop flag
+    let timer = mainloop.loop_().add_timer(Box::new({
+        let stop_flag = stop_flag.clone();
+        let mainloop = mainloop.clone();
+        move |_| {
+            if stop_flag.load(Ordering::SeqCst) {
+                info!("Stop requested, quitting mainloop");
+                mainloop.quit();
+            }
+        }
+    }));
+
+    // Set timer to fire every 100ms
+    timer.update_timer(
+        Some(std::time::Duration::from_millis(100)),
+        Some(std::time::Duration::from_millis(100)),
+    );
 
     let data = UserData {
         format: Default::default(),
@@ -713,8 +792,7 @@ fn start_streaming(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -727,22 +805,65 @@ async fn main() {
     gstreamer::init().expect("Failed to initialize GStreamer");
     info!("GStreamer initialized successfully");
 
-    let (stream, fd) = open_portal()
-        .await
-        .expect("Failed to open portal. Make sure you're running on a Wayland session with XDG Desktop Portal support.");
-    let pipewire_node_id = stream.pipe_wire_node_id();
+    // Initialize PipeWire
+    pw::init();
 
-    info!(
-        node_id = pipewire_node_id,
-        fd = fd.try_clone().unwrap().into_raw_fd(),
-        "PipeWire stream info"
-    );
+    // Create shared state for recording
+    let recording_state = Arc::new(Mutex::new(RecordingState::Idle));
+    let (start_recording_tx, start_recording_rx) = std::sync::mpsc::channel::<()>();
+    let stop_flag = Arc::new(AtomicBool::new(false));
 
+    // Create frame channel - sender goes to streaming thread, receiver to app
     let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let frame_receiver = Arc::new(Mutex::new(frame_receiver));
 
+    // Spawn background thread to handle recording requests
+    let recording_state_clone = recording_state.clone();
+    let stop_flag_clone = stop_flag.clone();
     std::thread::spawn(move || {
-        if let Err(e) = start_streaming(pipewire_node_id, fd, frame_sender) {
-            error!(error = %e, "PipeWire streaming error");
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+        while start_recording_rx.recv().is_ok() {
+            // Reset stop flag for new recording session
+            stop_flag_clone.store(false, Ordering::SeqCst);
+
+            // Set state to Starting
+            *recording_state_clone.lock().unwrap() = RecordingState::Starting;
+
+            // Run async portal request
+            let result = rt.block_on(open_portal());
+
+            match result {
+                Ok((stream, fd)) => {
+                    let pipewire_node_id = stream.pipe_wire_node_id();
+
+                    info!(
+                        node_id = pipewire_node_id,
+                        fd = fd.try_clone().unwrap().into_raw_fd(),
+                        "PipeWire stream info"
+                    );
+
+                    // Update state to Recording
+                    *recording_state_clone.lock().unwrap() = RecordingState::Recording;
+
+                    // Start streaming (this blocks until the stream ends or stop is requested)
+                    let sender = frame_sender.clone();
+                    let stop = stop_flag_clone.clone();
+                    if let Err(e) = start_streaming(pipewire_node_id, fd, sender, stop) {
+                        error!(error = %e, "PipeWire streaming error");
+                        *recording_state_clone.lock().unwrap() =
+                            RecordingState::Error(e.to_string());
+                    } else {
+                        // Stream ended normally, go back to Idle
+                        *recording_state_clone.lock().unwrap() = RecordingState::Idle;
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to open portal");
+                    *recording_state_clone.lock().unwrap() =
+                        RecordingState::Error(e.to_string());
+                }
+            }
         }
     });
 
@@ -761,7 +882,14 @@ async fn main() {
     if let Err(e) = eframe::run_native(
         "cocuyo",
         native_options,
-        Box::new(|_cc| Ok(Box::new(CocuyoApp::new(frame_receiver)))),
+        Box::new(|_cc| {
+            Ok(Box::new(CocuyoApp::new(
+                frame_receiver,
+                recording_state,
+                start_recording_tx,
+                stop_flag,
+            )))
+        }),
     ) {
         error!(error = %e, "Failed to run eframe application");
     }
