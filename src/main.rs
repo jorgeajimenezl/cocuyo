@@ -16,6 +16,8 @@ use pw::{properties::properties, spa};
 mod dmabuf_handler;
 mod gst_pipeline;
 
+use gst_pipeline::{detect_available_backends, GpuBackend};
+
 #[derive(Clone, PartialEq)]
 enum RecordingState {
     Idle,
@@ -29,6 +31,7 @@ struct UserData {
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
     gst_converter: Option<gst_pipeline::GstVideoConverter>,
     mainloop: pw::main_loop::MainLoop,
+    selected_backend: GpuBackend,
 }
 
 #[derive(Clone)]
@@ -47,16 +50,19 @@ struct CocuyoApp {
     info_window_open: bool,
     content_rect: Option<egui::Rect>,
     recording_state: Arc<Mutex<RecordingState>>,
-    start_recording_tx: std::sync::mpsc::Sender<()>,
+    start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
     stop_flag: Arc<AtomicBool>,
+    available_backends: Vec<GpuBackend>,
+    selected_backend_index: usize,
 }
 
 impl CocuyoApp {
     fn new(
         frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
         recording_state: Arc<Mutex<RecordingState>>,
-        start_recording_tx: std::sync::mpsc::Sender<()>,
+        start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
         stop_flag: Arc<AtomicBool>,
+        available_backends: Vec<GpuBackend>,
     ) -> Self {
         Self {
             frame_receiver,
@@ -68,6 +74,8 @@ impl CocuyoApp {
             recording_state,
             start_recording_tx,
             stop_flag,
+            available_backends,
+            selected_backend_index: 0,
         }
     }
 
@@ -148,8 +156,35 @@ impl eframe::App for CocuyoApp {
                     let state = self.recording_state.lock().unwrap().clone();
                     match state {
                         RecordingState::Idle => {
+                            // GPU Backend selection
+                            ui.horizontal(|ui| {
+                                ui.label("GPU Backend:");
+                                egui::ComboBox::from_id_salt("gpu_backend")
+                                    .selected_text(
+                                        self.available_backends
+                                            .get(self.selected_backend_index)
+                                            .map(|b| b.to_string())
+                                            .unwrap_or_else(|| "None".to_string()),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (i, backend) in self.available_backends.iter().enumerate() {
+                                            ui.selectable_value(
+                                                &mut self.selected_backend_index,
+                                                i,
+                                                backend.to_string(),
+                                            );
+                                        }
+                                    });
+                            });
+                            ui.add_space(10.0);
+
                             if ui.button("Start Recording").clicked() {
-                                let _ = self.start_recording_tx.send(());
+                                let backend = self
+                                    .available_backends
+                                    .get(self.selected_backend_index)
+                                    .cloned()
+                                    .unwrap_or(GpuBackend::Cpu);
+                                let _ = self.start_recording_tx.send(((), backend));
                             }
                         }
                         RecordingState::Starting => {
@@ -166,8 +201,36 @@ impl eframe::App for CocuyoApp {
                         RecordingState::Error(ref msg) => {
                             ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
                             ui.add_space(10.0);
+
+                            // GPU Backend selection for retry
+                            ui.horizontal(|ui| {
+                                ui.label("GPU Backend:");
+                                egui::ComboBox::from_id_salt("gpu_backend_retry")
+                                    .selected_text(
+                                        self.available_backends
+                                            .get(self.selected_backend_index)
+                                            .map(|b| b.to_string())
+                                            .unwrap_or_else(|| "None".to_string()),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (i, backend) in self.available_backends.iter().enumerate() {
+                                            ui.selectable_value(
+                                                &mut self.selected_backend_index,
+                                                i,
+                                                backend.to_string(),
+                                            );
+                                        }
+                                    });
+                            });
+                            ui.add_space(5.0);
+
                             if ui.button("Retry").clicked() {
-                                let _ = self.start_recording_tx.send(());
+                                let backend = self
+                                    .available_backends
+                                    .get(self.selected_backend_index)
+                                    .cloned()
+                                    .unwrap_or(GpuBackend::Cpu);
+                                let _ = self.start_recording_tx.send(((), backend));
                             }
                         }
                     }
@@ -469,6 +532,7 @@ fn start_streaming(
     fd: OwnedFd,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
     stop_flag: Arc<AtomicBool>,
+    selected_backend: GpuBackend,
 ) -> Result<(), pw::Error> {
     let mainloop = pw::main_loop::MainLoop::new(None)?;
     let context = pw::context::Context::new(&mainloop)?;
@@ -497,6 +561,7 @@ fn start_streaming(
         frame_sender,
         gst_converter: None,
         mainloop: mainloop.clone(),
+        selected_backend,
     };
 
     let stream = pw::stream::Stream::new(
@@ -549,14 +614,18 @@ fn start_streaming(
                 "Got video format"
             );
 
-            // Initialize GStreamer converter with the detected format
+            // Initialize GStreamer converter with the detected format and selected backend
             let width = user_data.format.size().width;
             let height = user_data.format.size().height;
             let format = user_data.format.format();
+            let backend = user_data.selected_backend.clone();
 
-            match gst_pipeline::GstVideoConverter::new(width, height, format) {
+            match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
                 Ok(converter) => {
-                    info!("GStreamer converter initialized successfully");
+                    info!(
+                        backend = %converter.backend(),
+                        "GStreamer converter initialized successfully"
+                    );
                     user_data.gst_converter = Some(converter);
                 }
                 Err(e) => {
@@ -808,9 +877,16 @@ fn main() {
     // Initialize PipeWire
     pw::init();
 
+    // Detect available GPU backends
+    let available_backends = detect_available_backends();
+    info!(
+        backends = ?available_backends.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
+        "Detected GPU backends"
+    );
+
     // Create shared state for recording
     let recording_state = Arc::new(Mutex::new(RecordingState::Idle));
-    let (start_recording_tx, start_recording_rx) = std::sync::mpsc::channel::<()>();
+    let (start_recording_tx, start_recording_rx) = std::sync::mpsc::channel::<((), GpuBackend)>();
     let stop_flag = Arc::new(AtomicBool::new(false));
 
     // Create frame channel - sender goes to streaming thread, receiver to app
@@ -823,12 +899,14 @@ fn main() {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-        while start_recording_rx.recv().is_ok() {
+        while let Ok(((), selected_backend)) = start_recording_rx.recv() {
             // Reset stop flag for new recording session
             stop_flag_clone.store(false, Ordering::SeqCst);
 
             // Set state to Starting
             *recording_state_clone.lock().unwrap() = RecordingState::Starting;
+
+            info!(backend = %selected_backend, "Starting recording with backend");
 
             // Run async portal request
             let result = rt.block_on(open_portal());
@@ -849,7 +927,13 @@ fn main() {
                     // Start streaming (this blocks until the stream ends or stop is requested)
                     let sender = frame_sender.clone();
                     let stop = stop_flag_clone.clone();
-                    if let Err(e) = start_streaming(pipewire_node_id, fd, sender, stop) {
+                    if let Err(e) = start_streaming(
+                        pipewire_node_id,
+                        fd,
+                        sender,
+                        stop,
+                        selected_backend.clone(),
+                    ) {
                         error!(error = %e, "PipeWire streaming error");
                         *recording_state_clone.lock().unwrap() =
                             RecordingState::Error(e.to_string());
@@ -888,6 +972,7 @@ fn main() {
                 recording_state,
                 start_recording_tx,
                 stop_flag,
+                available_backends,
             )))
         }),
     ) {
