@@ -1,868 +1,22 @@
-use std::os::fd::{IntoRawFd, OwnedFd};
+use std::os::fd::IntoRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tracing::{debug, error, info, warn};
-
-use ashpd::desktop::{
-    screencast::{CursorMode, Screencast, SourceType, Stream as ScreencastStream},
-    PersistMode,
-};
 use eframe::egui;
-use gstreamer;
 use pipewire as pw;
-use pw::{properties::properties, spa};
+use tracing::{error, info};
 
+mod app;
 mod dmabuf_handler;
+mod formats;
 mod gst_pipeline;
-
-use gst_pipeline::{detect_available_backends, GpuBackend};
-
-#[derive(Clone, PartialEq)]
-enum RecordingState {
-    Idle,
-    Starting,
-    Recording,
-    Error(String),
-}
-
-struct UserData {
-    format: spa::param::video::VideoInfoRaw,
-    frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
-    gst_converter: Option<gst_pipeline::GstVideoConverter>,
-    mainloop: pw::main_loop::MainLoop,
-    selected_backend: GpuBackend,
-}
-
-#[derive(Clone)]
-struct FrameData {
-    data: Vec<u8>,
-    width: u32,
-    height: u32,
-    format: spa::param::video::VideoFormat,
-}
-
-struct CocuyoApp {
-    frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
-    current_frame: Option<FrameData>,
-    texture: Option<egui::TextureHandle>,
-    screen_window_open: bool,
-    info_window_open: bool,
-    content_rect: Option<egui::Rect>,
-    recording_state: Arc<Mutex<RecordingState>>,
-    start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-    stop_flag: Arc<AtomicBool>,
-    available_backends: Vec<GpuBackend>,
-    selected_backend_index: usize,
-}
-
-impl CocuyoApp {
-    fn new(
-        frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
-        recording_state: Arc<Mutex<RecordingState>>,
-        start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-        stop_flag: Arc<AtomicBool>,
-        available_backends: Vec<GpuBackend>,
-    ) -> Self {
-        Self {
-            frame_receiver,
-            current_frame: None,
-            texture: None,
-            screen_window_open: false,
-            info_window_open: false,
-            content_rect: None,
-            recording_state,
-            start_recording_tx,
-            stop_flag,
-            available_backends,
-            selected_backend_index: 0,
-        }
-    }
-
-    fn update_frame(&mut self) {
-        let mut receiver = self.frame_receiver.lock().unwrap();
-        while let Ok(frame) = receiver.try_recv() {
-            self.current_frame = Some(frame);
-        }
-    }
-
-    fn convert_to_rgba(&self, frame: &FrameData) -> Option<Vec<u8>> {
-        // GStreamer handles all format conversions now
-        // This method just returns the data which should already be in RGBA format
-        if frame.format == spa::param::video::VideoFormat::RGBA {
-            Some(frame.data.clone())
-        } else {
-            warn!(format = ?frame.format, "Unexpected format (should be RGBA from GStreamer)");
-            None
-        }
-    }
-}
-
-impl eframe::App for CocuyoApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        egui::Rgba::TRANSPARENT.to_array() // Make sure we don't paint anything behind the rounded corners
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_frame();
-
-        let content_rect = custom_window_frame(
-            ctx,
-            "Cocuyo",
-            &mut self.screen_window_open,
-            &mut self.info_window_open,
-            |ui| {
-            // Bottom panel for status information
-            egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Status:");
-                    let state = self.recording_state.lock().unwrap().clone();
-                    match state {
-                        RecordingState::Idle => {
-                            ui.colored_label(egui::Color32::GRAY, "[Idle]");
-                        }
-                        RecordingState::Starting => {
-                            ui.colored_label(egui::Color32::YELLOW, "[Starting...]");
-                        }
-                        RecordingState::Recording => {
-                            if self.current_frame.is_some() {
-                                ui.colored_label(egui::Color32::GREEN, "[Recording]");
-                            } else {
-                                ui.colored_label(egui::Color32::YELLOW, "[Waiting for frames...]");
-                            }
-                        }
-                        RecordingState::Error(ref msg) => {
-                            ui.colored_label(egui::Color32::RED, format!("[Error: {}]", msg));
-                        }
-                    }
-
-                    if let Some(ref frame) = self.current_frame {
-                        ui.separator();
-                        ui.label(format!(
-                            "{}x{} | {:?}",
-                            frame.width, frame.height, frame.format
-                        ));
-                    }
-                });
-            });
-
-            // Central panel
-            egui::CentralPanel::default().show_inside(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("Cocuyo");
-                    ui.label("Screen capture via PipeWire");
-                    ui.add_space(20.0);
-
-                    let state = self.recording_state.lock().unwrap().clone();
-                    match state {
-                        RecordingState::Idle => {
-                            // GPU Backend selection
-                            ui.horizontal(|ui| {
-                                ui.label("GPU Backend:");
-                                egui::ComboBox::from_id_salt("gpu_backend")
-                                    .selected_text(
-                                        self.available_backends
-                                            .get(self.selected_backend_index)
-                                            .map(|b| b.to_string())
-                                            .unwrap_or_else(|| "None".to_string()),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (i, backend) in self.available_backends.iter().enumerate() {
-                                            ui.selectable_value(
-                                                &mut self.selected_backend_index,
-                                                i,
-                                                backend.to_string(),
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.add_space(10.0);
-
-                            if ui.button("Start Recording").clicked() {
-                                let backend = self
-                                    .available_backends
-                                    .get(self.selected_backend_index)
-                                    .cloned()
-                                    .unwrap_or(GpuBackend::Cpu);
-                                let _ = self.start_recording_tx.send(((), backend));
-                            }
-                        }
-                        RecordingState::Starting => {
-                            ui.spinner();
-                            ui.label("Requesting screen capture...");
-                        }
-                        RecordingState::Recording => {
-                            ui.label("Recording in progress");
-                            ui.add_space(10.0);
-                            if ui.button("Stop Recording").clicked() {
-                                self.stop_flag.store(true, Ordering::SeqCst);
-                            }
-                        }
-                        RecordingState::Error(ref msg) => {
-                            ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
-                            ui.add_space(10.0);
-
-                            // GPU Backend selection for retry
-                            ui.horizontal(|ui| {
-                                ui.label("GPU Backend:");
-                                egui::ComboBox::from_id_salt("gpu_backend_retry")
-                                    .selected_text(
-                                        self.available_backends
-                                            .get(self.selected_backend_index)
-                                            .map(|b| b.to_string())
-                                            .unwrap_or_else(|| "None".to_string()),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (i, backend) in self.available_backends.iter().enumerate() {
-                                            ui.selectable_value(
-                                                &mut self.selected_backend_index,
-                                                i,
-                                                backend.to_string(),
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.add_space(5.0);
-
-                            if ui.button("Retry").clicked() {
-                                let backend = self
-                                    .available_backends
-                                    .get(self.selected_backend_index)
-                                    .cloned()
-                                    .unwrap_or(GpuBackend::Cpu);
-                                let _ = self.start_recording_tx.send(((), backend));
-                            }
-                        }
-                    }
-                });
-            });
-        });
-
-        self.content_rect = Some(content_rect);
-
-        // Screen preview window
-        let current_frame = self.current_frame.clone();
-        let mut window_open = self.screen_window_open;
-
-        let mut window = egui::Window::new("Screen Preview")
-            .open(&mut window_open)
-            .default_size([800.0, 600.0])
-            .resizable(true);
-
-        if let Some(content_rect) = self.content_rect {
-            window = window.constrain_to(content_rect);
-        }
-
-        window.show(ctx, |ui| {
-                egui::ScrollArea::both().show(ui, |ui| {
-                    if let Some(ref frame) = current_frame {
-                        if let Some(rgba_data) = self.convert_to_rgba(frame) {
-                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                                [frame.width as usize, frame.height as usize],
-                                &rgba_data,
-                            );
-
-                            let texture = self.texture.get_or_insert_with(|| {
-                                ui.ctx().load_texture(
-                                    "screen_frame",
-                                    color_image.clone(),
-                                    egui::TextureOptions::LINEAR,
-                                )
-                            });
-
-                            texture.set(color_image, egui::TextureOptions::LINEAR);
-
-                            let available_size = ui.available_size();
-                            let aspect_ratio = frame.width as f32 / frame.height as f32;
-
-                            let display_size = if available_size.x / available_size.y > aspect_ratio {
-                                egui::vec2(available_size.y * aspect_ratio, available_size.y)
-                            } else {
-                                egui::vec2(available_size.x, available_size.x / aspect_ratio)
-                            };
-
-                            ui.image((texture.id(), display_size));
-                        }
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.spinner();
-                            ui.label("Waiting for frames...");
-                        });
-                    }
-                });
-            });
-
-        self.screen_window_open = window_open;
-
-        // Stream information window
-        let current_frame_info = self.current_frame.clone();
-        let mut info_window_open = self.info_window_open;
-
-        let mut info_window = egui::Window::new("Stream Information")
-            .open(&mut info_window_open)
-            .default_size([350.0, 250.0])
-            .resizable(true);
-
-        if let Some(content_rect) = self.content_rect {
-            info_window = info_window.constrain_to(content_rect);
-        }
-
-        info_window.show(ctx, |ui| {
-                ui.heading("Stream Details");
-                ui.separator();
-
-                if let Some(ref frame) = current_frame_info {
-                    ui.label(format!("Width: {} px", frame.width));
-                    ui.label(format!("Height: {} px", frame.height));
-                    ui.label(format!("Format: {:?}", frame.format));
-                    ui.label(format!("Data size: {} bytes", frame.data.len()));
-
-                    let aspect_ratio = frame.width as f32 / frame.height as f32;
-                    ui.label(format!("Aspect ratio: {:.2}", aspect_ratio));
-
-                    ui.add_space(10.0);
-                    ui.separator();
-
-                    ui.label(format!("Total pixels: {}", frame.width * frame.height));
-                    ui.label(format!("Bytes per pixel: {:.2}", frame.data.len() as f32 / (frame.width * frame.height) as f32));
-                } else {
-                    ui.label("No frame data available");
-                    ui.add_space(10.0);
-                    ui.colored_label(egui::Color32::YELLOW, "Waiting for first frame...");
-                }
-            });
-
-        self.info_window_open = info_window_open;
-
-        ctx.request_repaint();
-    }
-}
-
-fn custom_window_frame(
-    ctx: &egui::Context,
-    title: &str,
-    screen_window_open: &mut bool,
-    info_window_open: &mut bool,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) -> egui::Rect {
-    use egui::{CentralPanel, UiBuilder};
-
-    let panel_frame = egui::Frame::new()
-        .fill(ctx.style().visuals.window_fill())
-        .corner_radius(10)
-        .stroke(ctx.style().visuals.widgets.noninteractive.fg_stroke)
-        .outer_margin(1); // so the stroke is within the bounds
-
-    let mut content_rect_result = egui::Rect::NOTHING;
-
-    CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
-        let app_rect = ui.max_rect();
-
-        let title_bar_height = 32.0;
-        let title_bar_rect = {
-            let mut rect = app_rect;
-            rect.max.y = rect.min.y + title_bar_height;
-            rect
-        };
-        title_bar_ui(ui, title_bar_rect, title, screen_window_open, info_window_open);
-
-        // Add the contents:
-        let content_rect = {
-            let mut rect = app_rect;
-            rect.min.y = title_bar_rect.max.y;
-            rect
-        }
-        .shrink(4.0);
-        content_rect_result = content_rect;
-        let mut content_ui = ui.new_child(UiBuilder::new().max_rect(content_rect));
-        add_contents(&mut content_ui);
-    });
-
-    content_rect_result
-}
-
-fn title_bar_ui(
-    ui: &mut egui::Ui,
-    title_bar_rect: eframe::epaint::Rect,
-    title: &str,
-    screen_window_open: &mut bool,
-    info_window_open: &mut bool,
-) {
-    use egui::{Align2, FontId, Id, PointerButton, Sense, UiBuilder, vec2};
-
-    let painter = ui.painter();
-
-    // Paint the title:
-    painter.text(
-        title_bar_rect.center(),
-        Align2::CENTER_CENTER,
-        title,
-        FontId::proportional(20.0),
-        ui.style().visuals.text_color(),
-    );
-
-    // Paint the line under the title:
-    painter.line_segment(
-        [
-            title_bar_rect.left_bottom() + vec2(1.0, 0.0),
-            title_bar_rect.right_bottom() + vec2(-1.0, 0.0),
-        ],
-        ui.visuals().widgets.noninteractive.bg_stroke,
-    );
-
-    // Interact with the title bar first (for dragging)
-    let title_bar_response = ui.interact(
-        title_bar_rect,
-        Id::new("title_bar_drag"),
-        Sense::click_and_drag(),
-    );
-
-    // Handle dragging and double-click
-    if title_bar_response.double_clicked() {
-        let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-        ui.ctx()
-            .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
-    }
-
-    if title_bar_response.drag_started_by(PointerButton::Primary) {
-        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-    }
-
-    // Add menu on the left side
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(title_bar_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
-            ui.add_space(8.0);
-            ui.menu_button("View", |ui| {
-                if ui.button("Screen Preview").clicked() {
-                    *screen_window_open = true;
-                    ui.close();
-                }
-                if ui.button("Stream Information").clicked() {
-                    *info_window_open = true;
-                    ui.close();
-                }
-            });
-        },
-    );
-
-    // Add window control buttons on the right side
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(title_bar_rect)
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.visuals_mut().button_frame = false;
-            ui.add_space(8.0);
-            close_maximize_minimize(ui);
-        },
-    );
-}
-
-/// Show some close/maximize/minimize buttons for the native window.
-fn close_maximize_minimize(ui: &mut egui::Ui) {
-    use egui::{Button, RichText};
-
-    let button_height = 24.0;
-
-    let close_response = ui
-        .add(Button::new(RichText::new("❌").size(button_height)))
-        .on_hover_text("Close the window");
-    if close_response.clicked() {
-        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-    }
-
-    let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-    if is_maximized {
-        let maximized_response = ui
-            .add(Button::new(RichText::new("🗗").size(button_height)))
-            .on_hover_text("Restore window");
-        if maximized_response.clicked() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
-        }
-    } else {
-        let maximized_response = ui
-            .add(Button::new(RichText::new("🗗").size(button_height)))
-            .on_hover_text("Maximize window");
-        if maximized_response.clicked() {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-        }
-    }
-
-    let minimized_response = ui
-        .add(Button::new(RichText::new("🗕").size(button_height)))
-        .on_hover_text("Minimize the window");
-    if minimized_response.clicked() {
-        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-    }
-}
-
-async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd)> {
-    let proxy = Screencast::new().await?;
-    let session = proxy.create_session().await?;
-    proxy
-        .select_sources(
-            &session,
-            CursorMode::Hidden,
-            (SourceType::Monitor | SourceType::Window).into(),
-            false,
-            None,
-            PersistMode::DoNot,
-        )
-        .await?;
-
-    let response = proxy.start(&session, None).await?.response()?;
-    let stream = response
-        .streams()
-        .first()
-        .expect("no stream found / selected")
-        .to_owned();
-
-    let fd = proxy.open_pipe_wire_remote(&session).await?;
-
-    Ok((stream, fd))
-}
-
-fn start_streaming(
-    node_id: u32,
-    fd: OwnedFd,
-    frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
-    stop_flag: Arc<AtomicBool>,
-    selected_backend: GpuBackend,
-) -> Result<(), pw::Error> {
-    let mainloop = pw::main_loop::MainLoop::new(None)?;
-    let context = pw::context::Context::new(&mainloop)?;
-    let core = context.connect_fd(fd, None)?;
-
-    // Create a timer to periodically check the stop flag
-    let timer = mainloop.loop_().add_timer(Box::new({
-        let stop_flag = stop_flag.clone();
-        let mainloop = mainloop.clone();
-        move |_| {
-            if stop_flag.load(Ordering::SeqCst) {
-                info!("Stop requested, quitting mainloop");
-                mainloop.quit();
-            }
-        }
-    }));
-
-    // Set timer to fire every 100ms
-    timer.update_timer(
-        Some(std::time::Duration::from_millis(100)),
-        Some(std::time::Duration::from_millis(100)),
-    );
-
-    let data = UserData {
-        format: Default::default(),
-        frame_sender,
-        gst_converter: None,
-        mainloop: mainloop.clone(),
-        selected_backend,
-    };
-
-    let stream = pw::stream::Stream::new(
-        &core,
-        "video-capture",
-        properties! {
-            *pw::keys::MEDIA_TYPE => "Video",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Screen",
-        },
-    )?;
-
-    let _listener = stream
-        .add_local_listener_with_user_data(data)
-        .state_changed(|_, _, old, new| {
-            debug!(?old, ?new, "Stream state changed");
-        })
-        .param_changed(|_, user_data, id, param| {
-            let Some(param) = param else {
-                return;
-            };
-            if id != pw::spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-
-            let (media_type, media_subtype) =
-                match pw::spa::param::format_utils::parse_format(param) {
-                    Ok(v) => v,
-                    Err(_) => return,
-                };
-
-            if media_type != pw::spa::param::format::MediaType::Video
-                || media_subtype != pw::spa::param::format::MediaSubtype::Raw
-            {
-                return;
-            }
-
-            user_data
-                .format
-                .parse(param)
-                .expect("Failed to parse param changed to VideoInfoRaw");
-
-            info!(
-                format_raw = user_data.format.format().as_raw(),
-                format = ?user_data.format.format(),
-                width = user_data.format.size().width,
-                height = user_data.format.size().height,
-                framerate_num = user_data.format.framerate().num,
-                framerate_denom = user_data.format.framerate().denom,
-                "Got video format"
-            );
-
-            // Initialize GStreamer converter with the detected format and selected backend
-            let width = user_data.format.size().width;
-            let height = user_data.format.size().height;
-            let format = user_data.format.format();
-            let backend = user_data.selected_backend.clone();
-
-            match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
-                Ok(converter) => {
-                    info!(
-                        backend = %converter.backend(),
-                        "GStreamer converter initialized successfully"
-                    );
-                    user_data.gst_converter = Some(converter);
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to create GStreamer converter");
-                }
-            }
-        })
-        .process(|stream, user_data| {
-            match stream.dequeue_buffer() {
-                None => {
-                    warn!("Out of buffers");
-                }
-                Some(mut buffer) => {
-                    // Try to extract DMA-BUF first (Phase 3: DMA-BUF detection)
-                    match dmabuf_handler::DmaBufBuffer::from_pipewire_buffer(
-                        &mut buffer,
-                        user_data.format.size().width,
-                        user_data.format.size().height,
-                        user_data.format.format(),
-                    ) {
-                        Ok(dmabuf) => {
-                            static ONCE: std::sync::Once = std::sync::Once::new();
-                            ONCE.call_once(|| {
-                                info!(
-                                    fd = dmabuf.fd,
-                                    format = ?dmabuf.format,
-                                    stride = dmabuf.stride,
-                                    width = dmabuf.width,
-                                    height = dmabuf.height,
-                                    "DMA-BUF zero-copy enabled"
-                                );
-                            });
-
-                            // Calculate buffer size from stride and height
-                            let buffer_size = (dmabuf.stride * dmabuf.height) as usize;
-
-                            // Use GStreamer for format conversion with zero-copy DMA-BUF import
-                            let converted_data = if let Some(ref mut converter) = user_data.gst_converter {
-                                match converter.push_dmabuf(dmabuf.fd, buffer_size) {
-                                    Ok(_) => match converter.pull_rgba_frame() {
-                                        Ok(rgba_data) => rgba_data,
-                                        Err(e) => {
-                                            error!(error = %e, "Failed to convert DMA-BUF frame");
-                                            return;
-                                        }
-                                    },
-                                    Err(e) => {
-                                        error!(error = %e, "Failed to push DMA-BUF to GStreamer");
-                                        return;
-                                    }
-                                }
-                            } else {
-                                error!("No GStreamer converter available");
-                                return;
-                            };
-
-                            // Send converted frame
-                            let frame = FrameData {
-                                data: converted_data,
-                                width: user_data.format.size().width,
-                                height: user_data.format.size().height,
-                                format: spa::param::video::VideoFormat::RGBA,
-                            };
-
-                            if user_data.frame_sender.send(frame).is_err() {
-                                // Channel closed, receiver dropped - quit gracefully
-                                user_data.mainloop.quit();
-                            }
-                            return;
-                        }
-                        Err(e) => {
-                            // DMA-BUF not available, use CPU copy path
-                            static ONCE: std::sync::Once = std::sync::Once::new();
-                            ONCE.call_once(|| {
-                                warn!(error = %e, "DMA-BUF not available, using CPU copy fallback");
-                            });
-                        }
-                    }
-
-                    // CPU copy fallback path (only used if DMA-BUF extraction failed)
-                    let datas = buffer.datas_mut();
-                    if datas.is_empty() {
-                        return;
-                    }
-
-                    let data = &mut datas[0];
-                    let chunk = data.chunk();
-                    let size = chunk.size() as usize;
-
-                    if size == 0 {
-                        return;
-                    }
-
-                    // Only access data pointer if we're in CPU copy mode (MAP_BUFFERS would have been needed)
-                    let data_ptr = match data.data() {
-                        Some(ptr) => ptr,
-                        None => {
-                            warn!("No CPU-mapped data available (this is expected with DMA-BUF mode)");
-                            return;
-                        }
-                    };
-
-                    let slice = unsafe {
-                        std::slice::from_raw_parts(
-                            data_ptr.as_ptr(),
-                            size,
-                        )
-                    };
-
-                    // Use GStreamer for format conversion if available
-                    let converted_data = if let Some(ref converter) = user_data.gst_converter {
-                        match converter.push_buffer(slice) {
-                            Ok(_) => match converter.pull_rgba_frame() {
-                                Ok(rgba_data) => rgba_data,
-                                Err(e) => {
-                                    error!(error = %e, "Failed to pull RGBA frame");
-                                    return;
-                                }
-                            },
-                            Err(e) => {
-                                error!(error = %e, "Failed to push buffer to GStreamer");
-                                return;
-                            }
-                        }
-                    } else {
-                        // Fallback: send raw data if converter not ready
-                        slice.to_vec()
-                    };
-
-                    let frame_data = FrameData {
-                        data: converted_data,
-                        width: user_data.format.size().width,
-                        height: user_data.format.size().height,
-                        format: if user_data.gst_converter.is_some() {
-                            spa::param::video::VideoFormat::RGBA
-                        } else {
-                            user_data.format.format()
-                        },
-                    };
-
-                    if user_data.frame_sender.send(frame_data).is_err() {
-                        // Channel closed, receiver dropped - quit gracefully
-                        user_data.mainloop.quit();
-                    }
-                }
-            }
-        })
-        .register()?;
-
-    debug!(?stream, "Created stream");
-
-    let obj = pw::spa::pod::object!(
-        pw::spa::utils::SpaTypes::ObjectParamFormat,
-        pw::spa::param::ParamType::EnumFormat,
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::MediaType,
-            Id,
-            pw::spa::param::format::MediaType::Video
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::MediaSubtype,
-            Id,
-            pw::spa::param::format::MediaSubtype::Raw
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::VideoFormat,
-            Choice,
-            Enum,
-            Id,
-            pw::spa::param::video::VideoFormat::RGB,
-            pw::spa::param::video::VideoFormat::RGB,
-            pw::spa::param::video::VideoFormat::RGBA,
-            pw::spa::param::video::VideoFormat::RGBx,
-            pw::spa::param::video::VideoFormat::BGRx,
-            pw::spa::param::video::VideoFormat::YUY2,
-            pw::spa::param::video::VideoFormat::I420,
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::VideoSize,
-            Choice,
-            Range,
-            Rectangle,
-            pw::spa::utils::Rectangle {
-                width: 320,
-                height: 240
-            },
-            pw::spa::utils::Rectangle {
-                width: 1,
-                height: 1
-            },
-            pw::spa::utils::Rectangle {
-                width: 4096,
-                height: 4096
-            }
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::VideoFramerate,
-            Choice,
-            Range,
-            Fraction,
-            pw::spa::utils::Fraction { num: 25, denom: 1 },
-            pw::spa::utils::Fraction { num: 0, denom: 1 },
-            pw::spa::utils::Fraction {
-                num: 1000,
-                denom: 1
-            }
-        ),
-    );
-    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &pw::spa::pod::Value::Object(obj),
-    )
-    .unwrap()
-    .0
-    .into_inner();
-
-    let mut params = [spa::pod::Pod::from_bytes(&values).unwrap()];
-
-    // Phase 3: Try DMA-BUF by not forcing MAP_BUFFERS
-    // This allows PipeWire to provide DMA-BUF file descriptors if available
-    info!("Attempting to connect with DMA-BUF support");
-    stream.connect(
-        spa::utils::Direction::Input,
-        Some(node_id),
-        pw::stream::StreamFlags::AUTOCONNECT, // Removed MAP_BUFFERS to allow DMA-BUF
-        &mut params,
-    )?;
-
-    info!("Connected stream (DMA-BUF mode)");
-
-    mainloop.run();
-
-    Ok(())
-}
+mod stream;
+mod ui;
+
+use app::{CocuyoApp, RecordingState};
+use gst_pipeline::{GpuBackend, detect_available_backends};
 
 fn main() {
-    // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -870,86 +24,30 @@ fn main() {
         )
         .init();
 
-    // Initialize GStreamer
     gstreamer::init().expect("Failed to initialize GStreamer");
-    info!("GStreamer initialized successfully");
+    info!("GStreamer initialized");
 
-    // Initialize PipeWire
     pw::init();
 
-    // Detect available GPU backends
     let available_backends = detect_available_backends();
     info!(
         backends = ?available_backends.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
         "Detected GPU backends"
     );
 
-    // Create shared state for recording
     let recording_state = Arc::new(Mutex::new(RecordingState::Idle));
     let (start_recording_tx, start_recording_rx) = std::sync::mpsc::channel::<((), GpuBackend)>();
     let stop_flag = Arc::new(AtomicBool::new(false));
 
-    // Create frame channel - sender goes to streaming thread, receiver to app
     let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
     let frame_receiver = Arc::new(Mutex::new(frame_receiver));
 
-    // Spawn background thread to handle recording requests
-    let recording_state_clone = recording_state.clone();
-    let stop_flag_clone = stop_flag.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-        while let Ok(((), selected_backend)) = start_recording_rx.recv() {
-            // Reset stop flag for new recording session
-            stop_flag_clone.store(false, Ordering::SeqCst);
-
-            // Set state to Starting
-            *recording_state_clone.lock().unwrap() = RecordingState::Starting;
-
-            info!(backend = %selected_backend, "Starting recording with backend");
-
-            // Run async portal request
-            let result = rt.block_on(open_portal());
-
-            match result {
-                Ok((stream, fd)) => {
-                    let pipewire_node_id = stream.pipe_wire_node_id();
-
-                    info!(
-                        node_id = pipewire_node_id,
-                        fd = fd.try_clone().unwrap().into_raw_fd(),
-                        "PipeWire stream info"
-                    );
-
-                    // Update state to Recording
-                    *recording_state_clone.lock().unwrap() = RecordingState::Recording;
-
-                    // Start streaming (this blocks until the stream ends or stop is requested)
-                    let sender = frame_sender.clone();
-                    let stop = stop_flag_clone.clone();
-                    if let Err(e) = start_streaming(
-                        pipewire_node_id,
-                        fd,
-                        sender,
-                        stop,
-                        selected_backend.clone(),
-                    ) {
-                        error!(error = %e, "PipeWire streaming error");
-                        *recording_state_clone.lock().unwrap() =
-                            RecordingState::Error(e.to_string());
-                    } else {
-                        // Stream ended normally, go back to Idle
-                        *recording_state_clone.lock().unwrap() = RecordingState::Idle;
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to open portal");
-                    *recording_state_clone.lock().unwrap() =
-                        RecordingState::Error(e.to_string());
-                }
-            }
-        }
-    });
+    spawn_recording_thread(
+        start_recording_rx,
+        stop_flag.clone(),
+        recording_state.clone(),
+        frame_sender,
+    );
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -961,7 +59,7 @@ fn main() {
         ..Default::default()
     };
 
-    info!("Using wgpu backend (Vulkan preferred on Linux for DMA-BUF support)");
+    info!("Using wgpu backend");
 
     if let Err(e) = eframe::run_native(
         "cocuyo",
@@ -976,6 +74,56 @@ fn main() {
             )))
         }),
     ) {
-        error!(error = %e, "Failed to run eframe application");
+        error!(error = %e, "Failed to run application");
     }
+}
+
+fn spawn_recording_thread(
+    start_recording_rx: std::sync::mpsc::Receiver<((), GpuBackend)>,
+    stop_flag: Arc<AtomicBool>,
+    recording_state: Arc<Mutex<RecordingState>>,
+    frame_sender: tokio::sync::mpsc::UnboundedSender<app::FrameData>,
+) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+        while let Ok(((), selected_backend)) = start_recording_rx.recv() {
+            stop_flag.store(false, Ordering::SeqCst);
+            *recording_state.lock().unwrap() = RecordingState::Starting;
+
+            info!(backend = %selected_backend, "Starting recording");
+
+            let result = rt.block_on(stream::open_portal());
+
+            match result {
+                Ok((portal_stream, fd)) => {
+                    let node_id = portal_stream.pipe_wire_node_id();
+
+                    info!(
+                        node_id = node_id,
+                        fd = fd.try_clone().unwrap().into_raw_fd(),
+                        "PipeWire stream connected"
+                    );
+
+                    *recording_state.lock().unwrap() = RecordingState::Recording;
+
+                    let sender = frame_sender.clone();
+                    let stop = stop_flag.clone();
+
+                    if let Err(e) =
+                        stream::start_streaming(node_id, fd, sender, stop, selected_backend)
+                    {
+                        error!(error = %e, "PipeWire streaming error");
+                        *recording_state.lock().unwrap() = RecordingState::Error(e.to_string());
+                    } else {
+                        *recording_state.lock().unwrap() = RecordingState::Idle;
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to open portal");
+                    *recording_state.lock().unwrap() = RecordingState::Error(e.to_string());
+                }
+            }
+        }
+    });
 }
