@@ -2,12 +2,13 @@ use eframe::egui::{
     self, Align2, Button, CentralPanel, FontId, Id, PointerButton, RichText, Sense, UiBuilder, vec2,
 };
 
+use crate::app::WindowStates;
+
 /// Renders a custom window frame with title bar and returns the content area rect.
 pub fn custom_window_frame(
     ctx: &egui::Context,
     title: &str,
-    screen_window_open: &mut bool,
-    info_window_open: &mut bool,
+    window_states: &mut WindowStates,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> egui::Rect {
     let panel_frame = egui::Frame::new()
@@ -27,13 +28,7 @@ pub fn custom_window_frame(
             rect.max.y = rect.min.y + title_bar_height;
             rect
         };
-        title_bar_ui(
-            ui,
-            title_bar_rect,
-            title,
-            screen_window_open,
-            info_window_open,
-        );
+        title_bar_ui(ui, title_bar_rect, title, window_states);
 
         let inner_rect = {
             let mut rect = app_rect;
@@ -54,8 +49,7 @@ fn title_bar_ui(
     ui: &mut egui::Ui,
     title_bar_rect: egui::Rect,
     title: &str,
-    screen_window_open: &mut bool,
-    info_window_open: &mut bool,
+    window_states: &mut WindowStates,
 ) {
     let painter = ui.painter();
 
@@ -99,11 +93,17 @@ fn title_bar_ui(
             ui.add_space(8.0);
             ui.menu_button("View", |ui| {
                 if ui.button("Screen Preview").clicked() {
-                    *screen_window_open = true;
+                    window_states.screen_preview = true;
                     ui.close();
                 }
                 if ui.button("Stream Information").clicked() {
-                    *info_window_open = true;
+                    window_states.stream_info = true;
+                    ui.close();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui.button("Settings").clicked() {
+                    window_states.settings = true;
                     ui.close();
                 }
             });

@@ -24,12 +24,19 @@ pub struct FrameData {
     pub format: spa::param::video::VideoFormat,
 }
 
+/// Tracks the visibility state of all application windows
+#[derive(Default, Clone, Copy)]
+pub struct WindowStates {
+    pub screen_preview: bool,
+    pub stream_info: bool,
+    pub settings: bool,
+}
+
 pub struct CocuyoApp {
     frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
     current_frame: Option<FrameData>,
     texture: Option<egui::TextureHandle>,
-    screen_window_open: bool,
-    info_window_open: bool,
+    window_states: WindowStates,
     content_rect: Option<egui::Rect>,
     recording_state: Arc<Mutex<RecordingState>>,
     start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
@@ -50,8 +57,7 @@ impl CocuyoApp {
             frame_receiver,
             current_frame: None,
             texture: None,
-            screen_window_open: false,
-            info_window_open: false,
+            window_states: WindowStates::default(),
             content_rect: None,
             recording_state,
             start_recording_tx,
@@ -151,8 +157,6 @@ impl CocuyoApp {
                 let state = self.recording_state.lock().unwrap().clone();
                 match state {
                     RecordingState::Idle => {
-                        self.render_backend_selector(ui, "");
-                        ui.add_space(10.0);
                         if ui.button("Start Recording").clicked() {
                             self.start_recording();
                         }
@@ -171,8 +175,6 @@ impl CocuyoApp {
                     RecordingState::Error(ref msg) => {
                         ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
                         ui.add_space(10.0);
-                        self.render_backend_selector(ui, "_retry");
-                        ui.add_space(5.0);
                         if ui.button("Retry").clicked() {
                             self.start_recording();
                         }
@@ -184,7 +186,7 @@ impl CocuyoApp {
 
     fn render_preview_window(&mut self, ctx: &egui::Context) {
         let current_frame = self.current_frame.clone();
-        let mut window_open = self.screen_window_open;
+        let mut window_open = self.window_states.screen_preview;
 
         let mut window = egui::Window::new("Screen Preview")
             .open(&mut window_open)
@@ -234,12 +236,12 @@ impl CocuyoApp {
             });
         });
 
-        self.screen_window_open = window_open;
+        self.window_states.screen_preview = window_open;
     }
 
     fn render_info_window(&mut self, ctx: &egui::Context) {
         let current_frame = self.current_frame.clone();
-        let mut window_open = self.info_window_open;
+        let mut window_open = self.window_states.stream_info;
 
         let mut window = egui::Window::new("Stream Information")
             .open(&mut window_open)
@@ -278,7 +280,51 @@ impl CocuyoApp {
             }
         });
 
-        self.info_window_open = window_open;
+        self.window_states.stream_info = window_open;
+    }
+
+    fn render_settings_window(&mut self, ctx: &egui::Context) {
+        let mut window_open = self.window_states.settings;
+
+        let mut window = egui::Window::new("Settings")
+            .open(&mut window_open)
+            .default_size([400.0, 300.0])
+            .resizable(true);
+
+        if let Some(content_rect) = self.content_rect {
+            window = window.constrain_to(content_rect);
+        }
+
+        window.show(ctx, |ui| {
+            ui.heading("Settings");
+            ui.separator();
+
+            egui::CollapsingHeader::new("Video Processing")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.add_space(5.0);
+                    self.render_backend_selector(ui, "_settings");
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Select the GPU backend for video format conversion. \
+                             Changes take effect on the next recording session.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
+
+            // Placeholder for future settings sections
+            // Example:
+            // egui::CollapsingHeader::new("Output")
+            //     .default_open(false)
+            //     .show(ui, |ui| {
+            //         // Output format settings, file path, etc.
+            //     });
+        });
+
+        self.window_states.settings = window_open;
     }
 }
 
@@ -290,23 +336,16 @@ impl eframe::App for CocuyoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_frame();
 
-        let mut screen_window_open = self.screen_window_open;
-        let mut info_window_open = self.info_window_open;
-
-        let content_rect = custom_window_frame(
-            ctx,
-            "Cocuyo",
-            &mut screen_window_open,
-            &mut info_window_open,
-            |ui| self.render_main_panel(ui),
-        );
-
-        self.screen_window_open = screen_window_open;
-        self.info_window_open = info_window_open;
+        let mut window_states = self.window_states;
+        let content_rect = custom_window_frame(ctx, "Cocuyo", &mut window_states, |ui| {
+            self.render_main_panel(ui)
+        });
+        self.window_states = window_states;
         self.content_rect = Some(content_rect);
 
         self.render_preview_window(ctx);
         self.render_info_window(ctx);
+        self.render_settings_window(ctx);
 
         ctx.request_repaint();
     }
