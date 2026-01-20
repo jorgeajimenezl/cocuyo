@@ -3,10 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use iced::widget::{
-    button, center, column, container, horizontal_rule, horizontal_space, image, pick_list, row,
-    scrollable, text, vertical_space,
+    Space, button, center, column, container, image, pick_list, row, rule, scrollable, text,
 };
-use iced::{window, Alignment, Color, Element, Length, Size, Subscription, Task, Theme};
+use iced::{Alignment, Color, Element, Length, Size, Subscription, Task, Theme, window};
 use pipewire::spa;
 use tracing::warn;
 
@@ -245,7 +244,7 @@ impl CocuyoApp {
         }
     }
 
-    pub fn view(&self, window_id: window::Id) -> Element<Message> {
+    pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         match self.windows.get(&window_id) {
             Some(WindowKind::Main) => self.view_main_window(),
             Some(WindowKind::Preview) => self.view_preview_window(),
@@ -255,7 +254,7 @@ impl CocuyoApp {
         }
     }
 
-    fn view_main_window(&self) -> Element<Message> {
+    fn view_main_window(&self) -> Element<'_, Message> {
         // Menu bar
         let menu_bar = self.view_menu_bar();
 
@@ -278,7 +277,7 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_menu_bar(&self) -> Element<Message> {
+    fn view_menu_bar(&self) -> Element<'_, Message> {
         let view_button = button(text("Preview"))
             .on_press(Message::OpenPreview)
             .style(button::text);
@@ -292,13 +291,13 @@ impl CocuyoApp {
             .style(button::text);
 
         let menu_row = row![
-            horizontal_space().width(8),
+            Space::new().width(8),
             view_button,
             stream_info_button,
             edit_button,
-            horizontal_space(),
+            Space::new().width(Length::Fill),
             text("Cocuyo").size(20),
-            horizontal_space(),
+            Space::new().width(Length::Fill),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
@@ -316,21 +315,23 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_main_content(&self) -> Element<Message> {
+    fn view_main_content(&self) -> Element<'_, Message> {
         let title = text("Cocuyo").size(32);
         let subtitle = text("Screen capture via PipeWire").size(14);
 
         let action_content: Element<Message> = match &self.cached_recording_state {
-            RecordingState::Idle => column![button(text("Start Recording").size(16))
-                .on_press(Message::StartRecording)
-                .padding([10, 20])]
+            RecordingState::Idle => column![
+                button(text("Start Recording").size(16))
+                    .on_press(Message::StartRecording)
+                    .padding([10, 20])
+            ]
             .into(),
             RecordingState::Starting => {
                 column![text("Requesting screen capture...").size(14),].into()
             }
             RecordingState::Recording => column![
                 text("Recording in progress").size(14),
-                vertical_space().height(10),
+                Space::new().height(10),
                 button(text("Stop Recording").size(16))
                     .on_press(Message::StopRecording)
                     .padding([10, 20])
@@ -340,7 +341,7 @@ impl CocuyoApp {
                 text(format!("Error: {}", msg))
                     .size(14)
                     .color(Color::from_rgb(0.9, 0.2, 0.2)),
-                vertical_space().height(10),
+                Space::new().height(10),
                 button(text("Retry").size(16))
                     .on_press(Message::StartRecording)
                     .padding([10, 20])
@@ -348,7 +349,7 @@ impl CocuyoApp {
             .into(),
         };
 
-        let content = column![title, subtitle, vertical_space().height(20), action_content,]
+        let content = column![title, subtitle, Space::new().height(20), action_content,]
             .spacing(8)
             .align_x(Alignment::Center);
 
@@ -358,7 +359,7 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_status_bar(&self) -> Element<Message> {
+    fn view_status_bar(&self) -> Element<'_, Message> {
         let status_indicator: Element<Message> = match &self.cached_recording_state {
             RecordingState::Idle => text("[Idle]")
                 .size(12)
@@ -399,12 +400,12 @@ impl CocuyoApp {
         };
 
         let status_row = row![
-            horizontal_space().width(8),
+            Space::new().width(8),
             text("Status:").size(12),
             status_indicator,
-            horizontal_space().width(16),
+            Space::new().width(16),
             frame_info,
-            horizontal_space(),
+            Space::new().width(Length::Fill),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
@@ -422,7 +423,7 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_preview_window(&self) -> Element<Message> {
+    fn view_preview_window(&self) -> Element<'_, Message> {
         let content: Element<Message> = if let Some(ref frame) = self.current_frame {
             if let Some(rgba_data) = self.convert_to_rgba(frame) {
                 let img_handle = image::Handle::from_rgba(frame.width, frame.height, rgba_data);
@@ -457,7 +458,7 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_info_window(&self) -> Element<Message> {
+    fn view_info_window(&self) -> Element<'_, Message> {
         let title = text("Stream Details").size(20);
 
         let details: Element<Message> = if let Some(ref frame) = self.current_frame {
@@ -471,9 +472,9 @@ impl CocuyoApp {
                 text(format!("Format: {:?}", frame.format)).size(14),
                 text(format!("Data size: {} bytes", frame.data.len())).size(14),
                 text(format!("Aspect ratio: {:.2}", aspect_ratio)).size(14),
-                vertical_space().height(10),
-                horizontal_rule(1),
-                vertical_space().height(10),
+                Space::new().height(10),
+                rule::horizontal(1),
+                Space::new().height(10),
                 text(format!("Total pixels: {}", total_pixels)).size(14),
                 text(format!("Bytes per pixel: {:.2}", bytes_per_pixel)).size(14),
             ]
@@ -482,7 +483,7 @@ impl CocuyoApp {
         } else {
             column![
                 text("No frame data available").size(14),
-                vertical_space().height(10),
+                Space::new().height(10),
                 text("Waiting for first frame...")
                     .size(14)
                     .color(Color::from_rgb(0.9, 0.9, 0.2)),
@@ -491,14 +492,9 @@ impl CocuyoApp {
             .into()
         };
 
-        let content = column![
-            title,
-            horizontal_rule(1),
-            vertical_space().height(10),
-            details,
-        ]
-        .spacing(8)
-        .padding(16);
+        let content = column![title, rule::horizontal(1), Space::new().height(10), details,]
+            .spacing(8)
+            .padding(16);
 
         container(content)
             .width(Length::Fill)
@@ -506,7 +502,7 @@ impl CocuyoApp {
             .into()
     }
 
-    fn view_settings_window(&self) -> Element<Message> {
+    fn view_settings_window(&self) -> Element<'_, Message> {
         let title = text("Settings").size(20);
 
         let backend_selector = row![
@@ -530,17 +526,17 @@ impl CocuyoApp {
 
         let video_section = column![
             text("Video Processing").size(16),
-            vertical_space().height(8),
+            Space::new().height(8),
             backend_selector,
-            vertical_space().height(8),
+            Space::new().height(8),
             description,
         ]
         .spacing(4);
 
         let content = column![
             title,
-            horizontal_rule(1),
-            vertical_space().height(16),
+            rule::horizontal(1),
+            Space::new().height(16),
             video_section,
         ]
         .spacing(8)
