@@ -8,6 +8,7 @@ pub fn custom_window_frame(
     title: &str,
     screen_window_open: &mut bool,
     info_window_open: &mut bool,
+    settings_window_open: &mut bool,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> egui::Rect {
     let panel_frame = egui::Frame::new()
@@ -33,6 +34,7 @@ pub fn custom_window_frame(
             title,
             screen_window_open,
             info_window_open,
+            settings_window_open,
         );
 
         let inner_rect = {
@@ -56,6 +58,7 @@ fn title_bar_ui(
     title: &str,
     screen_window_open: &mut bool,
     info_window_open: &mut bool,
+    settings_window_open: &mut bool,
 ) {
     let painter = ui.painter();
 
@@ -104,6 +107,12 @@ fn title_bar_ui(
                 }
                 if ui.button("Stream Information").clicked() {
                     *info_window_open = true;
+                    ui.close();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui.button("Settings").clicked() {
+                    *settings_window_open = true;
                     ui.close();
                 }
             });
