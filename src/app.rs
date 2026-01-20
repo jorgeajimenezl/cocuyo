@@ -24,13 +24,19 @@ pub struct FrameData {
     pub format: spa::param::video::VideoFormat,
 }
 
+/// Tracks the visibility state of all application windows
+#[derive(Default, Clone, Copy)]
+pub struct WindowStates {
+    pub screen_preview: bool,
+    pub stream_info: bool,
+    pub settings: bool,
+}
+
 pub struct CocuyoApp {
     frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
     current_frame: Option<FrameData>,
     texture: Option<egui::TextureHandle>,
-    screen_window_open: bool,
-    info_window_open: bool,
-    settings_window_open: bool,
+    window_states: WindowStates,
     content_rect: Option<egui::Rect>,
     recording_state: Arc<Mutex<RecordingState>>,
     start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
@@ -51,9 +57,7 @@ impl CocuyoApp {
             frame_receiver,
             current_frame: None,
             texture: None,
-            screen_window_open: false,
-            info_window_open: false,
-            settings_window_open: false,
+            window_states: WindowStates::default(),
             content_rect: None,
             recording_state,
             start_recording_tx,
@@ -182,7 +186,7 @@ impl CocuyoApp {
 
     fn render_preview_window(&mut self, ctx: &egui::Context) {
         let current_frame = self.current_frame.clone();
-        let mut window_open = self.screen_window_open;
+        let mut window_open = self.window_states.screen_preview;
 
         let mut window = egui::Window::new("Screen Preview")
             .open(&mut window_open)
@@ -232,12 +236,12 @@ impl CocuyoApp {
             });
         });
 
-        self.screen_window_open = window_open;
+        self.window_states.screen_preview = window_open;
     }
 
     fn render_info_window(&mut self, ctx: &egui::Context) {
         let current_frame = self.current_frame.clone();
-        let mut window_open = self.info_window_open;
+        let mut window_open = self.window_states.stream_info;
 
         let mut window = egui::Window::new("Stream Information")
             .open(&mut window_open)
@@ -276,11 +280,11 @@ impl CocuyoApp {
             }
         });
 
-        self.info_window_open = window_open;
+        self.window_states.stream_info = window_open;
     }
 
     fn render_settings_window(&mut self, ctx: &egui::Context) {
-        let mut window_open = self.settings_window_open;
+        let mut window_open = self.window_states.settings;
 
         let mut window = egui::Window::new("Settings")
             .open(&mut window_open)
@@ -320,7 +324,7 @@ impl CocuyoApp {
             //     });
         });
 
-        self.settings_window_open = window_open;
+        self.window_states.settings = window_open;
     }
 }
 
@@ -332,22 +336,11 @@ impl eframe::App for CocuyoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_frame();
 
-        let mut screen_window_open = self.screen_window_open;
-        let mut info_window_open = self.info_window_open;
-        let mut settings_window_open = self.settings_window_open;
-
-        let content_rect = custom_window_frame(
-            ctx,
-            "Cocuyo",
-            &mut screen_window_open,
-            &mut info_window_open,
-            &mut settings_window_open,
-            |ui| self.render_main_panel(ui),
-        );
-
-        self.screen_window_open = screen_window_open;
-        self.info_window_open = info_window_open;
-        self.settings_window_open = settings_window_open;
+        let mut window_states = self.window_states;
+        let content_rect = custom_window_frame(ctx, "Cocuyo", &mut window_states, |ui| {
+            self.render_main_panel(ui)
+        });
+        self.window_states = window_states;
         self.content_rect = Some(content_rect);
 
         self.render_preview_window(ctx);
