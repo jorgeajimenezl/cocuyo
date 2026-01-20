@@ -1,10 +1,10 @@
 use std::os::fd::OwnedFd;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use ashpd::desktop::{
-    PersistMode,
     screencast::{CursorMode, Screencast, SourceType, Stream as ScreencastStream},
+    PersistMode,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};

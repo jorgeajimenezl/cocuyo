@@ -2,7 +2,7 @@ use std::os::fd::IntoRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use eframe::egui;
+use iced::{window, Element, Subscription, Task, Theme};
 use pipewire as pw;
 use tracing::{error, info};
 
@@ -11,12 +11,11 @@ mod dmabuf_handler;
 mod formats;
 mod gst_pipeline;
 mod stream;
-mod ui;
 
-use app::{CocuyoApp, RecordingState};
-use gst_pipeline::{GpuBackend, detect_available_backends};
+use app::{CocuyoApp, Message, RecordingState};
+use gst_pipeline::{detect_available_backends, GpuBackend};
 
-fn main() {
+fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -49,32 +48,46 @@ fn main() {
         frame_sender,
     );
 
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_title("Cocuyo")
-            .with_transparent(true)
-            .with_decorations(false),
-        renderer: eframe::Renderer::Wgpu,
-        ..Default::default()
-    };
+    info!("Using wgpu backend with iced");
 
-    info!("Using wgpu backend");
+    iced::daemon(AppWrapper::title, AppWrapper::update, AppWrapper::view)
+        .subscription(AppWrapper::subscription)
+        .theme(AppWrapper::theme)
+        .run_with(move || {
+            let (app, task) = CocuyoApp::new(
+                frame_receiver.clone(),
+                recording_state.clone(),
+                start_recording_tx.clone(),
+                stop_flag.clone(),
+                available_backends.clone(),
+            );
+            (AppWrapper { app }, task)
+        })
+}
 
-    if let Err(e) = eframe::run_native(
-        "cocuyo",
-        native_options,
-        Box::new(|_cc| {
-            Ok(Box::new(CocuyoApp::new(
-                frame_receiver,
-                recording_state,
-                start_recording_tx,
-                stop_flag,
-                available_backends,
-            )))
-        }),
-    ) {
-        error!(error = %e, "Failed to run application");
+struct AppWrapper {
+    app: CocuyoApp,
+}
+
+impl AppWrapper {
+    fn title(&self, window_id: window::Id) -> String {
+        self.app.title(window_id)
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
+        self.app.update(message)
+    }
+
+    fn view(&self, window_id: window::Id) -> Element<Message> {
+        self.app.view(window_id)
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        self.app.subscription()
+    }
+
+    fn theme(&self, window_id: window::Id) -> Theme {
+        self.app.theme(window_id)
     }
 }
 

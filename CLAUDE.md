@@ -50,17 +50,19 @@ Cocuyo is a Wayland screen capture application that displays real-time screen co
    - **DMA-BUF zero-copy path** - Uses `GstDmaBufAllocator` to wrap PipeWire's DMA-BUF fd directly into GStreamer buffers without CPU copies
    - **CPU copy fallback** - Traditional memory copy when DMA-BUF unavailable
 4. **Format Conversion** (`gst_pipeline.rs`) - GStreamer pipeline converts any input format to RGBA via `push_dmabuf()` or `push_buffer()`
-5. **Display** (`main.rs:CocuyoApp`) - egui/eframe renders frames using wgpu backend
+5. **Display** (`app.rs:CocuyoApp`) - iced renders frames using wgpu backend with multi-window support
 
 ### Key Components
 
-- **`main.rs`** - Application entry point, PipeWire stream setup, egui UI with custom window frame
+- **`main.rs`** - Application entry point, iced daemon setup, recording thread management
+- **`app.rs`** - Main application state, elm-like architecture with Message enum, update/view functions, multi-window management
 - **`gst_pipeline.rs`** - GStreamer-based video format converter (appsrc → videoconvert → appsink), includes `DmaBufAllocator` for zero-copy buffer wrapping
 - **`dmabuf_handler.rs`** - DMA-BUF metadata extraction from PipeWire buffers (fd, stride, format, dimensions)
+- **`stream.rs`** - PipeWire streaming and portal session management
 
 ### Threading Model
 
-- Main thread: Tokio async runtime for portal communication, then egui event loop
+- Main thread: iced daemon event loop
 - Separate thread: PipeWire mainloop for frame capture (spawned in `main`)
 - Frame data sent via `tokio::sync::mpsc::unbounded_channel`
 - Graceful shutdown: When channel closes (window closed), PipeWire thread calls `mainloop.quit()`

@@ -1,14 +1,18 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use eframe::egui;
+use iced::widget::{
+    button, center, column, container, horizontal_rule, horizontal_space, image, pick_list, row,
+    scrollable, text, vertical_space,
+};
+use iced::{window, Alignment, Color, Element, Length, Size, Subscription, Task, Theme};
 use pipewire::spa;
 use tracing::warn;
 
 use crate::gst_pipeline::GpuBackend;
-use crate::ui::custom_window_frame;
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
     Idle,
     Starting,
@@ -24,25 +28,49 @@ pub struct FrameData {
     pub format: spa::param::video::VideoFormat,
 }
 
-/// Tracks the visibility state of all application windows
-#[derive(Default, Clone, Copy)]
-pub struct WindowStates {
-    pub screen_preview: bool,
-    pub stream_info: bool,
-    pub settings: bool,
+/// Tracks which windows exist
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowKind {
+    Main,
+    Preview,
+    StreamInfo,
+    Settings,
+}
+
+/// All possible messages/events in the application
+#[derive(Debug, Clone)]
+pub enum Message {
+    // Recording control
+    StartRecording,
+    StopRecording,
+
+    // Window management
+    OpenPreview,
+    OpenStreamInfo,
+    OpenSettings,
+    WindowOpened(window::Id, WindowKind),
+    WindowClosed(window::Id),
+
+    // Settings
+    BackendSelected(GpuBackend),
+
+    // Frame updates
+    Tick,
 }
 
 pub struct CocuyoApp {
     frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
     current_frame: Option<FrameData>,
-    texture: Option<egui::TextureHandle>,
-    window_states: WindowStates,
-    content_rect: Option<egui::Rect>,
     recording_state: Arc<Mutex<RecordingState>>,
+    cached_recording_state: RecordingState,
     start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
     stop_flag: Arc<AtomicBool>,
     available_backends: Vec<GpuBackend>,
-    selected_backend_index: usize,
+    selected_backend: GpuBackend,
+
+    // Window tracking
+    windows: BTreeMap<window::Id, WindowKind>,
+    main_window_id: Option<window::Id>,
 }
 
 impl CocuyoApp {
@@ -52,25 +80,58 @@ impl CocuyoApp {
         start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
         stop_flag: Arc<AtomicBool>,
         available_backends: Vec<GpuBackend>,
-    ) -> Self {
-        Self {
+    ) -> (Self, Task<Message>) {
+        let selected_backend = available_backends
+            .first()
+            .cloned()
+            .unwrap_or(GpuBackend::Cpu);
+
+        let app = Self {
             frame_receiver,
             current_frame: None,
-            texture: None,
-            window_states: WindowStates::default(),
-            content_rect: None,
             recording_state,
+            cached_recording_state: RecordingState::Idle,
             start_recording_tx,
             stop_flag,
             available_backends,
-            selected_backend_index: 0,
+            selected_backend,
+            windows: BTreeMap::new(),
+            main_window_id: None,
+        };
+
+        // Open the main window
+        let (id, open) = window::open(window::Settings {
+            size: Size::new(1280.0, 720.0),
+            ..Default::default()
+        });
+
+        (
+            app,
+            open.map(move |_| Message::WindowOpened(id, WindowKind::Main)),
+        )
+    }
+
+    pub fn title(&self, window_id: window::Id) -> String {
+        match self.windows.get(&window_id) {
+            Some(WindowKind::Main) => String::from("Cocuyo"),
+            Some(WindowKind::Preview) => String::from("Screen Preview"),
+            Some(WindowKind::StreamInfo) => String::from("Stream Information"),
+            Some(WindowKind::Settings) => String::from("Settings"),
+            None => String::from("Cocuyo"),
         }
     }
 
     fn update_frame(&mut self) {
-        let mut receiver = self.frame_receiver.lock().unwrap();
-        while let Ok(frame) = receiver.try_recv() {
-            self.current_frame = Some(frame);
+        if let Ok(mut receiver) = self.frame_receiver.try_lock() {
+            while let Ok(frame) = receiver.try_recv() {
+                self.current_frame = Some(frame);
+            }
+        }
+    }
+
+    fn update_recording_state(&mut self) {
+        if let Ok(state) = self.recording_state.try_lock() {
+            self.cached_recording_state = state.clone();
         }
     }
 
@@ -83,270 +144,424 @@ impl CocuyoApp {
         }
     }
 
-    fn render_backend_selector(&mut self, ui: &mut egui::Ui, id_suffix: &str) {
-        ui.horizontal(|ui| {
-            ui.label("GPU Backend:");
-            egui::ComboBox::from_id_salt(format!("gpu_backend{}", id_suffix))
-                .selected_text(
-                    self.available_backends
-                        .get(self.selected_backend_index)
-                        .map(|b| b.to_string())
-                        .unwrap_or_else(|| "None".to_string()),
-                )
-                .show_ui(ui, |ui| {
-                    for (i, backend) in self.available_backends.iter().enumerate() {
-                        ui.selectable_value(
-                            &mut self.selected_backend_index,
-                            i,
-                            backend.to_string(),
-                        );
-                    }
-                });
-        });
-    }
-
     fn start_recording(&self) {
-        let backend = self
-            .available_backends
-            .get(self.selected_backend_index)
-            .cloned()
-            .unwrap_or(GpuBackend::Cpu);
-        let _ = self.start_recording_tx.send(((), backend));
+        let _ = self
+            .start_recording_tx
+            .send(((), self.selected_backend.clone()));
     }
 
-    fn render_main_panel(&mut self, ui: &mut egui::Ui) {
-        egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Status:");
-                let state = self.recording_state.lock().unwrap().clone();
-                match state {
-                    RecordingState::Idle => {
-                        ui.colored_label(egui::Color32::GRAY, "[Idle]");
-                    }
-                    RecordingState::Starting => {
-                        ui.colored_label(egui::Color32::YELLOW, "[Starting...]");
-                    }
-                    RecordingState::Recording => {
-                        if self.current_frame.is_some() {
-                            ui.colored_label(egui::Color32::GREEN, "[Recording]");
-                        } else {
-                            ui.colored_label(egui::Color32::YELLOW, "[Waiting for frames...]");
-                        }
-                    }
-                    RecordingState::Error(ref msg) => {
-                        ui.colored_label(egui::Color32::RED, format!("[Error: {}]", msg));
-                    }
-                }
-
-                if let Some(ref frame) = self.current_frame {
-                    ui.separator();
-                    ui.label(format!(
-                        "{}x{} | {:?}",
-                        frame.width, frame.height, frame.format
-                    ));
-                }
-            });
-        });
-
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading("Cocuyo");
-                ui.label("Screen capture via PipeWire");
-                ui.add_space(20.0);
-
-                let state = self.recording_state.lock().unwrap().clone();
-                match state {
-                    RecordingState::Idle => {
-                        if ui.button("Start Recording").clicked() {
-                            self.start_recording();
-                        }
-                    }
-                    RecordingState::Starting => {
-                        ui.spinner();
-                        ui.label("Requesting screen capture...");
-                    }
-                    RecordingState::Recording => {
-                        ui.label("Recording in progress");
-                        ui.add_space(10.0);
-                        if ui.button("Stop Recording").clicked() {
-                            self.stop_flag.store(true, Ordering::SeqCst);
-                        }
-                    }
-                    RecordingState::Error(ref msg) => {
-                        ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
-                        ui.add_space(10.0);
-                        if ui.button("Retry").clicked() {
-                            self.start_recording();
-                        }
-                    }
-                }
-            });
-        });
+    fn has_window(&self, kind: WindowKind) -> bool {
+        self.windows.values().any(|k| *k == kind)
     }
 
-    fn render_preview_window(&mut self, ctx: &egui::Context) {
-        let current_frame = self.current_frame.clone();
-        let mut window_open = self.window_states.screen_preview;
-
-        let mut window = egui::Window::new("Screen Preview")
-            .open(&mut window_open)
-            .default_size([800.0, 600.0])
-            .resizable(true);
-
-        if let Some(content_rect) = self.content_rect {
-            window = window.constrain_to(content_rect);
-        }
-
-        window.show(ctx, |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
-                if let Some(ref frame) = current_frame {
-                    if let Some(rgba_data) = self.convert_to_rgba(frame) {
-                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                            [frame.width as usize, frame.height as usize],
-                            &rgba_data,
-                        );
-
-                        let texture = self.texture.get_or_insert_with(|| {
-                            ui.ctx().load_texture(
-                                "screen_frame",
-                                color_image.clone(),
-                                egui::TextureOptions::LINEAR,
-                            )
-                        });
-
-                        texture.set(color_image, egui::TextureOptions::LINEAR);
-
-                        let available_size = ui.available_size();
-                        let aspect_ratio = frame.width as f32 / frame.height as f32;
-
-                        let display_size = if available_size.x / available_size.y > aspect_ratio {
-                            egui::vec2(available_size.y * aspect_ratio, available_size.y)
-                        } else {
-                            egui::vec2(available_size.x, available_size.x / aspect_ratio)
-                        };
-
-                        ui.image((texture.id(), display_size));
-                    }
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.spinner();
-                        ui.label("Waiting for frames...");
-                    });
-                }
-            });
-        });
-
-        self.window_states.screen_preview = window_open;
+    fn find_window_id(&self, kind: WindowKind) -> Option<window::Id> {
+        self.windows
+            .iter()
+            .find(|(_, k)| **k == kind)
+            .map(|(id, _)| *id)
     }
 
-    fn render_info_window(&mut self, ctx: &egui::Context) {
-        let current_frame = self.current_frame.clone();
-        let mut window_open = self.window_states.stream_info;
-
-        let mut window = egui::Window::new("Stream Information")
-            .open(&mut window_open)
-            .default_size([350.0, 250.0])
-            .resizable(true);
-
-        if let Some(content_rect) = self.content_rect {
-            window = window.constrain_to(content_rect);
-        }
-
-        window.show(ctx, |ui| {
-            ui.heading("Stream Details");
-            ui.separator();
-
-            if let Some(ref frame) = current_frame {
-                ui.label(format!("Width: {} px", frame.width));
-                ui.label(format!("Height: {} px", frame.height));
-                ui.label(format!("Format: {:?}", frame.format));
-                ui.label(format!("Data size: {} bytes", frame.data.len()));
-
-                let aspect_ratio = frame.width as f32 / frame.height as f32;
-                ui.label(format!("Aspect ratio: {:.2}", aspect_ratio));
-
-                ui.add_space(10.0);
-                ui.separator();
-
-                ui.label(format!("Total pixels: {}", frame.width * frame.height));
-                ui.label(format!(
-                    "Bytes per pixel: {:.2}",
-                    frame.data.len() as f32 / (frame.width * frame.height) as f32
-                ));
-            } else {
-                ui.label("No frame data available");
-                ui.add_space(10.0);
-                ui.colored_label(egui::Color32::YELLOW, "Waiting for first frame...");
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::StartRecording => {
+                self.start_recording();
+                Task::none()
             }
-        });
-
-        self.window_states.stream_info = window_open;
-    }
-
-    fn render_settings_window(&mut self, ctx: &egui::Context) {
-        let mut window_open = self.window_states.settings;
-
-        let mut window = egui::Window::new("Settings")
-            .open(&mut window_open)
-            .default_size([400.0, 300.0])
-            .resizable(true);
-
-        if let Some(content_rect) = self.content_rect {
-            window = window.constrain_to(content_rect);
+            Message::StopRecording => {
+                self.stop_flag.store(true, Ordering::SeqCst);
+                Task::none()
+            }
+            Message::OpenPreview => {
+                if self.has_window(WindowKind::Preview) {
+                    // Close existing preview window
+                    if let Some(id) = self.find_window_id(WindowKind::Preview) {
+                        return window::close(id);
+                    }
+                    Task::none()
+                } else {
+                    let (id, open) = window::open(window::Settings {
+                        size: Size::new(800.0, 600.0),
+                        resizable: true,
+                        ..Default::default()
+                    });
+                    open.map(move |_| Message::WindowOpened(id, WindowKind::Preview))
+                }
+            }
+            Message::OpenStreamInfo => {
+                if self.has_window(WindowKind::StreamInfo) {
+                    if let Some(id) = self.find_window_id(WindowKind::StreamInfo) {
+                        return window::close(id);
+                    }
+                    Task::none()
+                } else {
+                    let (id, open) = window::open(window::Settings {
+                        size: Size::new(350.0, 250.0),
+                        resizable: true,
+                        ..Default::default()
+                    });
+                    open.map(move |_| Message::WindowOpened(id, WindowKind::StreamInfo))
+                }
+            }
+            Message::OpenSettings => {
+                if self.has_window(WindowKind::Settings) {
+                    if let Some(id) = self.find_window_id(WindowKind::Settings) {
+                        return window::close(id);
+                    }
+                    Task::none()
+                } else {
+                    let (id, open) = window::open(window::Settings {
+                        size: Size::new(400.0, 300.0),
+                        resizable: true,
+                        ..Default::default()
+                    });
+                    open.map(move |_| Message::WindowOpened(id, WindowKind::Settings))
+                }
+            }
+            Message::WindowOpened(id, kind) => {
+                if kind == WindowKind::Main {
+                    self.main_window_id = Some(id);
+                }
+                self.windows.insert(id, kind);
+                Task::none()
+            }
+            Message::WindowClosed(id) => {
+                let kind = self.windows.remove(&id);
+                // If main window is closed, exit the application
+                if kind == Some(WindowKind::Main) {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::BackendSelected(backend) => {
+                self.selected_backend = backend;
+                Task::none()
+            }
+            Message::Tick => {
+                self.update_frame();
+                self.update_recording_state();
+                Task::none()
+            }
         }
-
-        window.show(ctx, |ui| {
-            ui.heading("Settings");
-            ui.separator();
-
-            egui::CollapsingHeader::new("Video Processing")
-                .default_open(true)
-                .show(ui, |ui| {
-                    ui.add_space(5.0);
-                    self.render_backend_selector(ui, "_settings");
-                    ui.add_space(5.0);
-                    ui.label(
-                        egui::RichText::new(
-                            "Select the GPU backend for video format conversion. \
-                             Changes take effect on the next recording session.",
-                        )
-                        .small()
-                        .weak(),
-                    );
-                });
-
-            // Placeholder for future settings sections
-            // Example:
-            // egui::CollapsingHeader::new("Output")
-            //     .default_open(false)
-            //     .show(ui, |ui| {
-            //         // Output format settings, file path, etc.
-            //     });
-        });
-
-        self.window_states.settings = window_open;
-    }
-}
-
-impl eframe::App for CocuyoApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        egui::Rgba::TRANSPARENT.to_array()
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_frame();
+    pub fn view(&self, window_id: window::Id) -> Element<Message> {
+        match self.windows.get(&window_id) {
+            Some(WindowKind::Main) => self.view_main_window(),
+            Some(WindowKind::Preview) => self.view_preview_window(),
+            Some(WindowKind::StreamInfo) => self.view_info_window(),
+            Some(WindowKind::Settings) => self.view_settings_window(),
+            None => container(text("Loading...")).into(),
+        }
+    }
 
-        let mut window_states = self.window_states;
-        let content_rect = custom_window_frame(ctx, "Cocuyo", &mut window_states, |ui| {
-            self.render_main_panel(ui)
-        });
-        self.window_states = window_states;
-        self.content_rect = Some(content_rect);
+    fn view_main_window(&self) -> Element<Message> {
+        // Menu bar
+        let menu_bar = self.view_menu_bar();
 
-        self.render_preview_window(ctx);
-        self.render_info_window(ctx);
-        self.render_settings_window(ctx);
+        // Main content
+        let main_content = self.view_main_content();
 
-        ctx.request_repaint();
+        // Status bar
+        let status_bar = self.view_status_bar();
+
+        // Combine all parts
+        let content = column![menu_bar, main_content, status_bar]
+            .spacing(0)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(container::rounded_box)
+            .into()
+    }
+
+    fn view_menu_bar(&self) -> Element<Message> {
+        let view_button = button(text("Preview"))
+            .on_press(Message::OpenPreview)
+            .style(button::text);
+
+        let edit_button = button(text("Settings"))
+            .on_press(Message::OpenSettings)
+            .style(button::text);
+
+        let stream_info_button = button(text("Info"))
+            .on_press(Message::OpenStreamInfo)
+            .style(button::text);
+
+        let menu_row = row![
+            horizontal_space().width(8),
+            view_button,
+            stream_info_button,
+            edit_button,
+            horizontal_space(),
+            text("Cocuyo").size(20),
+            horizontal_space(),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .height(32);
+
+        container(menu_row)
+            .width(Length::Fill)
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(palette.background.weak.color.into()),
+                    ..Default::default()
+                }
+            })
+            .into()
+    }
+
+    fn view_main_content(&self) -> Element<Message> {
+        let title = text("Cocuyo").size(32);
+        let subtitle = text("Screen capture via PipeWire").size(14);
+
+        let action_content: Element<Message> = match &self.cached_recording_state {
+            RecordingState::Idle => column![button(text("Start Recording").size(16))
+                .on_press(Message::StartRecording)
+                .padding([10, 20])]
+            .into(),
+            RecordingState::Starting => {
+                column![text("Requesting screen capture...").size(14),].into()
+            }
+            RecordingState::Recording => column![
+                text("Recording in progress").size(14),
+                vertical_space().height(10),
+                button(text("Stop Recording").size(16))
+                    .on_press(Message::StopRecording)
+                    .padding([10, 20])
+            ]
+            .into(),
+            RecordingState::Error(msg) => column![
+                text(format!("Error: {}", msg))
+                    .size(14)
+                    .color(Color::from_rgb(0.9, 0.2, 0.2)),
+                vertical_space().height(10),
+                button(text("Retry").size(16))
+                    .on_press(Message::StartRecording)
+                    .padding([10, 20])
+            ]
+            .into(),
+        };
+
+        let content = column![title, subtitle, vertical_space().height(20), action_content,]
+            .spacing(8)
+            .align_x(Alignment::Center);
+
+        center(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn view_status_bar(&self) -> Element<Message> {
+        let status_indicator: Element<Message> = match &self.cached_recording_state {
+            RecordingState::Idle => text("[Idle]")
+                .size(12)
+                .color(Color::from_rgb(0.5, 0.5, 0.5))
+                .into(),
+            RecordingState::Starting => text("[Starting...]")
+                .size(12)
+                .color(Color::from_rgb(0.9, 0.9, 0.2))
+                .into(),
+            RecordingState::Recording => {
+                if self.current_frame.is_some() {
+                    text("[Recording]")
+                        .size(12)
+                        .color(Color::from_rgb(0.2, 0.8, 0.2))
+                        .into()
+                } else {
+                    text("[Waiting for frames...]")
+                        .size(12)
+                        .color(Color::from_rgb(0.9, 0.9, 0.2))
+                        .into()
+                }
+            }
+            RecordingState::Error(msg) => text(format!("[Error: {}]", msg))
+                .size(12)
+                .color(Color::from_rgb(0.9, 0.2, 0.2))
+                .into(),
+        };
+
+        let frame_info: Element<Message> = if let Some(ref frame) = self.current_frame {
+            text(format!(
+                "{}x{} | {:?}",
+                frame.width, frame.height, frame.format
+            ))
+            .size(12)
+            .into()
+        } else {
+            text("").into()
+        };
+
+        let status_row = row![
+            horizontal_space().width(8),
+            text("Status:").size(12),
+            status_indicator,
+            horizontal_space().width(16),
+            frame_info,
+            horizontal_space(),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .height(24);
+
+        container(status_row)
+            .width(Length::Fill)
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(palette.background.weak.color.into()),
+                    ..Default::default()
+                }
+            })
+            .into()
+    }
+
+    fn view_preview_window(&self) -> Element<Message> {
+        let content: Element<Message> = if let Some(ref frame) = self.current_frame {
+            if let Some(rgba_data) = self.convert_to_rgba(frame) {
+                let img_handle = image::Handle::from_rgba(frame.width, frame.height, rgba_data);
+
+                scrollable(
+                    container(image(img_handle).content_fit(iced::ContentFit::Contain))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            } else {
+                center(text("Converting frame..."))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+        } else {
+            center(text("Waiting for frames..."))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(8)
+            .into()
+    }
+
+    fn view_info_window(&self) -> Element<Message> {
+        let title = text("Stream Details").size(20);
+
+        let details: Element<Message> = if let Some(ref frame) = self.current_frame {
+            let aspect_ratio = frame.width as f32 / frame.height as f32;
+            let total_pixels = frame.width * frame.height;
+            let bytes_per_pixel = frame.data.len() as f32 / total_pixels as f32;
+
+            column![
+                text(format!("Width: {} px", frame.width)).size(14),
+                text(format!("Height: {} px", frame.height)).size(14),
+                text(format!("Format: {:?}", frame.format)).size(14),
+                text(format!("Data size: {} bytes", frame.data.len())).size(14),
+                text(format!("Aspect ratio: {:.2}", aspect_ratio)).size(14),
+                vertical_space().height(10),
+                horizontal_rule(1),
+                vertical_space().height(10),
+                text(format!("Total pixels: {}", total_pixels)).size(14),
+                text(format!("Bytes per pixel: {:.2}", bytes_per_pixel)).size(14),
+            ]
+            .spacing(4)
+            .into()
+        } else {
+            column![
+                text("No frame data available").size(14),
+                vertical_space().height(10),
+                text("Waiting for first frame...")
+                    .size(14)
+                    .color(Color::from_rgb(0.9, 0.9, 0.2)),
+            ]
+            .spacing(4)
+            .into()
+        };
+
+        let content = column![
+            title,
+            horizontal_rule(1),
+            vertical_space().height(10),
+            details,
+        ]
+        .spacing(8)
+        .padding(16);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn view_settings_window(&self) -> Element<Message> {
+        let title = text("Settings").size(20);
+
+        let backend_selector = row![
+            text("GPU Backend:").size(14),
+            pick_list(
+                self.available_backends.clone(),
+                Some(self.selected_backend.clone()),
+                Message::BackendSelected,
+            )
+            .width(150),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let description = text(
+            "Select the GPU backend for video format conversion. \
+             Changes take effect on the next recording session.",
+        )
+        .size(12)
+        .color(Color::from_rgb(0.6, 0.6, 0.6));
+
+        let video_section = column![
+            text("Video Processing").size(16),
+            vertical_space().height(8),
+            backend_selector,
+            vertical_space().height(8),
+            description,
+        ]
+        .spacing(4);
+
+        let content = column![
+            title,
+            horizontal_rule(1),
+            vertical_space().height(16),
+            video_section,
+        ]
+        .spacing(8)
+        .padding(16);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([
+            // Window close events
+            window::close_events().map(Message::WindowClosed),
+            // Tick for frame updates (60fps)
+            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
+        ])
+    }
+
+    pub fn theme(&self, _window_id: window::Id) -> Theme {
+        Theme::Dark
     }
 }
