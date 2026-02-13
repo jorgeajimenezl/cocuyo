@@ -2,7 +2,6 @@ use std::os::fd::IntoRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use eframe::egui;
 use pipewire as pw;
 use tracing::{error, info};
 
@@ -10,13 +9,14 @@ mod app;
 mod dmabuf_handler;
 mod formats;
 mod gst_pipeline;
+mod screen;
 mod stream;
-mod ui;
+mod widget;
 
-use app::{CocuyoApp, RecordingState};
+use app::{Cocuyo, FrameData, RecordingState};
 use gst_pipeline::{GpuBackend, detect_available_backends};
 
-fn main() {
+fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -49,40 +49,27 @@ fn main() {
         frame_sender,
     );
 
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_title("Cocuyo")
-            .with_transparent(true)
-            .with_decorations(false),
-        renderer: eframe::Renderer::Wgpu,
-        ..Default::default()
-    };
+    let fr = frame_receiver.clone();
+    let rs = recording_state.clone();
+    let sf = stop_flag.clone();
+    let ab = available_backends.clone();
 
-    info!("Using wgpu backend");
-
-    if let Err(e) = eframe::run_native(
-        "cocuyo",
-        native_options,
-        Box::new(|_cc| {
-            Ok(Box::new(CocuyoApp::new(
-                frame_receiver,
-                recording_state,
-                start_recording_tx,
-                stop_flag,
-                available_backends,
-            )))
-        }),
-    ) {
-        error!(error = %e, "Failed to run application");
-    }
+    iced::daemon(
+        move || Cocuyo::new(fr.clone(), rs.clone(), start_recording_tx.clone(), sf.clone(), ab.clone()),
+        Cocuyo::update,
+        Cocuyo::view,
+    )
+    .title(Cocuyo::title)
+    .theme(Cocuyo::theme)
+    .subscription(Cocuyo::subscription)
+    .run()
 }
 
 fn spawn_recording_thread(
     start_recording_rx: std::sync::mpsc::Receiver<((), GpuBackend)>,
     stop_flag: Arc<AtomicBool>,
     recording_state: Arc<Mutex<RecordingState>>,
-    frame_sender: tokio::sync::mpsc::UnboundedSender<app::FrameData>,
+    frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
 ) {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
