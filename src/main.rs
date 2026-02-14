@@ -88,7 +88,7 @@ fn spawn_recording_thread(
             let result = rt.block_on(stream::open_portal());
 
             match result {
-                Ok((portal_stream, fd)) => {
+                Ok((portal_stream, fd, session)) => {
                     let node_id = portal_stream.pipe_wire_node_id();
 
                     info!(
@@ -109,6 +109,12 @@ fn spawn_recording_thread(
                         *recording_state.lock().unwrap() = RecordingState::Error(e.to_string());
                     } else {
                         *recording_state.lock().unwrap() = RecordingState::Idle;
+                    }
+
+                    if let Err(e) = rt.block_on(session.close()) {
+                        error!(error = %e, "Failed to close portal session");
+                    } else {
+                        info!("Portal session closed");
                     }
                 }
                 Err(e) => {

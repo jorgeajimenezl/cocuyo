@@ -23,7 +23,7 @@ pub struct UserData {
     pub selected_backend: GpuBackend,
 }
 
-pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd)> {
+pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd, ashpd::desktop::Session<'static, Screencast<'static>>)> {
     let proxy = Screencast::new().await?;
     let session = proxy.create_session().await?;
     proxy
@@ -46,7 +46,7 @@ pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd)> {
 
     let fd = proxy.open_pipe_wire_remote(&session).await?;
 
-    Ok((stream, fd))
+    Ok((stream, fd, session))
 }
 
 pub fn start_streaming(
