@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use iced::widget::container;
 use iced::window;
-use iced::{Size, Subscription, Task, Theme};
+use iced::{Fill, Size, Subscription, Task, Theme};
 use pipewire::spa;
 
 use crate::gst_pipeline::GpuBackend;
@@ -163,7 +164,7 @@ impl Cocuyo {
     }
 
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
-        match self.windows.get(&window_id) {
+        let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
                 let state = self.recording_state.lock().unwrap().clone();
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width, f.height));
@@ -175,7 +176,14 @@ impl Cocuyo {
             }
             Some(WindowKind::Preview) => crate::screen::preview::view(window_id),
             None => iced::widget::space().into(),
-        }
+        };
+
+        container(content)
+            .width(Fill)
+            .height(Fill)
+            .padding(1)
+            .style(crate::theme::window_border_container)
+            .into()
     }
 
     pub fn theme(&self, _window_id: window::Id) -> Theme {

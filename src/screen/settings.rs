@@ -44,6 +44,8 @@ pub fn view<'a>(
                 .width(Fill)
                 .padding(padding::all(20)),
         )
+        .width(Fill)
+        .height(Fill)
         .style(theme::pixel_container),
     ]
     .width(Fill)

@@ -116,6 +116,16 @@ pub fn title_bar_container(_theme: &Theme) -> container::Style {
     }
 }
 
+pub fn window_border_container(_theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(GREEN),
+        background: Some(Background::Color(BG)),
+        border: pixel_border(GREEN_DIM),
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
 // ── Containers ─────────────────────────────────────────────────
 
 pub fn pixel_container(_theme: &Theme) -> container::Style {
