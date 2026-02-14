@@ -43,6 +43,7 @@ impl DmaBufBuffer {
         width: u32,
         height: u32,
         format: pw::spa::param::video::VideoFormat,
+        modifier: u64,
     ) -> Result<Self, DmaBufError> {
         let datas = buffer.datas_mut();
 
@@ -82,7 +83,8 @@ impl DmaBufBuffer {
             DmaBufError::UnsupportedFormat(format!("Format {:?} not supported for DMA-BUF", format))
         })?;
 
-        let modifier = drm_fourcc::DrmModifier::Linear.into();
+        // Use the real modifier from PipeWire's negotiated format.
+        // A value of 0 means DRM_FORMAT_MOD_LINEAR.
 
         Ok(DmaBufBuffer {
             fd,

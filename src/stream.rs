@@ -214,8 +214,15 @@ fn try_process_dmabuf(
         user_data.format.size().width,
         user_data.format.size().height,
         user_data.format.format(),
+        user_data.format.modifier(),
     )
     .ok()?;
+
+    // SPA_VIDEO_FLAG_MODIFIER (1 << 2) indicates the modifier was explicitly negotiated.
+    // Without this flag, modifier() returns 0 but the buffer may actually use GPU-native tiling.
+    const SPA_VIDEO_FLAG_MODIFIER: u32 = 1 << 2;
+    let flags_raw = user_data.format.flags().bits();
+    let modifier_negotiated = (flags_raw & SPA_VIDEO_FLAG_MODIFIER) != 0;
 
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -225,16 +232,23 @@ fn try_process_dmabuf(
             stride = dmabuf.stride,
             width = dmabuf.width,
             height = dmabuf.height,
+            modifier = format!("0x{:x}", dmabuf.modifier),
+            modifier_negotiated,
+            flags = format!("0x{:x}", flags_raw),
             "DMA-BUF detected"
         );
     });
 
-    // Check if the format is directly importable into Vulkan and modifier is linear
-    let is_linear = dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Linear)
-        || dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Invalid);
+    // Check if the format is directly importable into Vulkan and modifier is linear.
+    // Only trust the modifier value if it was explicitly negotiated (SPA_VIDEO_FLAG_MODIFIER set).
+    // Without explicit negotiation, the buffer may use GPU-native tiling even though modifier==0.
+    let modifier_is_linear = modifier_negotiated
+        && (dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Linear)
+            || dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Invalid));
     let is_importable = vulkan_dmabuf::is_importable_format(dmabuf.format);
+    let vulkan_available = vulkan_dmabuf::is_dmabuf_import_available();
 
-    if is_linear && is_importable && vulkan_dmabuf::is_dmabuf_import_available() {
+    if modifier_is_linear && is_importable && vulkan_available {
         // Zero-copy path: dup the fd and send DMA-BUF metadata directly
         let duped_fd = match nix::unistd::dup(dmabuf.fd) {
             Ok(fd) => unsafe { OwnedFd::from_raw_fd(fd) },
@@ -248,8 +262,8 @@ fn try_process_dmabuf(
         ONCE_ZEROCOPY.call_once(|| {
             info!(
                 format = ?dmabuf.format,
-                modifier = dmabuf.modifier,
-                "DMA-BUF zero-copy Vulkan import path active"
+                modifier = format!("0x{:x}", dmabuf.modifier),
+                "Using DMA-BUF zero-copy Vulkan import path"
             );
         });
 
@@ -265,6 +279,25 @@ fn try_process_dmabuf(
     }
 
     // Non-importable format or non-linear modifier: use GStreamer conversion
+    static ONCE_GSTREAMER: std::sync::Once = std::sync::Once::new();
+    ONCE_GSTREAMER.call_once(|| {
+        let reason = if !modifier_negotiated {
+            "modifier not explicitly negotiated (may be tiled)"
+        } else if !modifier_is_linear {
+            "non-linear modifier"
+        } else if !is_importable {
+            "format not directly importable to Vulkan"
+        } else {
+            "Vulkan DMA-BUF import previously failed"
+        };
+        info!(
+            format = ?dmabuf.format,
+            modifier = format!("0x{:x}", dmabuf.modifier),
+            modifier_negotiated,
+            reason,
+            "Using GStreamer CPU conversion path (DMA-BUF available but not zero-copy eligible)"
+        );
+    });
     try_process_dmabuf_gstreamer(&dmabuf, user_data)
 }
 
@@ -296,7 +329,7 @@ fn try_process_dmabuf_gstreamer(
 fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) -> Option<FrameData> {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        warn!("DMA-BUF not available, using CPU copy fallback");
+        warn!("Using CPU memory copy path (no DMA-BUF available)");
     });
 
     let datas = buffer.datas_mut();

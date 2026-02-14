@@ -211,9 +211,27 @@ pub unsafe fn import_dmabuf_texture(
             DmaBufImportError::NoCompatibleMemoryType
         })?;
 
+        // Get the actual DMA-BUF size via lseek. When importing external memory,
+        // the allocation size must match the actual buffer size, not mem_reqs.size.
+        let dmabuf_size = nix::unistd::lseek(import_fd, 0, nix::unistd::Whence::SeekEnd)
+            .map(|s| s as u64)
+            .unwrap_or(0);
+        // Reset seek position
+        let _ = nix::unistd::lseek(import_fd, 0, nix::unistd::Whence::SeekSet);
+
+        // Use the actual DMA-BUF size if available, otherwise fall back to mem_reqs.size.
+        // The allocation size must be >= mem_reqs.size for the image to be usable.
+        let allocation_size = if dmabuf_size > 0 {
+            dmabuf_size.max(mem_reqs.size)
+        } else {
+            mem_reqs.size
+        };
+
         debug!(
             memory_type_index,
-            allocation_size = mem_reqs.size,
+            mem_reqs_size = mem_reqs.size,
+            dmabuf_size,
+            allocation_size,
             "Importing DMA-BUF memory"
         );
 
@@ -226,7 +244,7 @@ pub unsafe fn import_dmabuf_texture(
 
         let alloc_info = vk::MemoryAllocateInfo::default()
             .push_next(&mut import_info)
-            .allocation_size(mem_reqs.size)
+            .allocation_size(allocation_size)
             .memory_type_index(memory_type_index as u32);
 
         let memory = unsafe {
