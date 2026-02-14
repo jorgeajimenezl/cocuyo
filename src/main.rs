@@ -64,7 +64,9 @@ fn main() -> iced::Result {
     .title(Cocuyo::title)
     .theme(Cocuyo::theme)
     .subscription(Cocuyo::subscription)
-    .default_font(iced::Font::MONOSPACE)
+    .font(include_bytes!("../assets/fonts/Geist-Regular.otf").as_slice())
+    .font(include_bytes!("../assets/fonts/GeistPixel-Circle.otf").as_slice())
+    .default_font(iced::Font::with_name("Geist"))
     .run()
 }
 

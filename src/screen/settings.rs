@@ -13,10 +13,13 @@ pub fn view<'a>(
     available_backends: &'a [GpuBackend],
     selected_backend: Option<&'a GpuBackend>,
 ) -> Element<'a, Message> {
-    let heading = text("Settings").size(24).color(theme::GREEN);
+    let heading = text("Settings")
+        .size(24)
+        .color(theme::ACCENT)
+        .font(theme::HEADING_FONT);
 
     let backend_section = column![
-        text("Video Processing").size(18).color(theme::GREEN),
+        text("Video Processing").size(18).color(theme::ACCENT),
         pick_list(
             available_backends,
             selected_backend,
@@ -28,7 +31,7 @@ pub fn view<'a>(
                 Message::BackendSelected(idx)
             },
         )
-        .style(theme::pixel_pick_list),
+        .style(theme::styled_pick_list),
         text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")
             .size(12)
             .color(theme::TEXT_DIM),
@@ -37,7 +40,7 @@ pub fn view<'a>(
 
     column![
         title_bar::view(window_id, "Settings"),
-        rule::horizontal(1).style(theme::pixel_rule),
+        rule::horizontal(1).style(theme::styled_rule),
         container(
             column![heading, backend_section]
                 .spacing(20)
@@ -46,7 +49,7 @@ pub fn view<'a>(
         )
         .width(Fill)
         .height(Fill)
-        .style(theme::pixel_container),
+        .style(theme::styled_container),
     ]
     .width(Fill)
     .height(Fill)

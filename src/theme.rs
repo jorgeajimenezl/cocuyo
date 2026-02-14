@@ -1,74 +1,80 @@
 use iced::widget::{button, container, pick_list, rule};
-use iced::{color, Background, Border, Color, Shadow, Theme};
+use iced::{color, Background, Border, Color, Font, Shadow, Theme};
 
-// ── Color palette ──────────────────────────────────────────────
+// ── Heading font ─────────────────────────────────────────────
 
-pub const BG: Color = color!(0x0a0a0a);
-pub const BG_SECONDARY: Color = color!(0x141414);
-pub const GREEN: Color = color!(0x00ff41);
-pub const GREEN_DIM: Color = color!(0x00aa2a);
-pub const GREEN_DARK: Color = color!(0x004d1a);
-pub const RED: Color = color!(0xff3333);
-pub const YELLOW: Color = color!(0xcccc00);
-pub const TEXT_DIM: Color = color!(0x00aa2a);
+pub const HEADING_FONT: Font = Font::with_name("Geist Pixel Circle");
 
-// ── Theme constructor ──────────────────────────────────────────
+// ── Color palette ────────────────────────────────────────────
+
+pub const BG: Color = color!(0x2b292d);
+pub const BG_SECONDARY: Color = color!(0x242226);
+pub const TEXT: Color = color!(0xfecdb2);
+pub const TEXT_DIM: Color = color!(0xab8a79);
+pub const ACCENT: Color = color!(0xf6b6c9);
+pub const ACCENT_DIM: Color = color!(0x7d6e76);
+pub const BORDER: Color = color!(0x4f474d);
+pub const DANGER: Color = color!(0xe06b75);
+pub const WARNING: Color = color!(0xffa07a);
+pub const SUCCESS: Color = color!(0xb1b695);
+
+// ── Theme constructor ────────────────────────────────────────
 
 pub fn create_theme() -> Theme {
     Theme::custom(
         "Cocuyo".to_string(),
         iced::theme::Palette {
             background: BG,
-            text: GREEN,
-            primary: GREEN,
-            success: GREEN,
-            warning: YELLOW,
-            danger: RED,
+            text: TEXT,
+            primary: ACCENT,
+            success: SUCCESS,
+            warning: WARNING,
+            danger: DANGER,
         },
     )
 }
 
-// ── Pixel border helper ────────────────────────────────────────
+// ── Rounded border helper ────────────────────────────────────
 
-fn pixel_border(color: Color) -> Border {
+fn rounded_border(color: Color, radius: f32) -> Border {
     Border {
-        radius: 0.0.into(),
+        radius: radius.into(),
         width: 1.0,
         color,
     }
 }
 
-// ── Button ─────────────────────────────────────────────────────
+// ── Button ───────────────────────────────────────────────────
 
-pub fn pixel_button(_theme: &Theme, status: button::Status) -> button::Style {
+pub fn styled_button(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
-            background: Some(Background::Color(BG)),
-            text_color: GREEN,
-            border: pixel_border(GREEN_DIM),
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: TEXT,
+            border: rounded_border(BORDER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Hovered => button::Style {
-            background: Some(Background::Color(GREEN)),
+            background: Some(Background::Color(ACCENT)),
             text_color: BG,
-            border: pixel_border(GREEN),
+            border: rounded_border(ACCENT, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Pressed => button::Style {
-            background: Some(Background::Color(GREEN_DIM)),
+            background: Some(Background::Color(ACCENT_DIM)),
             text_color: BG,
-            border: pixel_border(GREEN),
+            border: rounded_border(ACCENT, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Disabled => button::Style {
-            background: Some(Background::Color(BG)),
-            text_color: GREEN_DARK,
-            border: pixel_border(GREEN_DARK),
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: ACCENT_DIM,
+            border: rounded_border(BORDER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
     }
 }
@@ -76,71 +82,71 @@ pub fn pixel_button(_theme: &Theme, status: button::Status) -> button::Style {
 pub fn close_button(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
-            background: Some(Background::Color(BG)),
-            text_color: GREEN,
-            border: pixel_border(GREEN_DIM),
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: TEXT,
+            border: rounded_border(BORDER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Hovered => button::Style {
-            background: Some(Background::Color(RED)),
+            background: Some(Background::Color(DANGER)),
             text_color: BG,
-            border: pixel_border(RED),
+            border: rounded_border(DANGER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Pressed => button::Style {
-            background: Some(Background::Color(color!(0xaa2222))),
+            background: Some(Background::Color(color!(0xaa4444))),
             text_color: BG,
-            border: pixel_border(RED),
+            border: rounded_border(DANGER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
         button::Status::Disabled => button::Style {
-            background: Some(Background::Color(BG)),
-            text_color: GREEN_DARK,
-            border: pixel_border(GREEN_DARK),
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: ACCENT_DIM,
+            border: rounded_border(BORDER, 6.0),
             shadow: Shadow::default(),
-            snap: true,
+            snap: false,
         },
     }
 }
 
 pub fn title_bar_container(_theme: &Theme) -> container::Style {
     container::Style {
-        text_color: Some(GREEN),
+        text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
         border: Border::default(),
         shadow: Shadow::default(),
-        snap: true,
+        snap: false,
     }
 }
 
 pub fn window_border_container(_theme: &Theme) -> container::Style {
     container::Style {
-        text_color: Some(GREEN),
+        text_color: Some(TEXT),
         background: Some(Background::Color(BG)),
-        border: pixel_border(GREEN_DIM),
+        border: rounded_border(BORDER, 8.0),
         shadow: Shadow::default(),
-        snap: true,
+        snap: false,
     }
 }
 
-// ── Containers ─────────────────────────────────────────────────
+// ── Containers ───────────────────────────────────────────────
 
-pub fn pixel_container(_theme: &Theme) -> container::Style {
+pub fn styled_container(_theme: &Theme) -> container::Style {
     container::Style {
-        text_color: Some(GREEN),
+        text_color: Some(TEXT),
         background: Some(Background::Color(BG)),
         border: Border::default(),
         shadow: Shadow::default(),
-        snap: true,
+        snap: false,
     }
 }
 
 pub fn menu_bar_container(_theme: &Theme) -> container::Style {
     container::Style {
-        text_color: Some(GREEN),
+        text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
         border: Border {
             radius: 0.0.into(),
@@ -148,13 +154,13 @@ pub fn menu_bar_container(_theme: &Theme) -> container::Style {
             color: Color::TRANSPARENT,
         },
         shadow: Shadow::default(),
-        snap: true,
+        snap: false,
     }
 }
 
 pub fn status_bar_container(_theme: &Theme) -> container::Style {
     container::Style {
-        text_color: Some(GREEN),
+        text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
         border: Border {
             radius: 0.0.into(),
@@ -162,34 +168,34 @@ pub fn status_bar_container(_theme: &Theme) -> container::Style {
             color: Color::TRANSPARENT,
         },
         shadow: Shadow::default(),
-        snap: true,
+        snap: false,
     }
 }
 
-// ── Rule ───────────────────────────────────────────────────────
+// ── Rule ─────────────────────────────────────────────────────
 
-pub fn pixel_rule(_theme: &Theme) -> rule::Style {
+pub fn styled_rule(_theme: &Theme) -> rule::Style {
     rule::Style {
-        color: GREEN_DIM,
+        color: BORDER,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
-        snap: true,
+        snap: false,
     }
 }
 
-// ── PickList ───────────────────────────────────────────────────
+// ── PickList ─────────────────────────────────────────────────
 
-pub fn pixel_pick_list(_theme: &Theme, status: pick_list::Status) -> pick_list::Style {
+pub fn styled_pick_list(_theme: &Theme, status: pick_list::Status) -> pick_list::Style {
     let border_color = match status {
-        pick_list::Status::Active => GREEN_DIM,
-        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => GREEN,
+        pick_list::Status::Active => BORDER,
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => ACCENT,
     };
 
     pick_list::Style {
-        text_color: GREEN,
-        placeholder_color: GREEN_DARK,
-        handle_color: GREEN,
+        text_color: TEXT,
+        placeholder_color: ACCENT_DIM,
+        handle_color: TEXT,
         background: Background::Color(BG_SECONDARY),
-        border: pixel_border(border_color),
+        border: rounded_border(border_color, 6.0),
     }
 }

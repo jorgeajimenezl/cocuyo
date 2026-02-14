@@ -9,22 +9,22 @@ use crate::widget::Element;
 pub fn view<'a>(window_id: window::Id, title: &str) -> Element<'a, Message> {
     let title_text = text(title.to_string())
         .size(14)
-        .color(theme::GREEN);
+        .color(theme::TEXT);
 
     let minimize_btn = button(text("_").size(12))
         .on_press(Message::MinimizeWindow(window_id))
-        .style(theme::pixel_button)
-        .padding([2, 8]);
+        .style(theme::styled_button)
+        .padding([4, 10]);
 
     let maximize_btn = button(text("\u{25a1}").size(12))
         .on_press(Message::MaximizeWindow(window_id))
-        .style(theme::pixel_button)
-        .padding([2, 8]);
+        .style(theme::styled_button)
+        .padding([4, 10]);
 
     let close_btn = button(text("\u{2715}").size(12))
         .on_press(Message::CloseWindow(window_id))
         .style(theme::close_button)
-        .padding([2, 8]);
+        .padding([4, 10]);
 
     let bar = row![
         title_text,
@@ -35,7 +35,7 @@ pub fn view<'a>(window_id: window::Id, title: &str) -> Element<'a, Message> {
     ]
     .spacing(4)
     .align_y(iced::Center)
-    .padding([4, 8]);
+    .padding([6, 12]);
 
     let bar_container = container(bar)
         .width(Fill)

@@ -16,7 +16,7 @@ pub fn view<'a>(window_id: window::Id, frame: Option<&FrameData>) -> Element<'a,
             .into(),
         None => center(
             column![
-                text("Waiting for capture...").size(24).color(theme::GREEN),
+                text("Waiting for capture...").size(24).color(theme::TEXT),
                 text("Start recording to see the preview")
                     .size(14)
                     .color(theme::TEXT_DIM),
@@ -29,7 +29,7 @@ pub fn view<'a>(window_id: window::Id, frame: Option<&FrameData>) -> Element<'a,
 
     column![
         title_bar::view(window_id, "Preview"),
-        rule::horizontal(1).style(theme::pixel_rule),
+        rule::horizontal(1).style(theme::styled_rule),
         content,
     ]
     .width(Fill)
