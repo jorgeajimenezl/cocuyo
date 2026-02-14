@@ -56,10 +56,10 @@ pub fn is_importable_format(format: DrmFourcc) -> bool {
 /// Maps a DRM fourcc format to the corresponding Vulkan format.
 fn drm_to_vk_format(format: DrmFourcc) -> Option<vk::Format> {
     match format {
-        DrmFourcc::Xrgb8888 => Some(vk::Format::B8G8R8A8_UNORM), // BGRx
-        DrmFourcc::Argb8888 => Some(vk::Format::B8G8R8A8_UNORM), // BGRa
-        DrmFourcc::Abgr8888 => Some(vk::Format::R8G8B8A8_UNORM), // RGBA
-        DrmFourcc::Xbgr8888 => Some(vk::Format::R8G8B8A8_UNORM), // RGBx
+        DrmFourcc::Xrgb8888 => Some(vk::Format::B8G8R8A8_SRGB), // BGRx
+        DrmFourcc::Argb8888 => Some(vk::Format::B8G8R8A8_SRGB), // BGRa
+        DrmFourcc::Abgr8888 => Some(vk::Format::R8G8B8A8_SRGB), // RGBA
+        DrmFourcc::Xbgr8888 => Some(vk::Format::R8G8B8A8_SRGB), // RGBx
         _ => None,
     }
 }
@@ -67,8 +67,8 @@ fn drm_to_vk_format(format: DrmFourcc) -> Option<vk::Format> {
 /// Maps a DRM fourcc format to the corresponding wgpu TextureFormat.
 pub fn drm_to_wgpu_format(format: DrmFourcc) -> Option<wgpu::TextureFormat> {
     match format {
-        DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => Some(wgpu::TextureFormat::Bgra8Unorm),
-        DrmFourcc::Abgr8888 | DrmFourcc::Xbgr8888 => Some(wgpu::TextureFormat::Rgba8Unorm),
+        DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+        DrmFourcc::Abgr8888 | DrmFourcc::Xbgr8888 => Some(wgpu::TextureFormat::Rgba8UnormSrgb),
         _ => None,
     }
 }
