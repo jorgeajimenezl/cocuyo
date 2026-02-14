@@ -30,7 +30,7 @@ pub fn view<'a>(
     let content = {
         let heading = text("Cocuyo")
             .size(28)
-            .color(theme::ACCENT)
+            .color(theme::TEXT)
             .font(theme::HEADING_FONT);
         let subtitle = text("Screen capture via PipeWire")
             .size(14)

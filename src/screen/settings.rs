@@ -13,13 +13,8 @@ pub fn view<'a>(
     available_backends: &'a [GpuBackend],
     selected_backend: Option<&'a GpuBackend>,
 ) -> Element<'a, Message> {
-    let heading = text("Settings")
-        .size(24)
-        .color(theme::ACCENT)
-        .font(theme::HEADING_FONT);
-
     let backend_section = column![
-        text("Video Processing").size(18).color(theme::ACCENT),
+        text("Video Processing").size(18).color(theme::TEXT),
         pick_list(
             available_backends,
             selected_backend,
@@ -42,7 +37,7 @@ pub fn view<'a>(
         title_bar::view(window_id, "Settings"),
         rule::horizontal(1).style(theme::styled_rule),
         container(
-            column![heading, backend_section]
+            column![backend_section]
                 .spacing(20)
                 .width(Fill)
                 .padding(padding::all(20)),
