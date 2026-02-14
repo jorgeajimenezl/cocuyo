@@ -1,16 +1,16 @@
-use iced::widget::{center, column, image, rule, text};
+use iced::widget::{center, column, rule, shader, text};
 use iced::window;
-use iced::{Center, ContentFit, Fill};
+use iced::{Center, Fill};
 
 use crate::app::{FrameData, Message};
 use crate::screen::title_bar;
+use crate::screen::video_shader::VideoScene;
 use crate::theme;
 use crate::widget::Element;
 
 pub fn view<'a>(window_id: window::Id, frame: Option<&FrameData>) -> Element<'a, Message> {
     let content: Element<'a, Message> = match frame {
-        Some(f) => image(image::Handle::from_rgba(f.width, f.height, f.data.clone()))
-            .content_fit(ContentFit::Contain)
+        Some(f) => shader(VideoScene::new(Some(f)))
             .width(Fill)
             .height(Fill)
             .into(),

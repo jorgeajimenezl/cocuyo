@@ -12,6 +12,7 @@ mod gst_pipeline;
 mod screen;
 mod stream;
 mod theme;
+mod vulkan_dmabuf;
 mod widget;
 
 use app::{Cocuyo, FrameData, RecordingState};

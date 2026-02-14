@@ -1,4 +1,4 @@
-use std::os::fd::OwnedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 use crate::app::FrameData;
 use crate::dmabuf_handler;
 use crate::gst_pipeline::{self, GpuBackend};
+use crate::vulkan_dmabuf;
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -224,10 +225,53 @@ fn try_process_dmabuf(
             stride = dmabuf.stride,
             width = dmabuf.width,
             height = dmabuf.height,
-            "DMA-BUF zero-copy enabled"
+            "DMA-BUF detected"
         );
     });
 
+    // Check if the format is directly importable into Vulkan and modifier is linear
+    let is_linear = dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Linear)
+        || dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Invalid);
+    let is_importable = vulkan_dmabuf::is_importable_format(dmabuf.format);
+
+    if is_linear && is_importable && vulkan_dmabuf::is_dmabuf_import_available() {
+        // Zero-copy path: dup the fd and send DMA-BUF metadata directly
+        let duped_fd = match nix::unistd::dup(dmabuf.fd) {
+            Ok(fd) => unsafe { OwnedFd::from_raw_fd(fd) },
+            Err(e) => {
+                warn!(error = %e, "Failed to dup DMA-BUF fd, falling back to GStreamer");
+                return try_process_dmabuf_gstreamer(&dmabuf, user_data);
+            }
+        };
+
+        static ONCE_ZEROCOPY: std::sync::Once = std::sync::Once::new();
+        ONCE_ZEROCOPY.call_once(|| {
+            info!(
+                format = ?dmabuf.format,
+                modifier = dmabuf.modifier,
+                "DMA-BUF zero-copy Vulkan import path active"
+            );
+        });
+
+        return Some(FrameData::DmaBuf {
+            fd: duped_fd,
+            width: dmabuf.width,
+            height: dmabuf.height,
+            drm_format: dmabuf.format,
+            stride: dmabuf.stride,
+            offset: dmabuf.offset,
+            modifier: dmabuf.modifier,
+        });
+    }
+
+    // Non-importable format or non-linear modifier: use GStreamer conversion
+    try_process_dmabuf_gstreamer(&dmabuf, user_data)
+}
+
+fn try_process_dmabuf_gstreamer(
+    dmabuf: &dmabuf_handler::DmaBufBuffer,
+    user_data: &mut UserData,
+) -> Option<FrameData> {
     let buffer_size = (dmabuf.stride * dmabuf.height) as usize;
     let converter = user_data.gst_converter.as_mut()?;
 
@@ -237,11 +281,10 @@ fn try_process_dmabuf(
     }
 
     match converter.pull_rgba_frame() {
-        Ok(data) => Some(FrameData {
+        Ok(data) => Some(FrameData::Cpu {
             data,
             width: user_data.format.size().width,
             height: user_data.format.size().height,
-            format: spa::param::video::VideoFormat::RGBA,
         }),
         Err(e) => {
             error!(error = %e, "Failed to convert DMA-BUF frame");
@@ -288,15 +331,10 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
         slice.to_vec()
     };
 
-    Some(FrameData {
+    Some(FrameData::Cpu {
         data: converted_data,
         width: user_data.format.size().width,
         height: user_data.format.size().height,
-        format: if user_data.gst_converter.is_some() {
-            spa::param::video::VideoFormat::RGBA
-        } else {
-            user_data.format.format()
-        },
     })
 }
 

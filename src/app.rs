@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
-use pipewire::spa;
 
 use crate::gst_pipeline::GpuBackend;
 use crate::screen::WindowKind;
@@ -20,12 +21,39 @@ pub enum RecordingState {
     Error(String),
 }
 
-#[derive(Clone)]
-pub struct FrameData {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub format: spa::param::video::VideoFormat,
+pub enum FrameData {
+    DmaBuf {
+        fd: OwnedFd,
+        width: u32,
+        height: u32,
+        drm_format: DrmFourcc,
+        stride: u32,
+        #[allow(dead_code)]
+        offset: u32,
+        #[allow(dead_code)]
+        modifier: u64,
+    },
+    Cpu {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+}
+
+impl FrameData {
+    pub fn width(&self) -> u32 {
+        match self {
+            FrameData::DmaBuf { width, .. } => *width,
+            FrameData::Cpu { width, .. } => *width,
+        }
+    }
+
+    pub fn height(&self) -> u32 {
+        match self {
+            FrameData::DmaBuf { height, .. } => *height,
+            FrameData::Cpu { height, .. } => *height,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +195,7 @@ impl Cocuyo {
         let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
                 let state = self.recording_state.lock().unwrap().clone();
-                let frame_info = self.current_frame.as_ref().map(|f| (f.width, f.height));
+                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
                 crate::screen::main_window::view(window_id, &state, frame_info)
             }
             Some(WindowKind::Settings) => {
