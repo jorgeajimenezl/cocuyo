@@ -1,6 +1,5 @@
 use std::os::fd::{FromRawFd, OwnedFd};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ashpd::desktop::{
     PersistMode,
@@ -9,6 +8,22 @@ use ashpd::desktop::{
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use tracing::{debug, error, info, warn};
+
+/// Thread-safe handle for quitting a PipeWire mainloop.
+///
+/// `pw_main_loop_quit()` is thread-safe in the C API, but the Rust
+/// `MainLoop` wrapper uses `Rc` internally so it doesn't implement `Send`.
+/// This wrapper holds only the raw pointer needed to call quit.
+pub struct MainLoopQuitHandle(*mut pw::sys::pw_main_loop);
+
+unsafe impl Send for MainLoopQuitHandle {}
+unsafe impl Sync for MainLoopQuitHandle {}
+
+impl MainLoopQuitHandle {
+    pub fn quit(&self) {
+        unsafe { pw::sys::pw_main_loop_quit(self.0) };
+    }
+}
 
 use crate::app::FrameData;
 use crate::dmabuf_handler;
@@ -53,28 +68,15 @@ pub fn start_streaming(
     node_id: u32,
     fd: OwnedFd,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
-    stop_flag: Arc<AtomicBool>,
+    quit_handle: Arc<Mutex<Option<MainLoopQuitHandle>>>,
     selected_backend: GpuBackend,
 ) -> Result<(), pw::Error> {
     let mainloop = pw::main_loop::MainLoop::new(None)?;
     let context = pw::context::Context::new(&mainloop)?;
     let core = context.connect_fd(fd, None)?;
 
-    let timer = mainloop.loop_().add_timer(Box::new({
-        let stop_flag = stop_flag.clone();
-        let mainloop = mainloop.clone();
-        move |_| {
-            if stop_flag.load(Ordering::SeqCst) {
-                info!("Stop requested, quitting mainloop");
-                mainloop.quit();
-            }
-        }
-    }));
-
-    timer.update_timer(
-        Some(std::time::Duration::from_millis(100)),
-        Some(std::time::Duration::from_millis(100)),
-    );
+    // Store quit handle so the UI thread can stop the mainloop directly
+    *quit_handle.lock().unwrap() = Some(MainLoopQuitHandle(mainloop.as_raw_ptr()));
 
     let data = UserData {
         format: Default::default(),
@@ -127,6 +129,9 @@ pub fn start_streaming(
     info!("Connected stream (DMA-BUF mode)");
 
     mainloop.run();
+
+    // Clear the handle so it's not used after the mainloop exits
+    *quit_handle.lock().unwrap() = None;
 
     Ok(())
 }

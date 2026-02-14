@@ -1,8 +1,6 @@
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use pipewire as pw;
 use tracing::{error, info};
 
 mod app;
@@ -29,7 +27,7 @@ fn main() -> iced::Result {
     gstreamer::init().expect("Failed to initialize GStreamer");
     info!("GStreamer initialized");
 
-    pw::init();
+    pipewire::init();
 
     let available_backends = detect_available_backends();
     info!(
@@ -39,25 +37,25 @@ fn main() -> iced::Result {
 
     let recording_state = Arc::new(Mutex::new(RecordingState::Idle));
     let (start_recording_tx, start_recording_rx) = std::sync::mpsc::channel::<((), GpuBackend)>();
-    let stop_flag = Arc::new(AtomicBool::new(false));
+    let mainloop_quit: Arc<Mutex<Option<stream::MainLoopQuitHandle>>> = Arc::new(Mutex::new(None));
 
     let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
     let frame_receiver = Arc::new(Mutex::new(frame_receiver));
 
     spawn_recording_thread(
         start_recording_rx,
-        stop_flag.clone(),
+        mainloop_quit.clone(),
         recording_state.clone(),
         frame_sender,
     );
 
     let fr = frame_receiver.clone();
     let rs = recording_state.clone();
-    let sf = stop_flag.clone();
+    let ml = mainloop_quit.clone();
     let ab = available_backends.clone();
 
     iced::daemon(
-        move || Cocuyo::new(fr.clone(), rs.clone(), start_recording_tx.clone(), sf.clone(), ab.clone()),
+        move || Cocuyo::new(fr.clone(), rs.clone(), start_recording_tx.clone(), ml.clone(), ab.clone()),
         Cocuyo::update,
         Cocuyo::view,
     )
@@ -72,7 +70,7 @@ fn main() -> iced::Result {
 
 fn spawn_recording_thread(
     start_recording_rx: std::sync::mpsc::Receiver<((), GpuBackend)>,
-    stop_flag: Arc<AtomicBool>,
+    mainloop_quit: Arc<Mutex<Option<stream::MainLoopQuitHandle>>>,
     recording_state: Arc<Mutex<RecordingState>>,
     frame_sender: tokio::sync::mpsc::UnboundedSender<FrameData>,
 ) {
@@ -80,7 +78,6 @@ fn spawn_recording_thread(
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
         while let Ok(((), selected_backend)) = start_recording_rx.recv() {
-            stop_flag.store(false, Ordering::SeqCst);
             *recording_state.lock().unwrap() = RecordingState::Starting;
 
             info!(backend = %selected_backend, "Starting recording");
@@ -100,10 +97,9 @@ fn spawn_recording_thread(
                     *recording_state.lock().unwrap() = RecordingState::Recording;
 
                     let sender = frame_sender.clone();
-                    let stop = stop_flag.clone();
 
                     if let Err(e) =
-                        stream::start_streaming(node_id, fd, sender, stop, selected_backend)
+                        stream::start_streaming(node_id, fd, sender, mainloop_quit.clone(), selected_backend)
                     {
                         error!(error = %e, "PipeWire streaming error");
                         *recording_state.lock().unwrap() = RecordingState::Error(e.to_string());

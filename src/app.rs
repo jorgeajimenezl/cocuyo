@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::os::fd::OwnedFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,10 +7,12 @@ use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
-
 use crate::gst_pipeline::GpuBackend;
 use crate::screen::WindowKind;
+use crate::stream::MainLoopQuitHandle;
 use crate::widget::Element;
+
+type SharedMutex<T> = Arc<Mutex<T>>;
 
 #[derive(Clone, PartialEq)]
 pub enum RecordingState {
@@ -78,17 +79,17 @@ pub struct Cocuyo {
     current_frame: Option<FrameData>,
     recording_state: Arc<Mutex<RecordingState>>,
     start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-    stop_flag: Arc<AtomicBool>,
+    mainloop_quit: Arc<Mutex<Option<MainLoopQuitHandle>>>,
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
 }
 
 impl Cocuyo {
     pub fn new(
-        frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
-        recording_state: Arc<Mutex<RecordingState>>,
+        frame_receiver: SharedMutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
+        recording_state: SharedMutex<RecordingState>,
         start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-        stop_flag: Arc<AtomicBool>,
+        mainloop_quit: SharedMutex<Option<MainLoopQuitHandle>>,
         available_backends: Vec<GpuBackend>,
     ) -> (Self, Task<Message>) {
         let (id, open) = window::open(window::Settings {
@@ -105,7 +106,7 @@ impl Cocuyo {
             current_frame: None,
             recording_state,
             start_recording_tx,
-            stop_flag,
+            mainloop_quit,
             available_backends,
             selected_backend_index: 0,
         };
@@ -175,7 +176,9 @@ impl Cocuyo {
                 Task::none()
             }
             Message::StopRecording => {
-                self.stop_flag.store(true, Ordering::SeqCst);
+                if let Some(handle) = self.mainloop_quit.lock().unwrap().take() {
+                    handle.quit();
+                }
                 self.current_frame = None;
                 // Drain any remaining frames from the channel to avoid stale data
                 let mut receiver = self.frame_receiver.lock().unwrap();
