@@ -174,7 +174,9 @@ impl Cocuyo {
                 let selected = self.available_backends.get(self.selected_backend_index);
                 crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
-            Some(WindowKind::Preview) => crate::screen::preview::view(window_id),
+            Some(WindowKind::Preview) => {
+                crate::screen::preview::view(window_id, self.current_frame.as_ref())
+            }
             None => iced::widget::space().into(),
         };
 
