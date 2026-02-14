@@ -31,6 +31,10 @@ pub struct FrameData {
 pub enum Message {
     WindowOpened(window::Id, WindowKind),
     WindowClosed(window::Id),
+    DragWindow(window::Id),
+    CloseWindow(window::Id),
+    MinimizeWindow(window::Id),
+    MaximizeWindow(window::Id),
     OpenSettings,
     OpenPreview,
     StartRecording,
@@ -61,6 +65,7 @@ impl Cocuyo {
         let (id, open) = window::open(window::Settings {
             size: Size::new(800.0, 500.0),
             min_size: Some(Size::new(400.0, 300.0)),
+            decorations: false,
             ..Default::default()
         });
 
@@ -102,6 +107,10 @@ impl Cocuyo {
                     Task::none()
                 }
             }
+            Message::DragWindow(id) => window::drag(id),
+            Message::CloseWindow(id) => window::close(id),
+            Message::MinimizeWindow(id) => window::minimize(id, true),
+            Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings => {
                 if self.windows.values().any(|k| *k == WindowKind::Settings) {
                     return Task::none();
@@ -109,6 +118,7 @@ impl Cocuyo {
                 let (_id, open) = window::open(window::Settings {
                     size: Size::new(400.0, 300.0),
                     min_size: Some(Size::new(300.0, 200.0)),
+                    decorations: false,
                     ..Default::default()
                 });
                 open.map(|id| Message::WindowOpened(id, WindowKind::Settings))
@@ -120,6 +130,7 @@ impl Cocuyo {
                 let (_id, open) = window::open(window::Settings {
                     size: Size::new(800.0, 600.0),
                     min_size: Some(Size::new(320.0, 240.0)),
+                    decorations: false,
                     ..Default::default()
                 });
                 open.map(|id| Message::WindowOpened(id, WindowKind::Preview))
@@ -156,13 +167,13 @@ impl Cocuyo {
             Some(WindowKind::Main) => {
                 let state = self.recording_state.lock().unwrap().clone();
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width, f.height));
-                crate::screen::main_window::view(&state, frame_info)
+                crate::screen::main_window::view(window_id, &state, frame_info)
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
-                crate::screen::settings::view(&self.available_backends, selected)
+                crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
-            Some(WindowKind::Preview) => crate::screen::preview::view(),
+            Some(WindowKind::Preview) => crate::screen::preview::view(window_id),
             None => iced::widget::space().into(),
         }
     }

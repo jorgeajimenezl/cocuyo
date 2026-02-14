@@ -1,12 +1,15 @@
-use iced::widget::{column, container, pick_list, text};
+use iced::widget::{column, container, pick_list, rule, text};
+use iced::window;
 use iced::{Fill, padding};
 
 use crate::app::Message;
 use crate::gst_pipeline::GpuBackend;
+use crate::screen::title_bar;
 use crate::theme;
 use crate::widget::Element;
 
 pub fn view<'a>(
+    window_id: window::Id,
     available_backends: &'a [GpuBackend],
     selected_backend: Option<&'a GpuBackend>,
 ) -> Element<'a, Message> {
@@ -32,12 +35,18 @@ pub fn view<'a>(
     ]
     .spacing(10);
 
-    container(
-        column![heading, backend_section]
-            .spacing(20)
-            .width(Fill)
-            .padding(padding::all(20)),
-    )
-    .style(theme::pixel_container)
+    column![
+        title_bar::view(window_id, "Settings"),
+        rule::horizontal(1).style(theme::pixel_rule),
+        container(
+            column![heading, backend_section]
+                .spacing(20)
+                .width(Fill)
+                .padding(padding::all(20)),
+        )
+        .style(theme::pixel_container),
+    ]
+    .width(Fill)
+    .height(Fill)
     .into()
 }

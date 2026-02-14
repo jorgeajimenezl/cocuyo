@@ -73,6 +73,49 @@ pub fn pixel_button(_theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+pub fn close_button(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Active => button::Style {
+            background: Some(Background::Color(BG)),
+            text_color: GREEN,
+            border: pixel_border(GREEN_DIM),
+            shadow: Shadow::default(),
+            snap: true,
+        },
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(RED)),
+            text_color: BG,
+            border: pixel_border(RED),
+            shadow: Shadow::default(),
+            snap: true,
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(color!(0xaa2222))),
+            text_color: BG,
+            border: pixel_border(RED),
+            shadow: Shadow::default(),
+            snap: true,
+        },
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(BG)),
+            text_color: GREEN_DARK,
+            border: pixel_border(GREEN_DARK),
+            shadow: Shadow::default(),
+            snap: true,
+        },
+    }
+}
+
+pub fn title_bar_container(_theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(GREEN),
+        background: Some(Background::Color(BG_SECONDARY)),
+        border: Border::default(),
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
 // ── Containers ─────────────────────────────────────────────────
 
 pub fn pixel_container(_theme: &Theme) -> container::Style {

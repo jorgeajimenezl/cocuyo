@@ -1,11 +1,14 @@
 use iced::widget::{button, center, column, container, row, rule, text};
+use iced::window;
 use iced::{Center, Fill};
 
 use crate::app::{Message, RecordingState};
+use crate::screen::title_bar;
 use crate::theme;
 use crate::widget::Element;
 
 pub fn view<'a>(
+    window_id: window::Id,
     recording_state: &RecordingState,
     frame_info: Option<(u32, u32)>,
 ) -> Element<'a, Message> {
@@ -86,6 +89,8 @@ pub fn view<'a>(
     };
 
     column![
+        title_bar::view(window_id, "Cocuyo"),
+        rule::horizontal(1).style(theme::pixel_rule),
         menu_bar,
         rule::horizontal(1).style(theme::pixel_rule),
         content,
