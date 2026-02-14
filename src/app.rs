@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
+use std::time::Duration;
 
 use drm_fourcc::DrmFourcc;
 use iced::widget::container;
@@ -18,6 +19,13 @@ pub enum RecordingState {
     Starting,
     Recording,
     Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct BulbInfo {
+    pub mac: String,
+    pub ip: std::net::IpAddr,
+    pub name: Option<String>,
 }
 
 impl std::fmt::Debug for FrameData {
@@ -89,6 +97,9 @@ pub enum Message {
     StopRecording,
     BackendSelected(usize),
     RecordingEvent(RecordingEvent),
+    ScanBulbs,
+    BulbsDiscovered(Vec<BulbInfo>),
+    ToggleBulb(String),
 }
 
 pub struct Cocuyo {
@@ -100,6 +111,9 @@ pub struct Cocuyo {
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
+    discovered_bulbs: Vec<BulbInfo>,
+    selected_bulbs: HashSet<String>,
+    is_scanning: bool,
 }
 
 impl Cocuyo {
@@ -123,6 +137,9 @@ impl Cocuyo {
             available_backends,
             selected_backend_index: 0,
             recording_cmd_tx: None,
+            discovered_bulbs: Vec::new(),
+            selected_bulbs: HashSet::new(),
+            is_scanning: false,
         };
 
         (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
@@ -196,6 +213,40 @@ impl Cocuyo {
                 self.selected_backend_index = idx;
                 Task::none()
             }
+            Message::ScanBulbs => {
+                self.is_scanning = true;
+                self.discovered_bulbs.clear();
+                Task::perform(
+                    async {
+                        match wiz_lights_rs::discover_bulbs(Duration::from_secs(5)).await {
+                            Ok(bulbs) => bulbs
+                                .into_iter()
+                                .map(|b| BulbInfo {
+                                    ip: std::net::IpAddr::V4(b.ip),
+                                    mac: b.mac.clone(),
+                                    name: None,
+                                })
+                                .collect(),
+                            Err(e) => {
+                                tracing::error!(error = %e, "Bulb discovery failed");
+                                Vec::new()
+                            }
+                        }
+                    },
+                    Message::BulbsDiscovered,
+                )
+            }
+            Message::BulbsDiscovered(bulbs) => {
+                self.is_scanning = false;
+                self.discovered_bulbs = bulbs;
+                Task::none()
+            }
+            Message::ToggleBulb(mac) => {
+                if !self.selected_bulbs.remove(&mac) {
+                    self.selected_bulbs.insert(mac);
+                }
+                Task::none()
+            }
             Message::RecordingEvent(event) => {
                 match event {
                     RecordingEvent::Ready(cmd_tx) => {
@@ -220,15 +271,25 @@ impl Cocuyo {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
-                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
-                crate::screen::main_window::view(window_id, &self.recording_state, frame_info)
+                crate::screen::main_window::view(
+                    window_id,
+                    &self.discovered_bulbs,
+                    &self.selected_bulbs,
+                    self.is_scanning,
+                )
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
                 crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
             Some(WindowKind::Preview) => {
-                crate::screen::preview::view(window_id, self.current_frame.as_ref().map(|f| f.as_ref()))
+                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
+                crate::screen::preview::view(
+                    window_id,
+                    self.current_frame.as_ref().map(|f| f.as_ref()),
+                    &self.recording_state,
+                    frame_info,
+                )
             }
             None => iced::widget::space().into(),
         };
