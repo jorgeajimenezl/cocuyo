@@ -19,6 +19,11 @@ pub fn mark_dmabuf_import_failed() {
     DMABUF_IMPORT_FAILED.store(true, Ordering::Relaxed);
 }
 
+/// Reset the DMA-BUF import failure flag, allowing zero-copy import to be retried.
+pub fn reset_dmabuf_import_failed() {
+    DMABUF_IMPORT_FAILED.store(false, Ordering::Relaxed);
+}
+
 #[derive(Debug)]
 pub enum DmaBufImportError {
     UnsupportedFormat(DrmFourcc),

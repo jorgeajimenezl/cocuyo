@@ -170,11 +170,16 @@ impl Cocuyo {
                     .get(self.selected_backend_index)
                     .cloned()
                     .unwrap_or(GpuBackend::Cpu);
+                crate::vulkan_dmabuf::reset_dmabuf_import_failed();
                 let _ = self.start_recording_tx.send(((), backend));
                 Task::none()
             }
             Message::StopRecording => {
                 self.stop_flag.store(true, Ordering::SeqCst);
+                self.current_frame = None;
+                // Drain any remaining frames from the channel to avoid stale data
+                let mut receiver = self.frame_receiver.lock().unwrap();
+                while receiver.try_recv().is_ok() {}
                 Task::none()
             }
             Message::BackendSelected(idx) => {

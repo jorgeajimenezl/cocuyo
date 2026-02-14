@@ -1,4 +1,4 @@
-use std::os::fd::IntoRawFd;
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -93,7 +93,7 @@ fn spawn_recording_thread(
 
                     info!(
                         node_id = node_id,
-                        fd = fd.try_clone().unwrap().into_raw_fd(),
+                        fd = fd.as_raw_fd(),
                         "PipeWire stream connected"
                     );
 
