@@ -168,7 +168,7 @@ impl Cocuyo {
     }
 
     pub fn theme(&self, _window_id: window::Id) -> Theme {
-        Theme::Dark
+        crate::theme::create_theme()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

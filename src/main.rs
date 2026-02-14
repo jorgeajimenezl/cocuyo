@@ -11,6 +11,7 @@ mod formats;
 mod gst_pipeline;
 mod screen;
 mod stream;
+mod theme;
 mod widget;
 
 use app::{Cocuyo, FrameData, RecordingState};
@@ -62,6 +63,7 @@ fn main() -> iced::Result {
     .title(Cocuyo::title)
     .theme(Cocuyo::theme)
     .subscription(Cocuyo::subscription)
+    .default_font(iced::Font::MONOSPACE)
     .run()
 }
 
