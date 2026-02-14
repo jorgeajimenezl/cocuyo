@@ -5,6 +5,8 @@ use ash::vk;
 use drm_fourcc::DrmFourcc;
 use tracing::debug;
 
+use crate::formats;
+
 /// Global flag: once DMA-BUF import fails, stop trying for all subsequent frames.
 static DMABUF_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -53,31 +55,6 @@ impl std::fmt::Display for DmaBufImportError {
 
 impl std::error::Error for DmaBufImportError {}
 
-/// Returns whether a DRM format can be directly imported into Vulkan as a 2D texture.
-pub fn is_importable_format(format: DrmFourcc) -> bool {
-    drm_to_vk_format(format).is_some()
-}
-
-/// Maps a DRM fourcc format to the corresponding Vulkan format.
-fn drm_to_vk_format(format: DrmFourcc) -> Option<vk::Format> {
-    match format {
-        DrmFourcc::Xrgb8888 => Some(vk::Format::B8G8R8A8_SRGB), // BGRx
-        DrmFourcc::Argb8888 => Some(vk::Format::B8G8R8A8_SRGB), // BGRa
-        DrmFourcc::Abgr8888 => Some(vk::Format::R8G8B8A8_SRGB), // RGBA
-        DrmFourcc::Xbgr8888 => Some(vk::Format::R8G8B8A8_SRGB), // RGBx
-        _ => None,
-    }
-}
-
-/// Maps a DRM fourcc format to the corresponding wgpu TextureFormat.
-pub fn drm_to_wgpu_format(format: DrmFourcc) -> Option<wgpu::TextureFormat> {
-    match format {
-        DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-        DrmFourcc::Abgr8888 | DrmFourcc::Xbgr8888 => Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-        _ => None,
-    }
-}
-
 /// Imports a DMA-BUF file descriptor as a wgpu texture via Vulkan external memory.
 ///
 /// The fd is dup'd internally before import — the caller retains ownership of the
@@ -97,9 +74,9 @@ pub unsafe fn import_dmabuf_texture(
     _stride: u32,
 ) -> Result<(wgpu::Texture, wgpu::TextureFormat), DmaBufImportError> {
     let vk_format =
-        drm_to_vk_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
+        formats::drm_to_vk_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
     let wgpu_format =
-        drm_to_wgpu_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
+        formats::drm_to_wgpu_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
 
     // Dup the fd so Vulkan can take ownership of the copy without affecting the caller's fd.
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.

@@ -1,25 +1,43 @@
 use std::collections::BTreeMap;
 use std::os::fd::OwnedFd;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
+use tokio::sync::mpsc;
 use crate::gst_pipeline::GpuBackend;
+use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
-use crate::stream::MainLoopQuitHandle;
 use crate::widget::Element;
 
-type SharedMutex<T> = Arc<Mutex<T>>;
-
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
     Idle,
     Starting,
     Recording,
     Error(String),
+}
+
+impl std::fmt::Debug for FrameData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameData::DmaBuf { width, height, drm_format, .. } => {
+                f.debug_struct("DmaBuf")
+                    .field("width", width)
+                    .field("height", height)
+                    .field("drm_format", drm_format)
+                    .finish()
+            }
+            FrameData::Cpu { width, height, .. } => {
+                f.debug_struct("Cpu")
+                    .field("width", width)
+                    .field("height", height)
+                    .finish()
+            }
+        }
+    }
 }
 
 pub enum FrameData {
@@ -70,26 +88,22 @@ pub enum Message {
     StartRecording,
     StopRecording,
     BackendSelected(usize),
-    Tick,
+    RecordingEvent(RecordingEvent),
 }
 
 pub struct Cocuyo {
     windows: BTreeMap<window::Id, WindowKind>,
-    frame_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>>,
-    current_frame: Option<FrameData>,
-    recording_state: Arc<Mutex<RecordingState>>,
-    start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-    mainloop_quit: Arc<Mutex<Option<MainLoopQuitHandle>>>,
+    current_frame: Option<Arc<FrameData>>,
+    recording_state: RecordingState,
+    is_recording: bool,
+    session_id: u64,
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
+    recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
 }
 
 impl Cocuyo {
     pub fn new(
-        frame_receiver: SharedMutex<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
-        recording_state: SharedMutex<RecordingState>,
-        start_recording_tx: std::sync::mpsc::Sender<((), GpuBackend)>,
-        mainloop_quit: SharedMutex<Option<MainLoopQuitHandle>>,
         available_backends: Vec<GpuBackend>,
     ) -> (Self, Task<Message>) {
         let (id, open) = window::open(window::Settings {
@@ -102,13 +116,13 @@ impl Cocuyo {
         let _ = id;
         let app = Self {
             windows: BTreeMap::new(),
-            frame_receiver,
             current_frame: None,
-            recording_state,
-            start_recording_tx,
-            mainloop_quit,
+            recording_state: RecordingState::Idle,
+            is_recording: false,
+            session_id: 0,
             available_backends,
             selected_backend_index: 0,
+            recording_cmd_tx: None,
         };
 
         (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
@@ -166,33 +180,37 @@ impl Cocuyo {
                 open.map(|id| Message::WindowOpened(id, WindowKind::Preview))
             }
             Message::StartRecording => {
-                let backend = self
-                    .available_backends
-                    .get(self.selected_backend_index)
-                    .cloned()
-                    .unwrap_or(GpuBackend::Cpu);
                 crate::vulkan_dmabuf::reset_dmabuf_import_failed();
-                let _ = self.start_recording_tx.send(((), backend));
+                self.is_recording = true;
+                self.session_id += 1;
                 Task::none()
             }
             Message::StopRecording => {
-                if let Some(handle) = self.mainloop_quit.lock().unwrap().take() {
-                    handle.quit();
+                if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                    let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
                 self.current_frame = None;
-                // Drain any remaining frames from the channel to avoid stale data
-                let mut receiver = self.frame_receiver.lock().unwrap();
-                while receiver.try_recv().is_ok() {}
                 Task::none()
             }
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
                 Task::none()
             }
-            Message::Tick => {
-                let mut receiver = self.frame_receiver.lock().unwrap();
-                while let Ok(frame) = receiver.try_recv() {
-                    self.current_frame = Some(frame);
+            Message::RecordingEvent(event) => {
+                match event {
+                    RecordingEvent::Ready(cmd_tx) => {
+                        self.recording_cmd_tx = Some(cmd_tx);
+                    }
+                    RecordingEvent::StateChanged(state) => {
+                        if state == RecordingState::Idle {
+                            self.is_recording = false;
+                            self.recording_cmd_tx = None;
+                        }
+                        self.recording_state = state;
+                    }
+                    RecordingEvent::Frame(frame) => {
+                        self.current_frame = Some(frame);
+                    }
                 }
                 Task::none()
             }
@@ -202,16 +220,15 @@ impl Cocuyo {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
-                let state = self.recording_state.lock().unwrap().clone();
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
-                crate::screen::main_window::view(window_id, &state, frame_info)
+                crate::screen::main_window::view(window_id, &self.recording_state, frame_info)
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
                 crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
             Some(WindowKind::Preview) => {
-                crate::screen::preview::view(window_id, self.current_frame.as_ref())
+                crate::screen::preview::view(window_id, self.current_frame.as_ref().map(|f| f.as_ref()))
             }
             None => iced::widget::space().into(),
         };
@@ -229,9 +246,24 @@ impl Cocuyo {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            iced::time::every(Duration::from_millis(16)).map(|_| Message::Tick),
-            window::close_events().map(Message::WindowClosed),
-        ])
+        let mut subs = vec![window::close_events().map(Message::WindowClosed)];
+
+        if self.is_recording {
+            let backend = self
+                .available_backends
+                .get(self.selected_backend_index)
+                .cloned()
+                .unwrap_or(GpuBackend::Cpu);
+
+            subs.push(
+                Subscription::run_with(
+                    (self.session_id, backend),
+                    recording::recording_subscription,
+                )
+                .map(Message::RecordingEvent),
+            );
+        }
+
+        Subscription::batch(subs)
     }
 }

@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use crate::formats::to_gst_format;
 
 /// Available GPU backends for video processing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GpuBackend {
     Cuda(CudaDevice),
     Vaapi(VaapiDevice),
@@ -26,13 +26,13 @@ impl std::fmt::Display for GpuBackend {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CudaDevice {
     pub index: i32,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VaapiDevice {
     pub path: String,
     pub name: String,
@@ -248,30 +248,13 @@ impl GstVideoConverter {
             .build()
             .map_err(|e| GstError::PipelineError(format!("Failed to create cudaconvert: {}", e)))?;
 
-        let cudadownload = gst::ElementFactory::make("cudadownload")
-            .build()
-            .map_err(|e| {
-                GstError::PipelineError(format!("Failed to create cudadownload: {}", e))
-            })?;
+        let cudadownload = make_element("cudadownload")?;
 
-        pipeline
-            .add_many([
-                appsrc.upcast_ref(),
-                &cudaupload,
-                &cudaconvert,
-                &cudadownload,
-                appsink.upcast_ref(),
-            ])
-            .map_err(|e| GstError::PipelineError(format!("Failed to add CUDA elements: {}", e)))?;
-
-        gst::Element::link_many([
-            appsrc.upcast_ref(),
-            &cudaupload,
-            &cudaconvert,
-            &cudadownload,
-            appsink.upcast_ref(),
-        ])
-        .map_err(|e| GstError::PipelineError(format!("Failed to link CUDA elements: {}", e)))?;
+        build_pipeline_with_elements(
+            pipeline, appsrc, appsink,
+            &[&cudaupload, &cudaconvert, &cudadownload],
+            "CUDA",
+        )?;
 
         info!(device_id, "CUDA pipeline created");
         Ok(())
@@ -282,40 +265,15 @@ impl GstVideoConverter {
         appsrc: &gst_app::AppSrc,
         appsink: &gst_app::AppSink,
     ) -> Result<(), GstError> {
-        let glupload = gst::ElementFactory::make("glupload")
-            .build()
-            .map_err(|e| GstError::PipelineError(format!("Failed to create glupload: {}", e)))?;
+        let glupload = make_element("glupload")?;
+        let glcolorconvert = make_element("glcolorconvert")?;
+        let gldownload = make_element("gldownload")?;
 
-        let glcolorconvert = gst::ElementFactory::make("glcolorconvert")
-            .build()
-            .map_err(|e| {
-                GstError::PipelineError(format!("Failed to create glcolorconvert: {}", e))
-            })?;
-
-        let gldownload = gst::ElementFactory::make("gldownload")
-            .build()
-            .map_err(|e| GstError::PipelineError(format!("Failed to create gldownload: {}", e)))?;
-
-        pipeline
-            .add_many([
-                appsrc.upcast_ref(),
-                &glupload,
-                &glcolorconvert,
-                &gldownload,
-                appsink.upcast_ref(),
-            ])
-            .map_err(|e| {
-                GstError::PipelineError(format!("Failed to add OpenGL elements: {}", e))
-            })?;
-
-        gst::Element::link_many([
-            appsrc.upcast_ref(),
-            &glupload,
-            &glcolorconvert,
-            &gldownload,
-            appsink.upcast_ref(),
-        ])
-        .map_err(|e| GstError::PipelineError(format!("Failed to link OpenGL elements: {}", e)))?;
+        build_pipeline_with_elements(
+            pipeline, appsrc, appsink,
+            &[&glupload, &glcolorconvert, &gldownload],
+            "OpenGL",
+        )?;
 
         info!("OpenGL pipeline created");
         Ok(())
@@ -326,18 +284,13 @@ impl GstVideoConverter {
         appsrc: &gst_app::AppSrc,
         appsink: &gst_app::AppSink,
     ) -> Result<(), GstError> {
-        let videoconvert = gst::ElementFactory::make("videoconvert")
-            .build()
-            .map_err(|e| {
-                GstError::PipelineError(format!("Failed to create videoconvert: {}", e))
-            })?;
+        let videoconvert = make_element("videoconvert")?;
 
-        pipeline
-            .add_many([appsrc.upcast_ref(), &videoconvert, appsink.upcast_ref()])
-            .map_err(|e| GstError::PipelineError(format!("Failed to add elements: {}", e)))?;
-
-        gst::Element::link_many([appsrc.upcast_ref(), &videoconvert, appsink.upcast_ref()])
-            .map_err(|e| GstError::PipelineError(format!("Failed to link elements: {}", e)))?;
+        build_pipeline_with_elements(
+            pipeline, appsrc, appsink,
+            &[&videoconvert],
+            "CPU",
+        )?;
 
         info!("CPU pipeline created");
         Ok(())
@@ -416,4 +369,32 @@ impl Drop for GstVideoConverter {
     fn drop(&mut self) {
         let _ = self.pipeline.set_state(gst::State::Null);
     }
+}
+
+fn make_element(name: &str) -> Result<gst::Element, GstError> {
+    gst::ElementFactory::make(name)
+        .build()
+        .map_err(|e| GstError::PipelineError(format!("Failed to create {}: {}", name, e)))
+}
+
+fn build_pipeline_with_elements(
+    pipeline: &gst::Pipeline,
+    appsrc: &gst_app::AppSrc,
+    appsink: &gst_app::AppSink,
+    elements: &[&gst::Element],
+    label: &str,
+) -> Result<(), GstError> {
+    let mut all: Vec<&gst::Element> = Vec::with_capacity(elements.len() + 2);
+    all.push(appsrc.upcast_ref());
+    all.extend_from_slice(elements);
+    all.push(appsink.upcast_ref());
+
+    pipeline
+        .add_many(all.iter().copied())
+        .map_err(|e| GstError::PipelineError(format!("Failed to add {} elements: {}", label, e)))?;
+
+    gst::Element::link_many(all.iter().copied())
+        .map_err(|e| GstError::PipelineError(format!("Failed to link {} elements: {}", label, e)))?;
+
+    Ok(())
 }

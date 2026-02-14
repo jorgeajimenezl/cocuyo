@@ -56,13 +56,14 @@ Cocuyo is a Wayland screen capture application that displays real-time screen co
 
 ### Key Components
 
-- **`main.rs`** - Application entry point, spawns recording thread, initializes iced daemon with multi-window support
-- **`app.rs`** - `Cocuyo` application state, iced message handling, multi-window management (`Main`, `Settings`, `Preview`)
-- **`stream.rs`** - PipeWire stream setup, portal session, frame processing pipeline (DMA-BUF and CPU paths)
-- **`gst_pipeline.rs`** - GStreamer video converter with GPU backend detection (CUDA, VA-API, CPU). `GstVideoConverter` handles appsrc → videoconvert → appsink
-- **`vulkan_dmabuf.rs`** - Vulkan DMA-BUF import: creates VkImage with external memory, wraps into wgpu texture via `wgpu_hal`. Includes format mapping (DRM → Vulkan → wgpu)
+- **`main.rs`** - Application entry point, initializes GStreamer/PipeWire, detects backends, launches iced daemon
+- **`app.rs`** - `Cocuyo` application state, iced message handling, multi-window management (`Main`, `Settings`, `Preview`). Recording state owned directly (no mutexes).
+- **`recording.rs`** - Recording lifecycle as an `iced::Subscription` using `iced::stream::channel`. Manages portal session, spawns PipeWire thread, forwards frames as `RecordingEvent`s.
+- **`stream.rs`** - PipeWire stream setup, portal session, frame processing pipeline (DMA-BUF and CPU paths). Uses bounded `mpsc::Sender<Arc<FrameData>>` with backpressure.
+- **`gst_pipeline.rs`** - GStreamer video converter with GPU backend detection (CUDA, OpenGL, CPU). `GstVideoConverter` handles appsrc → videoconvert → appsink. Helper functions `make_element` and `build_pipeline_with_elements` reduce pipeline builder duplication.
+- **`vulkan_dmabuf.rs`** - Vulkan DMA-BUF import: creates VkImage with external memory, wraps into wgpu texture via `wgpu_hal`
 - **`dmabuf_handler.rs`** - DMA-BUF metadata extraction from PipeWire buffers (fd, stride, format, dimensions, modifier)
-- **`formats.rs`** - Video format conversion tables (PipeWire SPA → GStreamer, PipeWire SPA → DRM fourcc)
+- **`formats.rs`** - Unified video format conversion tables: PipeWire SPA → GStreamer, PipeWire SPA → DRM fourcc, DRM → Vulkan format, DRM → wgpu format, importability check
 - **`screen/`** - UI screens:
   - `main_window.rs` - Main control window (start/stop recording, status)
   - `settings.rs` - Backend selection (GPU/CPU)
@@ -75,10 +76,12 @@ Cocuyo is a Wayland screen capture application that displays real-time screen co
 ### Threading Model
 
 - Main thread: iced event loop (daemon mode with multi-window)
-- Recording thread: Tokio runtime for portal communication, then PipeWire mainloop for frame capture
-- Frame data sent via `tokio::sync::mpsc::unbounded_channel`
-- Recording control: `start_recording_tx` channel to start, `AtomicBool` stop flag to stop
-- Graceful shutdown: stop flag checked via timer in PipeWire mainloop; channel close triggers mainloop quit
+- Recording lifecycle driven by `iced::Subscription` — when `is_recording` is true, the subscription spawns a PipeWire thread
+- Frame data sent via bounded `tokio::sync::mpsc::channel(2)` with backpressure (frames dropped when full)
+- Frames delivered to UI as `Message::RecordingEvent(Frame(Arc<FrameData>))` — no polling tick
+- Recording state updated via `Message::RecordingEvent(StateChanged(...))` — owned by UI, no mutexes
+- Bidirectional control: subscription sends `RecordingEvent::Ready(cmd_tx)` at startup; app stores the `cmd_tx` sender for issuing `RecordingCommand::Stop`
+- Graceful stop: app sends `RecordingCommand::Stop` via command channel → subscription drops `frame_rx` (closing the frame channel) → PipeWire thread detects `Closed` on next `try_send` and calls `mainloop.quit()` → subscription joins PipeWire thread, closes portal session, emits `StateChanged(Idle)` → app sets `is_recording = false` (subscription dropped only after cleanup)
 
 ### Supported Video Formats
 
