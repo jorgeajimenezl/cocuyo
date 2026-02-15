@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashSet};
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
+use crate::ambient::BulbInfo;
 use crate::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
@@ -19,13 +20,6 @@ pub enum RecordingState {
     Starting,
     Recording,
     Error(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct BulbInfo {
-    pub mac: String,
-    pub ip: std::net::IpAddr,
-    pub name: Option<String>,
 }
 
 impl std::fmt::Debug for FrameData {
@@ -81,6 +75,24 @@ impl FrameData {
             FrameData::Cpu { height, .. } => *height,
         }
     }
+
+    /// Sample a pixel at (x, y) returning (R, G, B). Only works for CPU frames (RGBA layout).
+    pub fn sample_pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
+        match self {
+            FrameData::Cpu { data, width, height } => {
+                if x >= *width || y >= *height {
+                    return None;
+                }
+                let idx = ((y * width + x) * 4) as usize;
+                if idx + 2 < data.len() {
+                    Some((data[idx], data[idx + 1], data[idx + 2]))
+                } else {
+                    None
+                }
+            }
+            FrameData::DmaBuf { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +112,9 @@ pub enum Message {
     ScanBulbs,
     BulbsDiscovered(Vec<BulbInfo>),
     ToggleBulb(String),
+    StartAmbient,
+    StopAmbient,
+    Noop,
 }
 
 pub struct Cocuyo {
@@ -114,6 +129,8 @@ pub struct Cocuyo {
     discovered_bulbs: Vec<BulbInfo>,
     selected_bulbs: HashSet<String>,
     is_scanning: bool,
+    is_ambient_active: bool,
+    last_bulb_update: Option<Instant>,
 }
 
 impl Cocuyo {
@@ -140,6 +157,8 @@ impl Cocuyo {
             discovered_bulbs: Vec::new(),
             selected_bulbs: HashSet::new(),
             is_scanning: false,
+            is_ambient_active: false,
+            last_bulb_update: None,
         };
 
         (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
@@ -217,22 +236,7 @@ impl Cocuyo {
                 self.is_scanning = true;
                 self.discovered_bulbs.clear();
                 Task::perform(
-                    async {
-                        match wiz_lights_rs::discover_bulbs(Duration::from_secs(5)).await {
-                            Ok(bulbs) => bulbs
-                                .into_iter()
-                                .map(|b| BulbInfo {
-                                    ip: std::net::IpAddr::V4(b.ip),
-                                    mac: b.mac.clone(),
-                                    name: None,
-                                })
-                                .collect(),
-                            Err(e) => {
-                                tracing::error!(error = %e, "Bulb discovery failed");
-                                Vec::new()
-                            }
-                        }
-                    },
+                    crate::ambient::discover_bulbs(),
                     Message::BulbsDiscovered,
                 )
             }
@@ -247,6 +251,29 @@ impl Cocuyo {
                 }
                 Task::none()
             }
+            Message::Noop => Task::none(),
+            Message::StartAmbient => {
+                if self.selected_bulbs.is_empty() {
+                    return Task::none();
+                }
+                self.is_ambient_active = true;
+                self.last_bulb_update = None;
+                if !self.is_recording {
+                    crate::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    self.is_recording = true;
+                    self.session_id += 1;
+                }
+                Task::none()
+            }
+            Message::StopAmbient => {
+                self.is_ambient_active = false;
+                self.last_bulb_update = None;
+                if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                    let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                }
+                self.current_frame = None;
+                Task::none()
+            }
             Message::RecordingEvent(event) => {
                 match event {
                     RecordingEvent::Ready(cmd_tx) => {
@@ -255,12 +282,35 @@ impl Cocuyo {
                     RecordingEvent::StateChanged(state) => {
                         if state == RecordingState::Idle {
                             self.is_recording = false;
+                            self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
                         }
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
-                        self.current_frame = Some(frame);
+                        self.current_frame = Some(frame.clone());
+
+                        if self.is_ambient_active {
+                            let should_update = self
+                                .last_bulb_update
+                                .map(|t| t.elapsed() >= Duration::from_millis(150))
+                                .unwrap_or(true);
+
+                            if should_update {
+                                self.last_bulb_update = Some(Instant::now());
+                                let selected: Vec<_> = self.selected_bulbs.iter().cloned().collect();
+                                if let Some(targets) = crate::ambient::sample_frame_for_bulbs(
+                                    &frame,
+                                    &selected,
+                                    &self.discovered_bulbs,
+                                ) {
+                                    return Task::perform(
+                                        crate::ambient::dispatch_bulb_colors(targets),
+                                        |()| Message::Noop,
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Task::none()
@@ -276,6 +326,7 @@ impl Cocuyo {
                     &self.discovered_bulbs,
                     &self.selected_bulbs,
                     self.is_scanning,
+                    self.is_ambient_active,
                 )
             }
             Some(WindowKind::Settings) => {
@@ -289,6 +340,7 @@ impl Cocuyo {
                     self.current_frame.as_ref().map(|f| f.as_ref()),
                     &self.recording_state,
                     frame_info,
+                    self.is_ambient_active,
                 )
             }
             None => iced::widget::space().into(),

@@ -1,5 +1,6 @@
 use tracing::info;
 
+mod ambient;
 mod app;
 mod dmabuf_handler;
 mod formats;

@@ -13,37 +13,44 @@ pub fn view<'a>(
     frame: Option<&FrameData>,
     recording_state: &RecordingState,
     frame_info: Option<(u32, u32)>,
+    is_ambient_active: bool,
 ) -> Element<'a, Message> {
-    let controls: Element<'_, Message> = match recording_state {
-        RecordingState::Idle => column![
-            button("Start Recording")
-                .on_press(Message::StartRecording)
-                .style(theme::styled_button),
-        ]
-        .align_x(Center)
-        .into(),
-        RecordingState::Starting => column![text("Requesting screen capture...")
-            .color(theme::WARNING)]
-        .align_x(Center)
-        .into(),
-        RecordingState::Recording => column![
-            text("Recording in progress").color(theme::SUCCESS),
-            button("Stop Recording")
-                .on_press(Message::StopRecording)
-                .style(theme::styled_button),
-        ]
-        .spacing(10)
-        .align_x(Center)
-        .into(),
-        RecordingState::Error(msg) => column![
-            text(format!("Error: {}", msg)).color(theme::DANGER),
-            button("Retry")
-                .on_press(Message::StartRecording)
-                .style(theme::styled_button),
-        ]
-        .spacing(10)
-        .align_x(Center)
-        .into(),
+    let controls: Element<'_, Message> = if is_ambient_active {
+        column![text("Recording controlled by ambient mode").color(theme::WARNING)]
+            .align_x(Center)
+            .into()
+    } else {
+        match recording_state {
+            RecordingState::Idle => column![
+                button("Start Recording")
+                    .on_press(Message::StartRecording)
+                    .style(theme::styled_button),
+            ]
+            .align_x(Center)
+            .into(),
+            RecordingState::Starting => column![text("Requesting screen capture...")
+                .color(theme::WARNING)]
+            .align_x(Center)
+            .into(),
+            RecordingState::Recording => column![
+                text("Recording in progress").color(theme::SUCCESS),
+                button("Stop Recording")
+                    .on_press(Message::StopRecording)
+                    .style(theme::styled_button),
+            ]
+            .spacing(10)
+            .align_x(Center)
+            .into(),
+            RecordingState::Error(msg) => column![
+                text(format!("Error: {}", msg)).color(theme::DANGER),
+                button("Retry")
+                    .on_press(Message::StartRecording)
+                    .style(theme::styled_button),
+            ]
+            .spacing(10)
+            .align_x(Center)
+            .into(),
+        }
     };
 
     let controls_bar = container(controls)

@@ -577,6 +577,7 @@ dependencies = [
  "ashpd",
  "bytemuck",
  "drm-fourcc",
+ "futures",
  "gstreamer",
  "gstreamer-allocators",
  "gstreamer-app",

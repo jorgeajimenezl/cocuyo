@@ -4,7 +4,8 @@ use iced::widget::{button, center, checkbox, column, container, row, rule, scrol
 use iced::window;
 use iced::{Center, Fill};
 
-use crate::app::{BulbInfo, Message};
+use crate::ambient::BulbInfo;
+use crate::app::Message;
 use crate::screen::title_bar;
 use crate::theme;
 use crate::widget::Element;
@@ -14,6 +15,7 @@ pub fn view<'a>(
     discovered_bulbs: &'a [BulbInfo],
     selected_bulbs: &'a HashSet<String>,
     is_scanning: bool,
+    is_ambient_active: bool,
 ) -> Element<'a, Message> {
     let menu_bar = container(
         row![
@@ -90,8 +92,40 @@ pub fn view<'a>(
         scrollable(items).width(Fill).height(Fill).into()
     };
 
+    let ambient_controls: Element<'a, Message> = if is_ambient_active {
+        row![
+            text("Ambient active").color(theme::SUCCESS),
+            button("Stop Ambient")
+                .on_press(Message::StopAmbient)
+                .style(theme::styled_button),
+        ]
+        .spacing(10)
+        .align_y(Center)
+        .into()
+    } else {
+        let btn = button("Start Ambient").style(theme::styled_button);
+        let btn = if selected_bulbs.is_empty() {
+            btn
+        } else {
+            btn.on_press(Message::StartAmbient)
+        };
+        btn.into()
+    };
+
+    let ambient_bar = container(ambient_controls)
+        .width(Fill)
+        .padding(10)
+        .center_x(Fill);
+
     let selected_count = selected_bulbs.len();
-    let status_text = if discovered_bulbs.is_empty() {
+    let status_text = if is_ambient_active {
+        text(format!(
+            "Ambient active \u{2014} {} bulb{}",
+            selected_count,
+            if selected_count == 1 { "" } else { "s" }
+        ))
+        .color(theme::SUCCESS)
+    } else if discovered_bulbs.is_empty() {
         text("No bulbs discovered").color(theme::TEXT_DIM)
     } else {
         text(format!(
@@ -116,6 +150,8 @@ pub fn view<'a>(
         container(header).width(Fill).padding(15),
         rule::horizontal(1).style(theme::styled_rule),
         bulb_list,
+        rule::horizontal(1).style(theme::styled_rule),
+        ambient_bar,
         rule::horizontal(1).style(theme::styled_rule),
         status_bar,
     ]
