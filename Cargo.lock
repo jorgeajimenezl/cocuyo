@@ -5491,9 +5491,9 @@ dependencies = [
 
 [[package]]
 name = "wiz-lights-rs"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b9bf46b122830b59040f6e617947de5544159da79b08d2bc0becea30ac35db0"
+checksum = "b6d40518f9d16b76885b10714a5e03640725bf1861df0605b90cf9a2d90e1880"
 dependencies = [
  "futures",
  "log",

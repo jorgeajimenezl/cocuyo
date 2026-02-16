@@ -71,4 +71,12 @@ impl BulbSetupState {
     pub fn selected_bulbs_vec(&self) -> Vec<String> {
         self.selected_bulbs.iter().cloned().collect()
     }
+
+    pub fn selected_bulb_infos(&self) -> Vec<BulbInfo> {
+        self.discovered_bulbs
+            .iter()
+            .filter(|b| self.selected_bulbs.contains(&b.mac))
+            .cloned()
+            .collect()
+    }
 }

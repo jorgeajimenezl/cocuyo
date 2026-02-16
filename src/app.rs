@@ -6,6 +6,7 @@ use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
+use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::frame::FrameData;
 use crate::gst_pipeline::GpuBackend;
@@ -39,6 +40,8 @@ pub enum Message {
     BulbSetup(BulbSetupMessage),
     StartAmbient,
     StopAmbient,
+    BulbStatesSaved(Vec<SavedBulbState>),
+    ExitApp,
     Noop,
 }
 
@@ -54,6 +57,7 @@ pub struct Cocuyo {
     bulb_setup: BulbSetupState,
     is_ambient_active: bool,
     last_bulb_update: Option<Instant>,
+    saved_bulb_states: Option<Vec<SavedBulbState>>,
 }
 
 impl Cocuyo {
@@ -93,6 +97,7 @@ impl Cocuyo {
             bulb_setup: BulbSetupState::new(),
             is_ambient_active: false,
             last_bulb_update: None,
+            saved_bulb_states: None,
         };
 
         (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
@@ -117,7 +122,23 @@ impl Cocuyo {
             Message::WindowClosed(id) => {
                 let kind = self.windows.remove(&id);
                 if kind == Some(WindowKind::Main) || self.windows.is_empty() {
-                    iced::exit()
+                    // Stop recording if active
+                    if self.is_ambient_active || self.is_recording {
+                        if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                            let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                        }
+                        self.is_ambient_active = false;
+                        self.is_recording = false;
+                    }
+                    // Restore bulb states before exiting
+                    if let Some(states) = self.saved_bulb_states.take() {
+                        Task::perform(
+                            crate::ambient::restore_bulb_states(states),
+                            |()| Message::ExitApp,
+                        )
+                    } else {
+                        iced::exit()
+                    }
                 } else {
                     Task::none()
                 }
@@ -174,10 +195,21 @@ impl Cocuyo {
                 self.bulb_setup.update(msg).map(Message::BulbSetup)
             }
             Message::Noop => Task::none(),
+            Message::ExitApp => iced::exit(),
             Message::StartAmbient => {
                 if !self.bulb_setup.has_selected_bulbs() {
                     return Task::none();
                 }
+                // Phase 1: save bulb states before starting ambient
+                let bulbs = self.bulb_setup.selected_bulb_infos();
+                Task::perform(
+                    crate::ambient::save_bulb_states(bulbs),
+                    Message::BulbStatesSaved,
+                )
+            }
+            Message::BulbStatesSaved(states) => {
+                // Phase 2: states saved, now start ambient
+                self.saved_bulb_states = if states.is_empty() { None } else { Some(states) };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 if !self.is_recording {
@@ -194,7 +226,15 @@ impl Cocuyo {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
                 self.current_frame = None;
-                Task::none()
+                let restore_task = if let Some(states) = self.saved_bulb_states.take() {
+                    Task::perform(
+                        crate::ambient::restore_bulb_states(states),
+                        |()| Message::Noop,
+                    )
+                } else {
+                    Task::none()
+                };
+                restore_task
             }
             Message::RecordingEvent(event) => {
                 match event {
