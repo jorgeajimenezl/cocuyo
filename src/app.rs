@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -8,7 +8,7 @@ use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
-use crate::ambient::BulbInfo;
+use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
@@ -105,13 +105,12 @@ pub enum Message {
     MaximizeWindow(window::Id),
     OpenSettings,
     OpenPreview,
+    OpenBulbSetup,
     StartRecording,
     StopRecording,
     BackendSelected(usize),
     RecordingEvent(RecordingEvent),
-    ScanBulbs,
-    BulbsDiscovered(Vec<BulbInfo>),
-    ToggleBulb(String),
+    BulbSetup(BulbSetupMessage),
     StartAmbient,
     StopAmbient,
     Noop,
@@ -126,9 +125,7 @@ pub struct Cocuyo {
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
-    discovered_bulbs: Vec<BulbInfo>,
-    selected_bulbs: HashSet<String>,
-    is_scanning: bool,
+    bulb_setup: BulbSetupState,
     is_ambient_active: bool,
     last_bulb_update: Option<Instant>,
 }
@@ -154,9 +151,7 @@ impl Cocuyo {
             available_backends,
             selected_backend_index: 0,
             recording_cmd_tx: None,
-            discovered_bulbs: Vec::new(),
-            selected_bulbs: HashSet::new(),
-            is_scanning: false,
+            bulb_setup: BulbSetupState::new(),
             is_ambient_active: false,
             last_bulb_update: None,
         };
@@ -169,6 +164,7 @@ impl Cocuyo {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
             Some(WindowKind::Preview) => "Cocuyo - Preview".to_string(),
+            Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
             None => String::new(),
         }
     }
@@ -232,28 +228,30 @@ impl Cocuyo {
                 self.selected_backend_index = idx;
                 Task::none()
             }
-            Message::ScanBulbs => {
-                self.is_scanning = true;
-                self.discovered_bulbs.clear();
-                Task::perform(
-                    crate::ambient::discover_bulbs(),
-                    Message::BulbsDiscovered,
-                )
-            }
-            Message::BulbsDiscovered(bulbs) => {
-                self.is_scanning = false;
-                self.discovered_bulbs = bulbs;
-                Task::none()
-            }
-            Message::ToggleBulb(mac) => {
-                if !self.selected_bulbs.remove(&mac) {
-                    self.selected_bulbs.insert(mac);
+            Message::OpenBulbSetup => {
+                if self.windows.values().any(|k| *k == WindowKind::BulbSetup) {
+                    return Task::none();
                 }
-                Task::none()
+                let (_id, open) = window::open(window::Settings {
+                    size: Size::new(500.0, 400.0),
+                    min_size: Some(Size::new(350.0, 300.0)),
+                    decorations: false,
+                    ..Default::default()
+                });
+                open.map(|id| Message::WindowOpened(id, WindowKind::BulbSetup))
+            }
+            Message::BulbSetup(msg) => {
+                if matches!(msg, BulbSetupMessage::Done) {
+                    if let Some((&id, _)) = self.windows.iter().find(|(_, k)| **k == WindowKind::BulbSetup) {
+                        return window::close(id);
+                    }
+                    return Task::none();
+                }
+                self.bulb_setup.update(msg).map(Message::BulbSetup)
             }
             Message::Noop => Task::none(),
             Message::StartAmbient => {
-                if self.selected_bulbs.is_empty() {
+                if !self.bulb_setup.has_selected_bulbs() {
                     return Task::none();
                 }
                 self.is_ambient_active = true;
@@ -298,11 +296,11 @@ impl Cocuyo {
 
                             if should_update {
                                 self.last_bulb_update = Some(Instant::now());
-                                let selected: Vec<_> = self.selected_bulbs.iter().cloned().collect();
+                                let selected = self.bulb_setup.selected_bulbs_vec();
                                 if let Some(targets) = crate::ambient::sample_frame_for_bulbs(
                                     &frame,
                                     &selected,
-                                    &self.discovered_bulbs,
+                                    self.bulb_setup.discovered_bulbs(),
                                 ) {
                                     return Task::perform(
                                         crate::ambient::dispatch_bulb_colors(targets),
@@ -323,10 +321,9 @@ impl Cocuyo {
             Some(WindowKind::Main) => {
                 crate::screen::main_window::view(
                     window_id,
-                    &self.discovered_bulbs,
-                    &self.selected_bulbs,
-                    self.is_scanning,
                     self.is_ambient_active,
+                    self.bulb_setup.has_selected_bulbs(),
+                    self.bulb_setup.selected_bulbs().len(),
                 )
             }
             Some(WindowKind::Settings) => {
@@ -342,6 +339,9 @@ impl Cocuyo {
                     frame_info,
                     self.is_ambient_active,
                 )
+            }
+            Some(WindowKind::BulbSetup) => {
+                crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
             }
             None => iced::widget::space().into(),
         };

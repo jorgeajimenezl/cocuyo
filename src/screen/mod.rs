@@ -1,3 +1,4 @@
+pub mod bulb_setup;
 pub mod main_window;
 pub mod preview;
 pub mod settings;
@@ -9,4 +10,5 @@ pub enum WindowKind {
     Main,
     Settings,
     Preview,
+    BulbSetup,
 }
