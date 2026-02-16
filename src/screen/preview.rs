@@ -2,7 +2,8 @@ use iced::widget::{button, center, column, container, row, rule, shader, text};
 use iced::window;
 use iced::{Center, Fill};
 
-use crate::app::{FrameData, Message, RecordingState};
+use crate::app::{Message, RecordingState};
+use crate::frame::FrameData;
 use crate::screen::title_bar;
 use crate::screen::video_shader::VideoScene;
 use crate::theme;

@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::app::FrameData;
+use crate::frame::FrameData;
 
 #[derive(Debug, Clone)]
 pub struct BulbInfo {

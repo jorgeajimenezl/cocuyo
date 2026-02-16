@@ -1,14 +1,13 @@
 use std::collections::BTreeMap;
-use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
+use crate::frame::FrameData;
 use crate::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
@@ -20,79 +19,6 @@ pub enum RecordingState {
     Starting,
     Recording,
     Error(String),
-}
-
-impl std::fmt::Debug for FrameData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameData::DmaBuf { width, height, drm_format, .. } => {
-                f.debug_struct("DmaBuf")
-                    .field("width", width)
-                    .field("height", height)
-                    .field("drm_format", drm_format)
-                    .finish()
-            }
-            FrameData::Cpu { width, height, .. } => {
-                f.debug_struct("Cpu")
-                    .field("width", width)
-                    .field("height", height)
-                    .finish()
-            }
-        }
-    }
-}
-
-pub enum FrameData {
-    DmaBuf {
-        fd: OwnedFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        #[allow(dead_code)]
-        offset: u32,
-        #[allow(dead_code)]
-        modifier: u64,
-    },
-    Cpu {
-        data: Vec<u8>,
-        width: u32,
-        height: u32,
-    },
-}
-
-impl FrameData {
-    pub fn width(&self) -> u32 {
-        match self {
-            FrameData::DmaBuf { width, .. } => *width,
-            FrameData::Cpu { width, .. } => *width,
-        }
-    }
-
-    pub fn height(&self) -> u32 {
-        match self {
-            FrameData::DmaBuf { height, .. } => *height,
-            FrameData::Cpu { height, .. } => *height,
-        }
-    }
-
-    /// Sample a pixel at (x, y) returning (R, G, B). Only works for CPU frames (RGBA layout).
-    pub fn sample_pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
-        match self {
-            FrameData::Cpu { data, width, height } => {
-                if x >= *width || y >= *height {
-                    return None;
-                }
-                let idx = ((y * width + x) * 4) as usize;
-                if idx + 2 < data.len() {
-                    Some((data[idx], data[idx + 1], data[idx + 2]))
-                } else {
-                    None
-                }
-            }
-            FrameData::DmaBuf { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +57,19 @@ pub struct Cocuyo {
 }
 
 impl Cocuyo {
+    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size) -> Task<Message> {
+        if self.windows.values().any(|k| *k == kind) {
+            return Task::none();
+        }
+        let (_id, open) = window::open(window::Settings {
+            size,
+            min_size: Some(min_size),
+            decorations: false,
+            ..Default::default()
+        });
+        open.map(move |id| Message::WindowOpened(id, kind))
+    }
+
     pub fn new(
         available_backends: Vec<GpuBackend>,
     ) -> (Self, Task<Message>) {
@@ -188,28 +127,18 @@ impl Cocuyo {
             Message::MinimizeWindow(id) => window::minimize(id, true),
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings => {
-                if self.windows.values().any(|k| *k == WindowKind::Settings) {
-                    return Task::none();
-                }
-                let (_id, open) = window::open(window::Settings {
-                    size: Size::new(400.0, 300.0),
-                    min_size: Some(Size::new(300.0, 200.0)),
-                    decorations: false,
-                    ..Default::default()
-                });
-                open.map(|id| Message::WindowOpened(id, WindowKind::Settings))
+                self.open_window(
+                    WindowKind::Settings,
+                    Size::new(400.0, 300.0),
+                    Size::new(300.0, 200.0),
+                )
             }
             Message::OpenPreview => {
-                if self.windows.values().any(|k| *k == WindowKind::Preview) {
-                    return Task::none();
-                }
-                let (_id, open) = window::open(window::Settings {
-                    size: Size::new(800.0, 600.0),
-                    min_size: Some(Size::new(320.0, 240.0)),
-                    decorations: false,
-                    ..Default::default()
-                });
-                open.map(|id| Message::WindowOpened(id, WindowKind::Preview))
+                self.open_window(
+                    WindowKind::Preview,
+                    Size::new(800.0, 600.0),
+                    Size::new(320.0, 240.0),
+                )
             }
             Message::StartRecording => {
                 crate::vulkan_dmabuf::reset_dmabuf_import_failed();
@@ -229,16 +158,11 @@ impl Cocuyo {
                 Task::none()
             }
             Message::OpenBulbSetup => {
-                if self.windows.values().any(|k| *k == WindowKind::BulbSetup) {
-                    return Task::none();
-                }
-                let (_id, open) = window::open(window::Settings {
-                    size: Size::new(500.0, 400.0),
-                    min_size: Some(Size::new(350.0, 300.0)),
-                    decorations: false,
-                    ..Default::default()
-                });
-                open.map(|id| Message::WindowOpened(id, WindowKind::BulbSetup))
+                self.open_window(
+                    WindowKind::BulbSetup,
+                    Size::new(500.0, 400.0),
+                    Size::new(350.0, 300.0),
+                )
             }
             Message::BulbSetup(msg) => {
                 if matches!(msg, BulbSetupMessage::Done) {

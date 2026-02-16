@@ -10,7 +10,7 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::app::FrameData;
+use crate::frame::FrameData;
 use crate::dmabuf_handler;
 use crate::gst_pipeline::{self, GpuBackend};
 use crate::vulkan_dmabuf;

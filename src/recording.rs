@@ -6,7 +6,8 @@ use iced::futures::Stream;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-use crate::app::{FrameData, RecordingState};
+use crate::app::RecordingState;
+use crate::frame::FrameData;
 use crate::gst_pipeline::GpuBackend;
 use crate::stream;
 

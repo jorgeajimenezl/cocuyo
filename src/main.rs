@@ -3,6 +3,7 @@ use tracing::info;
 mod ambient;
 mod app;
 mod bulb_setup;
+mod frame;
 mod dmabuf_handler;
 mod formats;
 mod gst_pipeline;

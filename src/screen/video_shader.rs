@@ -5,7 +5,7 @@ use iced::widget::shader;
 use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
-use crate::app::FrameData;
+use crate::frame::FrameData;
 use crate::vulkan_dmabuf;
 
 /// Scene data passed to the shader widget each frame.
