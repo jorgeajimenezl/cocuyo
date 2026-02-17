@@ -127,8 +127,6 @@ impl Cocuyo {
                         if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                             let _ = cmd_tx.try_send(RecordingCommand::Stop);
                         }
-                        self.is_ambient_active = false;
-                        self.is_recording = false;
                     }
                     // Restore bulb states before exiting
                     if let Some(states) = self.saved_bulb_states.take() {
