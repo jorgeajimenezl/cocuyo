@@ -8,8 +8,8 @@ use tracing::{error, info};
 
 use crate::app::RecordingState;
 use crate::frame::FrameData;
-use crate::gst_pipeline::GpuBackend;
-use crate::stream;
+use crate::platform::linux::gst_pipeline::GpuBackend;
+use crate::platform::linux::stream;
 
 /// Commands sent from the app to the recording subscription.
 #[derive(Debug)]

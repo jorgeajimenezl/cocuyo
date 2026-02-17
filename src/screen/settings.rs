@@ -3,7 +3,7 @@ use iced::window;
 use iced::{Fill, padding};
 
 use crate::app::Message;
-use crate::gst_pipeline::GpuBackend;
+use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::screen::title_bar;
 use crate::theme;
 use crate::widget::Element;

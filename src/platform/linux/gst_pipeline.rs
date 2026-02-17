@@ -6,7 +6,7 @@ use pipewire::spa;
 use std::os::fd::RawFd;
 use tracing::{info, warn};
 
-use crate::formats::to_gst_format;
+use super::formats::to_gst_format;
 
 /// Available GPU backends for video processing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -2,7 +2,7 @@ use nix::sys::stat::fstat;
 use pipewire as pw;
 use std::os::fd::RawFd;
 
-use crate::formats::to_drm_format;
+use super::formats::to_drm_format;
 
 #[derive(Debug, Clone)]
 pub struct DmaBufBuffer {

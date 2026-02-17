@@ -6,7 +6,7 @@ use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
 use crate::frame::FrameData;
-use crate::vulkan_dmabuf;
+use crate::platform::linux::vulkan_dmabuf;
 
 /// Scene data passed to the shader widget each frame.
 pub struct VideoScene {

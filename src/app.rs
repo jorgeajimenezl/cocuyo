@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::frame::FrameData;
-use crate::gst_pipeline::GpuBackend;
+use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
 use crate::widget::Element;
@@ -160,7 +160,7 @@ impl Cocuyo {
                 )
             }
             Message::StartRecording => {
-                crate::vulkan_dmabuf::reset_dmabuf_import_failed();
+                crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                 self.is_recording = true;
                 self.session_id += 1;
                 Task::none()
@@ -211,7 +211,7 @@ impl Cocuyo {
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 if !self.is_recording {
-                    crate::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
                 }
