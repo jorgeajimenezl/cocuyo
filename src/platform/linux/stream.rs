@@ -10,10 +10,10 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::app::FrameData;
-use crate::dmabuf_handler;
-use crate::gst_pipeline::{self, GpuBackend};
-use crate::vulkan_dmabuf;
+use crate::frame::FrameData;
+use super::dmabuf_handler;
+use super::gst_pipeline::{self, GpuBackend};
+use super::vulkan_dmabuf;
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -228,7 +228,7 @@ fn try_process_dmabuf(
     let modifier_is_linear = modifier_negotiated
         && (dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Linear)
             || dmabuf.modifier == u64::from(drm_fourcc::DrmModifier::Invalid));
-    let is_importable = crate::formats::is_importable_format(dmabuf.format);
+    let is_importable = super::formats::is_importable_format(dmabuf.format);
     let vulkan_available = vulkan_dmabuf::is_dmabuf_import_available();
 
     if modifier_is_linear && is_importable && vulkan_available {

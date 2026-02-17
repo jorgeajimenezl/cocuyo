@@ -1,18 +1,17 @@
 use tracing::info;
 
+mod ambient;
 mod app;
-mod dmabuf_handler;
-mod formats;
-mod gst_pipeline;
+mod bulb_setup;
+mod frame;
+mod platform;
 mod recording;
 mod screen;
-mod stream;
 mod theme;
-mod vulkan_dmabuf;
 mod widget;
 
 use app::Cocuyo;
-use gst_pipeline::detect_available_backends;
+use platform::linux::gst_pipeline::detect_available_backends;
 
 fn main() -> iced::Result {
     tracing_subscriber::fmt()

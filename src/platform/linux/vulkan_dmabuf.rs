@@ -5,7 +5,7 @@ use ash::vk;
 use drm_fourcc::DrmFourcc;
 use tracing::debug;
 
-use crate::formats;
+use super::formats;
 
 /// Global flag: once DMA-BUF import fails, stop trying for all subsequent frames.
 static DMABUF_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);

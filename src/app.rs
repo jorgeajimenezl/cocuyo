@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
-use std::os::fd::OwnedFd;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use drm_fourcc::DrmFourcc;
 use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
-use crate::gst_pipeline::GpuBackend;
+use crate::ambient::SavedBulbState;
+use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
+use crate::frame::FrameData;
+use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::screen::WindowKind;
 use crate::widget::Element;
@@ -20,61 +22,6 @@ pub enum RecordingState {
     Error(String),
 }
 
-impl std::fmt::Debug for FrameData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameData::DmaBuf { width, height, drm_format, .. } => {
-                f.debug_struct("DmaBuf")
-                    .field("width", width)
-                    .field("height", height)
-                    .field("drm_format", drm_format)
-                    .finish()
-            }
-            FrameData::Cpu { width, height, .. } => {
-                f.debug_struct("Cpu")
-                    .field("width", width)
-                    .field("height", height)
-                    .finish()
-            }
-        }
-    }
-}
-
-pub enum FrameData {
-    DmaBuf {
-        fd: OwnedFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        #[allow(dead_code)]
-        offset: u32,
-        #[allow(dead_code)]
-        modifier: u64,
-    },
-    Cpu {
-        data: Vec<u8>,
-        width: u32,
-        height: u32,
-    },
-}
-
-impl FrameData {
-    pub fn width(&self) -> u32 {
-        match self {
-            FrameData::DmaBuf { width, .. } => *width,
-            FrameData::Cpu { width, .. } => *width,
-        }
-    }
-
-    pub fn height(&self) -> u32 {
-        match self {
-            FrameData::DmaBuf { height, .. } => *height,
-            FrameData::Cpu { height, .. } => *height,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Message {
     WindowOpened(window::Id, WindowKind),
@@ -85,10 +32,17 @@ pub enum Message {
     MaximizeWindow(window::Id),
     OpenSettings,
     OpenPreview,
+    OpenBulbSetup,
     StartRecording,
     StopRecording,
     BackendSelected(usize),
     RecordingEvent(RecordingEvent),
+    BulbSetup(BulbSetupMessage),
+    StartAmbient,
+    StopAmbient,
+    BulbStatesSaved(Vec<SavedBulbState>),
+    ExitApp,
+    Noop,
 }
 
 pub struct Cocuyo {
@@ -100,9 +54,26 @@ pub struct Cocuyo {
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
+    bulb_setup: BulbSetupState,
+    is_ambient_active: bool,
+    last_bulb_update: Option<Instant>,
+    saved_bulb_states: Option<Vec<SavedBulbState>>,
 }
 
 impl Cocuyo {
+    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size) -> Task<Message> {
+        if self.windows.values().any(|k| *k == kind) {
+            return Task::none();
+        }
+        let (_id, open) = window::open(window::Settings {
+            size,
+            min_size: Some(min_size),
+            decorations: false,
+            ..Default::default()
+        });
+        open.map(move |id| Message::WindowOpened(id, kind))
+    }
+
     pub fn new(
         available_backends: Vec<GpuBackend>,
     ) -> (Self, Task<Message>) {
@@ -123,6 +94,10 @@ impl Cocuyo {
             available_backends,
             selected_backend_index: 0,
             recording_cmd_tx: None,
+            bulb_setup: BulbSetupState::new(),
+            is_ambient_active: false,
+            last_bulb_update: None,
+            saved_bulb_states: None,
         };
 
         (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
@@ -133,6 +108,7 @@ impl Cocuyo {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
             Some(WindowKind::Preview) => "Cocuyo - Preview".to_string(),
+            Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
             None => String::new(),
         }
     }
@@ -146,7 +122,21 @@ impl Cocuyo {
             Message::WindowClosed(id) => {
                 let kind = self.windows.remove(&id);
                 if kind == Some(WindowKind::Main) || self.windows.is_empty() {
-                    iced::exit()
+                    // Stop recording if active
+                    if self.is_ambient_active || self.is_recording {
+                        if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                            let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                        }
+                    }
+                    // Restore bulb states before exiting
+                    if let Some(states) = self.saved_bulb_states.take() {
+                        Task::perform(
+                            crate::ambient::restore_bulb_states(states),
+                            |()| Message::ExitApp,
+                        )
+                    } else {
+                        iced::exit()
+                    }
                 } else {
                     Task::none()
                 }
@@ -156,31 +146,21 @@ impl Cocuyo {
             Message::MinimizeWindow(id) => window::minimize(id, true),
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings => {
-                if self.windows.values().any(|k| *k == WindowKind::Settings) {
-                    return Task::none();
-                }
-                let (_id, open) = window::open(window::Settings {
-                    size: Size::new(400.0, 300.0),
-                    min_size: Some(Size::new(300.0, 200.0)),
-                    decorations: false,
-                    ..Default::default()
-                });
-                open.map(|id| Message::WindowOpened(id, WindowKind::Settings))
+                self.open_window(
+                    WindowKind::Settings,
+                    Size::new(400.0, 300.0),
+                    Size::new(300.0, 200.0),
+                )
             }
             Message::OpenPreview => {
-                if self.windows.values().any(|k| *k == WindowKind::Preview) {
-                    return Task::none();
-                }
-                let (_id, open) = window::open(window::Settings {
-                    size: Size::new(800.0, 600.0),
-                    min_size: Some(Size::new(320.0, 240.0)),
-                    decorations: false,
-                    ..Default::default()
-                });
-                open.map(|id| Message::WindowOpened(id, WindowKind::Preview))
+                self.open_window(
+                    WindowKind::Preview,
+                    Size::new(800.0, 600.0),
+                    Size::new(320.0, 240.0),
+                )
             }
             Message::StartRecording => {
-                crate::vulkan_dmabuf::reset_dmabuf_import_failed();
+                crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                 self.is_recording = true;
                 self.session_id += 1;
                 Task::none()
@@ -196,6 +176,64 @@ impl Cocuyo {
                 self.selected_backend_index = idx;
                 Task::none()
             }
+            Message::OpenBulbSetup => {
+                self.open_window(
+                    WindowKind::BulbSetup,
+                    Size::new(500.0, 400.0),
+                    Size::new(350.0, 300.0),
+                )
+            }
+            Message::BulbSetup(msg) => {
+                if matches!(msg, BulbSetupMessage::Done) {
+                    if let Some((&id, _)) = self.windows.iter().find(|(_, k)| **k == WindowKind::BulbSetup) {
+                        return window::close(id);
+                    }
+                    return Task::none();
+                }
+                self.bulb_setup.update(msg).map(Message::BulbSetup)
+            }
+            Message::Noop => Task::none(),
+            Message::ExitApp => iced::exit(),
+            Message::StartAmbient => {
+                if !self.bulb_setup.has_selected_bulbs() {
+                    return Task::none();
+                }
+                // Phase 1: save bulb states before starting ambient
+                let bulbs = self.bulb_setup.selected_bulb_infos();
+                Task::perform(
+                    crate::ambient::save_bulb_states(bulbs),
+                    Message::BulbStatesSaved,
+                )
+            }
+            Message::BulbStatesSaved(states) => {
+                // Phase 2: states saved, now start ambient
+                self.saved_bulb_states = if states.is_empty() { None } else { Some(states) };
+                self.is_ambient_active = true;
+                self.last_bulb_update = None;
+                if !self.is_recording {
+                    crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    self.is_recording = true;
+                    self.session_id += 1;
+                }
+                Task::none()
+            }
+            Message::StopAmbient => {
+                self.is_ambient_active = false;
+                self.last_bulb_update = None;
+                if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                    let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                }
+                self.current_frame = None;
+                let restore_task = if let Some(states) = self.saved_bulb_states.take() {
+                    Task::perform(
+                        crate::ambient::restore_bulb_states(states),
+                        |()| Message::Noop,
+                    )
+                } else {
+                    Task::none()
+                };
+                restore_task
+            }
             Message::RecordingEvent(event) => {
                 match event {
                     RecordingEvent::Ready(cmd_tx) => {
@@ -204,12 +242,35 @@ impl Cocuyo {
                     RecordingEvent::StateChanged(state) => {
                         if state == RecordingState::Idle {
                             self.is_recording = false;
+                            self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
                         }
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
-                        self.current_frame = Some(frame);
+                        self.current_frame = Some(frame.clone());
+
+                        if self.is_ambient_active {
+                            let should_update = self
+                                .last_bulb_update
+                                .map(|t| t.elapsed() >= Duration::from_millis(150))
+                                .unwrap_or(true);
+
+                            if should_update {
+                                self.last_bulb_update = Some(Instant::now());
+                                let selected = self.bulb_setup.selected_bulbs_vec();
+                                if let Some(targets) = crate::ambient::sample_frame_for_bulbs(
+                                    &frame,
+                                    &selected,
+                                    self.bulb_setup.discovered_bulbs(),
+                                ) {
+                                    return Task::perform(
+                                        crate::ambient::dispatch_bulb_colors(targets),
+                                        |()| Message::Noop,
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Task::none()
@@ -220,15 +281,29 @@ impl Cocuyo {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
-                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
-                crate::screen::main_window::view(window_id, &self.recording_state, frame_info)
+                crate::screen::main_window::view(
+                    window_id,
+                    self.is_ambient_active,
+                    self.bulb_setup.has_selected_bulbs(),
+                    self.bulb_setup.selected_bulbs().len(),
+                )
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
                 crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
             Some(WindowKind::Preview) => {
-                crate::screen::preview::view(window_id, self.current_frame.as_ref().map(|f| f.as_ref()))
+                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
+                crate::screen::preview::view(
+                    window_id,
+                    self.current_frame.as_ref().map(|f| f.as_ref()),
+                    &self.recording_state,
+                    frame_info,
+                    self.is_ambient_active,
+                )
+            }
+            Some(WindowKind::BulbSetup) => {
+                crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
             }
             None => iced::widget::space().into(),
         };
