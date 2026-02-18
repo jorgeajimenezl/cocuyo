@@ -1,9 +1,9 @@
-use iced::widget::{button, container, pick_list, rule};
-use iced::{color, Background, Border, Color, Font, Shadow, Theme};
+use std::sync::LazyLock;
 
-// ── Heading font ─────────────────────────────────────────────
+use iced::widget::{button, container, pick_list, rule, theme};
+use iced::{color, Background, Border, Color, Shadow, Theme, border::Radius};
 
-pub const HEADING_FONT: Font = Font::with_name("Geist Pixel Circle");
+use crate::app::Cocuyo;
 
 // ── Color palette ────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ pub const SUCCESS: Color = color!(0xb1b695);
 
 // ── Theme constructor ────────────────────────────────────────
 
-pub fn create_theme() -> Theme {
+static THEME: LazyLock<Theme> = LazyLock::new(|| {
     Theme::custom(
         "Cocuyo".to_string(),
         iced::theme::Palette {
@@ -32,6 +32,10 @@ pub fn create_theme() -> Theme {
             danger: DANGER,
         },
     )
+});
+
+pub fn create_theme() -> Theme {
+    THEME.clone()
 }
 
 // ── Rounded border helper ────────────────────────────────────
@@ -41,6 +45,14 @@ fn rounded_border(color: Color, radius: f32) -> Border {
         radius: radius.into(),
         width: 1.0,
         color,
+    }
+}
+
+// ── App Style ───────────────────────────────────────────────────
+pub fn app_style(_state: &Cocuyo, _theme: &Theme) -> theme::Style {
+    theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
     }
 }
 
@@ -116,7 +128,10 @@ pub fn title_bar_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
-        border: Border::default(),
+        border: Border {
+            radius: Radius::default().top(7.0),
+            ..Border::default()
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -138,7 +153,10 @@ pub fn styled_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG)),
-        border: Border::default(),
+        border: Border {
+            radius: Radius::default().bottom(7.0),
+            ..Border::default()
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -163,7 +181,7 @@ pub fn status_bar_container(_theme: &Theme) -> container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
         border: Border {
-            radius: 0.0.into(),
+            radius: Radius::default().bottom(7.0),
             width: 0.0,
             color: Color::TRANSPARENT,
         },

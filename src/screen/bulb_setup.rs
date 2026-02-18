@@ -91,7 +91,8 @@ pub fn view<'a>(
             .align_y(Center),
     )
     .padding(10)
-    .width(Fill);
+    .width(Fill)
+    .style(theme::status_bar_container);
 
     column![
         title_bar::view(window_id, "Bulb Setup"),

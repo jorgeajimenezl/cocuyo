@@ -1,4 +1,5 @@
 use std::os::fd::AsRawFd;
+use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
 use iced::widget::shader;
@@ -23,7 +24,7 @@ enum FrameInfo {
         stride: u32,
     },
     Cpu {
-        data: Vec<u8>,
+        data: Arc<Vec<u8>>,
         width: u32,
         height: u32,
     },
@@ -51,7 +52,7 @@ impl VideoScene {
                 width,
                 height,
             } => FrameInfo::Cpu {
-                data: data.clone(),
+                data: Arc::clone(data),
                 width: *width,
                 height: *height,
             },
@@ -91,7 +92,7 @@ impl<Message> shader::Program<Message> for VideoScene {
                 width,
                 height,
             }) => VideoPrimitive::Cpu {
-                data: data.clone(),
+                data: Arc::clone(data),
                 width: *width,
                 height: *height,
                 bounds,
@@ -113,7 +114,7 @@ pub enum VideoPrimitive {
         bounds: Rectangle,
     },
     Cpu {
-        data: Vec<u8>,
+        data: Arc<Vec<u8>>,
         width: u32,
         height: u32,
         bounds: Rectangle,
@@ -141,7 +142,7 @@ impl shader::Primitive for VideoPrimitive {
                 stride,
                 bounds,
             } => {
-                pipeline.prepare_dmabuf(device, *fd, *width, *height, *drm_format, *stride, *bounds);
+                pipeline.prepare_dmabuf(device, queue, *fd, *width, *height, *drm_format, *stride, *bounds);
             }
             VideoPrimitive::Cpu {
                 data,
@@ -302,6 +303,7 @@ impl VideoPipeline {
     fn prepare_dmabuf(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         fd: std::os::fd::RawFd,
         width: u32,
         height: u32,
@@ -316,7 +318,7 @@ impl VideoPipeline {
         match result {
             Ok((texture, _wgpu_format)) => {
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                self.update_bind_group(device, &view, width, height, bounds);
+                self.update_bind_group(device, queue, &view, width, height, bounds);
                 self._current_texture = Some(texture);
             }
             Err(e) => {
@@ -392,13 +394,14 @@ impl VideoPipeline {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.update_bind_group(device, &view, width, height, bounds);
+        self.update_bind_group(device, queue, &view, width, height, bounds);
         self._current_texture = Some(texture);
     }
 
     fn update_bind_group(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         texture_view: &wgpu::TextureView,
         frame_width: u32,
         frame_height: u32,
@@ -421,23 +424,7 @@ impl VideoPipeline {
             offset: [(1.0 - scale_x) * 0.5, (1.0 - scale_y) * 0.5],
         };
 
-        // Write uniforms - we'll update via a new buffer write
-        // Since we can't write to the buffer here (no queue), we recreate the buffer
-        // Actually we need queue for write_buffer... Let's use mapped_at_creation approach
-        // or just include queue in our calls. For now, use a new buffer each frame.
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("video_uniforms"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
-
-        {
-            let mut mapping = uniform_buffer.slice(..).get_mapped_range_mut();
-            mapping.copy_from_slice(bytemuck::bytes_of(&uniforms));
-        }
-        uniform_buffer.unmap();
-        self.uniform_buffer = uniform_buffer;
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
         self.current_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("video_bind_group"),

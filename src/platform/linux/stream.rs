@@ -298,7 +298,7 @@ fn try_process_dmabuf_gstreamer(
 
     match converter.pull_rgba_frame() {
         Ok(data) => Some(FrameData::Cpu {
-            data,
+            data: Arc::new(data),
             width: user_data.format.size().width,
             height: user_data.format.size().height,
         }),
@@ -348,7 +348,7 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     };
 
     Some(FrameData::Cpu {
-        data: converted_data,
+        data: Arc::new(converted_data),
         width: user_data.format.size().width,
         height: user_data.format.size().height,
     })

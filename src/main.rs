@@ -6,6 +6,8 @@ mod bulb_setup;
 mod frame;
 mod platform;
 mod recording;
+mod region;
+mod sampling;
 mod screen;
 mod theme;
 mod widget;
@@ -28,19 +30,20 @@ fn main() -> iced::Result {
 
     let available_backends = detect_available_backends();
     info!(
-        backends = ?available_backends.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
+        backends = ?available_backends,
         "Detected GPU backends"
     );
 
-    let ab = available_backends.clone();
-
-    iced::daemon(
-        move || Cocuyo::new(ab.clone()),
+    iced::daemon({
+        let backends = available_backends;
+        move || Cocuyo::new(backends.clone())
+    },
         Cocuyo::update,
         Cocuyo::view,
     )
     .title(Cocuyo::title)
     .theme(Cocuyo::theme)
+    .style(theme::app_style)
     .subscription(Cocuyo::subscription)
     .font(include_bytes!("../assets/fonts/Geist-Regular.otf").as_slice())
     .font(include_bytes!("../assets/fonts/GeistPixel-Circle.otf").as_slice())

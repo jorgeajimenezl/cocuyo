@@ -2,17 +2,20 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use iced::widget::container;
-use iced::window;
-use iced::{Fill, Size, Subscription, Task, Theme};
-use tokio::sync::mpsc;
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::frame::FrameData;
 use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
+use crate::region::Region;
+use crate::sampling::SamplingStrategy;
 use crate::screen::WindowKind;
+use crate::screen::region_overlay::RegionMessage;
 use crate::widget::Element;
+use iced::widget::container;
+use iced::window;
+use iced::{Fill, Size, Subscription, Task, Theme};
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
@@ -31,7 +34,6 @@ pub enum Message {
     MinimizeWindow(window::Id),
     MaximizeWindow(window::Id),
     OpenSettings,
-    OpenPreview,
     OpenBulbSetup,
     StartRecording,
     StopRecording,
@@ -41,6 +43,8 @@ pub enum Message {
     StartAmbient,
     StopAmbient,
     BulbStatesSaved(Vec<SavedBulbState>),
+    RegionUpdate(RegionMessage),
+    RegionStrategyChanged(usize, SamplingStrategy),
     ExitApp,
     Noop,
 }
@@ -58,29 +62,18 @@ pub struct Cocuyo {
     is_ambient_active: bool,
     last_bulb_update: Option<Instant>,
     saved_bulb_states: Option<Vec<SavedBulbState>>,
+    regions: Vec<Region>,
+    next_region_id: usize,
+    selected_region: Option<usize>,
 }
 
 impl Cocuyo {
-    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size) -> Task<Message> {
-        if self.windows.values().any(|k| *k == kind) {
-            return Task::none();
-        }
-        let (_id, open) = window::open(window::Settings {
-            size,
-            min_size: Some(min_size),
-            decorations: false,
-            ..Default::default()
-        });
-        open.map(move |id| Message::WindowOpened(id, kind))
-    }
-
-    pub fn new(
-        available_backends: Vec<GpuBackend>,
-    ) -> (Self, Task<Message>) {
+    pub fn new(available_backends: Vec<GpuBackend>) -> (Self, Task<Message>) {
         let (id, open) = window::open(window::Settings {
-            size: Size::new(800.0, 500.0),
-            min_size: Some(Size::new(400.0, 300.0)),
+            size: Size::new(1200.0, 750.0),
+            min_size: Some(Size::new(800.0, 500.0)),
             decorations: false,
+            transparent: true,
             ..Default::default()
         });
 
@@ -98,16 +91,21 @@ impl Cocuyo {
             is_ambient_active: false,
             last_bulb_update: None,
             saved_bulb_states: None,
+            regions: Vec::new(),
+            next_region_id: 1,
+            selected_region: None,
         };
 
-        (app, open.map(move |id| Message::WindowOpened(id, WindowKind::Main)))
+        (
+            app,
+            open.map(move |id| Message::WindowOpened(id, WindowKind::Main)),
+        )
     }
 
     pub fn title(&self, window_id: window::Id) -> String {
         match self.windows.get(&window_id) {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
-            Some(WindowKind::Preview) => "Cocuyo - Preview".to_string(),
             Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
             None => String::new(),
         }
@@ -130,10 +128,9 @@ impl Cocuyo {
                     }
                     // Restore bulb states before exiting
                     if let Some(states) = self.saved_bulb_states.take() {
-                        Task::perform(
-                            crate::ambient::restore_bulb_states(states),
-                            |()| Message::ExitApp,
-                        )
+                        Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                            Message::ExitApp
+                        })
                     } else {
                         iced::exit()
                     }
@@ -145,20 +142,11 @@ impl Cocuyo {
             Message::CloseWindow(id) => window::close(id),
             Message::MinimizeWindow(id) => window::minimize(id, true),
             Message::MaximizeWindow(id) => window::maximize(id, true),
-            Message::OpenSettings => {
-                self.open_window(
-                    WindowKind::Settings,
-                    Size::new(400.0, 300.0),
-                    Size::new(300.0, 200.0),
-                )
-            }
-            Message::OpenPreview => {
-                self.open_window(
-                    WindowKind::Preview,
-                    Size::new(800.0, 600.0),
-                    Size::new(320.0, 240.0),
-                )
-            }
+            Message::OpenSettings => self.open_window(
+                WindowKind::Settings,
+                Size::new(400.0, 300.0),
+                Size::new(300.0, 200.0),
+            ),
             Message::StartRecording => {
                 crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                 self.is_recording = true;
@@ -176,21 +164,29 @@ impl Cocuyo {
                 self.selected_backend_index = idx;
                 Task::none()
             }
-            Message::OpenBulbSetup => {
-                self.open_window(
-                    WindowKind::BulbSetup,
-                    Size::new(500.0, 400.0),
-                    Size::new(350.0, 300.0),
-                )
-            }
+            Message::OpenBulbSetup => self.open_window(
+                WindowKind::BulbSetup,
+                Size::new(500.0, 400.0),
+                Size::new(350.0, 300.0),
+            ),
             Message::BulbSetup(msg) => {
                 if matches!(msg, BulbSetupMessage::Done) {
-                    if let Some((&id, _)) = self.windows.iter().find(|(_, k)| **k == WindowKind::BulbSetup) {
+                    self.sync_regions_to_bulbs();
+                    if let Some((&id, _)) = self
+                        .windows
+                        .iter()
+                        .find(|(_, k)| **k == WindowKind::BulbSetup)
+                    {
                         return window::close(id);
                     }
                     return Task::none();
                 }
-                self.bulb_setup.update(msg).map(Message::BulbSetup)
+                let is_toggle = matches!(msg, BulbSetupMessage::ToggleBulb(_));
+                let task = self.bulb_setup.update(msg).map(Message::BulbSetup);
+                if is_toggle {
+                    self.sync_regions_to_bulbs();
+                }
+                task
             }
             Message::Noop => Task::none(),
             Message::ExitApp => iced::exit(),
@@ -207,7 +203,11 @@ impl Cocuyo {
             }
             Message::BulbStatesSaved(states) => {
                 // Phase 2: states saved, now start ambient
-                self.saved_bulb_states = if states.is_empty() { None } else { Some(states) };
+                self.saved_bulb_states = if states.is_empty() {
+                    None
+                } else {
+                    Some(states)
+                };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 if !self.is_recording {
@@ -225,10 +225,9 @@ impl Cocuyo {
                 }
                 self.current_frame = None;
                 let restore_task = if let Some(states) = self.saved_bulb_states.take() {
-                    Task::perform(
-                        crate::ambient::restore_bulb_states(states),
-                        |()| Message::Noop,
-                    )
+                    Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                        Message::Noop
+                    })
                 } else {
                     Task::none()
                 };
@@ -248,7 +247,20 @@ impl Cocuyo {
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
-                        self.current_frame = Some(frame.clone());
+                        self.current_frame = Some(frame);
+                        let frame = self.current_frame.as_ref().unwrap();
+
+                        // Update region sampled colors
+                        for region in &mut self.regions {
+                            region.sampled_color = crate::sampling::sample_region(
+                                frame,
+                                region.x,
+                                region.y,
+                                region.width,
+                                region.height,
+                                region.strategy,
+                            );
+                        }
 
                         if self.is_ambient_active {
                             let should_update = self
@@ -258,10 +270,15 @@ impl Cocuyo {
 
                             if should_update {
                                 self.last_bulb_update = Some(Instant::now());
-                                let selected = self.bulb_setup.selected_bulbs_vec();
-                                if let Some(targets) = crate::ambient::sample_frame_for_bulbs(
-                                    &frame,
-                                    &selected,
+
+                                // Use region-based sampling when regions exist
+                                if self.regions.is_empty() {
+                                    return Task::none();
+                                }
+
+                                if let Some(targets) = crate::ambient::sample_frame_for_regions(
+                                    frame,
+                                    &self.regions,
                                     self.bulb_setup.discovered_bulbs(),
                                 ) {
                                     return Task::perform(
@@ -275,32 +292,50 @@ impl Cocuyo {
                 }
                 Task::none()
             }
+            Message::RegionStrategyChanged(id, strategy) => {
+                if let Some(region) = self.regions.iter_mut().find(|r| r.id == id) {
+                    region.strategy = strategy;
+                }
+                Task::none()
+            }
+            Message::RegionUpdate(msg) => {
+                match msg {
+                    RegionMessage::Updated(id, x, y, w, h) => {
+                        if let Some(existing) = self.regions.iter_mut().find(|reg| reg.id == id) {
+                            existing.x = x;
+                            existing.y = y;
+                            existing.width = w;
+                            existing.height = h;
+                        }
+                    }
+                    RegionMessage::Selected(id) => {
+                        self.selected_region = id;
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         let content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
-                crate::screen::main_window::view(
-                    window_id,
-                    self.is_ambient_active,
-                    self.bulb_setup.has_selected_bulbs(),
-                    self.bulb_setup.selected_bulbs().len(),
-                )
-            }
-            Some(WindowKind::Settings) => {
-                let selected = self.available_backends.get(self.selected_backend_index);
-                crate::screen::settings::view(window_id, &self.available_backends, selected)
-            }
-            Some(WindowKind::Preview) => {
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
-                crate::screen::preview::view(
+                crate::screen::main_window::view(
                     window_id,
                     self.current_frame.as_ref().map(|f| f.as_ref()),
                     &self.recording_state,
                     frame_info,
                     self.is_ambient_active,
+                    self.bulb_setup.has_selected_bulbs(),
+                    self.bulb_setup.selected_bulbs().len(),
+                    &self.regions,
+                    self.selected_region,
                 )
+            }
+            Some(WindowKind::Settings) => {
+                let selected = self.available_backends.get(self.selected_backend_index);
+                crate::screen::settings::view(window_id, &self.available_backends, selected)
             }
             Some(WindowKind::BulbSetup) => {
                 crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
@@ -340,5 +375,68 @@ impl Cocuyo {
         }
 
         Subscription::batch(subs)
+    }
+
+    fn sync_regions_to_bulbs(&mut self) {
+        let selected_macs = self.bulb_setup.selected_bulbs_vec();
+
+        // Remove regions whose bulb_mac is no longer selected
+        self.regions.retain(|r| {
+            selected_macs.contains(&r.bulb_mac)
+        });
+
+        // Clear selected_region if it was removed
+        if let Some(sel) = self.selected_region {
+            if !self.regions.iter().any(|r| r.id == sel) {
+                self.selected_region = None;
+            }
+        }
+
+        // Add new regions for newly selected bulbs (not already covered)
+        let num_total = selected_macs.len();
+        for (i, mac) in selected_macs.iter().enumerate() {
+            if self.regions.iter().any(|r| r.bulb_mac == *mac) {
+                continue;
+            }
+
+            // Default layout: evenly spaced horizontally, vertically centered
+            let (frame_w, frame_h) = self
+                .current_frame
+                .as_ref()
+                .map(|f| (f.width() as f32, f.height() as f32))
+                .unwrap_or((1920.0, 1080.0));
+
+            let default_w = (frame_w / (num_total as f32 + 1.0)).min(frame_w * 0.3);
+            let default_h = frame_h * 0.4;
+            let cx = frame_w * (i as f32 + 1.0) / (num_total as f32 + 1.0);
+            let cy = frame_h / 2.0;
+
+            let region = Region {
+                id: self.next_region_id,
+                x: cx - default_w / 2.0,
+                y: (cy - default_h / 2.0).clamp(0.0, frame_h - default_h),
+                width: default_w,
+                height: default_h,
+                bulb_mac: mac.clone(),
+                sampled_color: None,
+                strategy: SamplingStrategy::default(),
+            };
+            self.next_region_id += 1;
+            self.regions.push(region);
+        }
+    }
+
+    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size) -> Task<Message> {
+        if self.windows.values().any(|k| *k == kind) {
+            return Task::none();
+        }
+        let (_id, open) = window::open(window::Settings {
+            size,
+            min_size: Some(min_size),
+            decorations: false,
+            transparent: true,
+            ..Default::default()
+        });
+        open.map(move |id| Message::WindowOpened(id, kind))
     }
 }

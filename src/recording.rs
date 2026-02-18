@@ -81,11 +81,10 @@ pub fn recording_subscription(
 
         // Create bounded channel for frames from PipeWire thread
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Arc<FrameData>>(2);
-        let selected_backend = backend.clone();
 
         // Spawn PipeWire thread
         let pw_handle = std::thread::spawn(move || {
-            stream::start_streaming(node_id, fd, frame_tx, selected_backend)
+            stream::start_streaming(node_id, fd, frame_tx, backend)
         });
 
         // Forward frames until PipeWire thread finishes or we receive a stop command.

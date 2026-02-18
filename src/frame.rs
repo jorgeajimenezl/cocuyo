@@ -1,4 +1,5 @@
 use std::os::fd::OwnedFd;
+use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
 
@@ -35,7 +36,7 @@ pub enum FrameData {
         modifier: u64,
     },
     Cpu {
-        data: Vec<u8>,
+        data: Arc<Vec<u8>>,
         width: u32,
         height: u32,
     },
@@ -56,21 +57,4 @@ impl FrameData {
         }
     }
 
-    /// Sample a pixel at (x, y) returning (R, G, B). Only works for CPU frames (RGBA layout).
-    pub fn sample_pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
-        match self {
-            FrameData::Cpu { data, width, height } => {
-                if x >= *width || y >= *height {
-                    return None;
-                }
-                let idx = ((y * width + x) * 4) as usize;
-                if idx + 2 < data.len() {
-                    Some((data[idx], data[idx + 1], data[idx + 2]))
-                } else {
-                    None
-                }
-            }
-            FrameData::DmaBuf { .. } => None,
-        }
-    }
 }
