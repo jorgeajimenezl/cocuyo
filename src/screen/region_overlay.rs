@@ -9,9 +9,10 @@ use crate::region::{self, Region};
 const HANDLE_SIZE: f32 = 8.0;
 const MIN_REGION_SIZE: f32 = 10.0;
 
+/// Region geometry update: (x, y, width, height)
 #[derive(Debug, Clone)]
 pub enum RegionMessage {
-    Updated(usize, Region),
+    Updated(usize, f32, f32, f32, f32),
     Selected(Option<usize>),
 }
 
@@ -202,12 +203,13 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                             return Some(Action::capture());
                         };
 
-                        let mut updated = region.clone();
-                        updated.x = fx.max(0.0).min(self.frame_width as f32 - updated.width);
-                        updated.y = fy.max(0.0).min(self.frame_height as f32 - updated.height);
+                        let new_x = fx.max(0.0).min(self.frame_width as f32 - region.width);
+                        let new_y = fy.max(0.0).min(self.frame_height as f32 - region.height);
 
                         Some(
-                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(region_id, updated)))
+                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(
+                                region_id, new_x, new_y, region.width, region.height,
+                            )))
                                 .and_capture(),
                         )
                     }
@@ -265,14 +267,14 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                             return Some(Action::capture());
                         };
 
-                        let mut updated = region.clone();
-                        updated.x = fx0.max(0.0);
-                        updated.y = fy0.max(0.0);
-                        updated.width = (fx1 - fx0).max(1.0);
-                        updated.height = (fy1 - fy0).max(1.0);
-
                         Some(
-                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(region_id, updated)))
+                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(
+                                region_id,
+                                fx0.max(0.0),
+                                fy0.max(0.0),
+                                (fx1 - fx0).max(1.0),
+                                (fy1 - fy0).max(1.0),
+                            )))
                                 .and_capture(),
                         )
                     }

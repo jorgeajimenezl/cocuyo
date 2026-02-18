@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use iced::widget::{button, container, pick_list, rule};
 use iced::{color, Background, Border, Color, Shadow, Theme};
 
@@ -20,7 +22,7 @@ pub const SUCCESS: Color = color!(0xb1b695);
 
 // ── Theme constructor ────────────────────────────────────────
 
-pub fn create_theme() -> Theme {
+static THEME: LazyLock<Theme> = LazyLock::new(|| {
     Theme::custom(
         "Cocuyo".to_string(),
         iced::theme::Palette {
@@ -32,6 +34,10 @@ pub fn create_theme() -> Theme {
             danger: DANGER,
         },
     )
+});
+
+pub fn create_theme() -> Theme {
+    THEME.clone()
 }
 
 // ── Rounded border helper ────────────────────────────────────

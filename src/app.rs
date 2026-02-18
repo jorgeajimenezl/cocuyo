@@ -244,7 +244,8 @@ impl Cocuyo {
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
-                        self.current_frame = Some(frame.clone());
+                        self.current_frame = Some(frame);
+                        let frame = self.current_frame.as_ref().unwrap();
 
                         // Update region sampled colors
                         for region in &mut self.regions {
@@ -271,7 +272,7 @@ impl Cocuyo {
                                 }
 
                                 if let Some(targets) = crate::ambient::sample_frame_for_regions(
-                                    &frame,
+                                    frame,
                                     &self.regions,
                                     self.bulb_setup.discovered_bulbs(),
                                 ) {
@@ -288,12 +289,12 @@ impl Cocuyo {
             }
             Message::RegionUpdate(msg) => {
                 match msg {
-                    RegionMessage::Updated(id, r) => {
+                    RegionMessage::Updated(id, x, y, w, h) => {
                         if let Some(existing) = self.regions.iter_mut().find(|reg| reg.id == id) {
-                            existing.x = r.x;
-                            existing.y = r.y;
-                            existing.width = r.width;
-                            existing.height = r.height;
+                            existing.x = x;
+                            existing.y = y;
+                            existing.width = w;
+                            existing.height = h;
                         }
                     }
                     RegionMessage::Selected(id) => {
@@ -381,15 +382,9 @@ impl Cocuyo {
         }
 
         // Add new regions for newly selected bulbs (not already covered)
-        let existing_macs: Vec<String> = self
-            .regions
-            .iter()
-            .map(|r| r.bulb_mac.clone())
-            .collect();
-
         let num_total = selected_macs.len();
         for (i, mac) in selected_macs.iter().enumerate() {
-            if existing_macs.contains(mac) {
+            if self.regions.iter().any(|r| r.bulb_mac == *mac) {
                 continue;
             }
 

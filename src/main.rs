@@ -29,14 +29,14 @@ fn main() -> iced::Result {
 
     let available_backends = detect_available_backends();
     info!(
-        backends = ?available_backends.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
+        backends = ?available_backends,
         "Detected GPU backends"
     );
 
-    let ab = available_backends.clone();
-
-    iced::daemon(
-        move || Cocuyo::new(ab.clone()),
+    iced::daemon({
+        let backends = available_backends;
+        move || Cocuyo::new(backends.clone())
+    },
         Cocuyo::update,
         Cocuyo::view,
     )

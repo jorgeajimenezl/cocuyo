@@ -320,14 +320,7 @@ impl GstVideoConverter {
     }
 
     pub fn push_dmabuf(&mut self, fd: RawFd, size: usize) -> Result<(), GstError> {
-        let allocator = match &self.dmabuf_allocator {
-            Some(alloc) => alloc.clone(),
-            None => {
-                let alloc = DmaBufAllocator::new();
-                self.dmabuf_allocator = Some(alloc.clone());
-                alloc
-            }
-        };
+        let allocator = self.dmabuf_allocator.get_or_insert_with(DmaBufAllocator::new);
 
         let memory = unsafe { allocator.alloc_with_flags(fd, size, FdMemoryFlags::DONT_CLOSE) }
             .map_err(|e| {

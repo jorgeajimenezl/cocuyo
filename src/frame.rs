@@ -1,4 +1,5 @@
 use std::os::fd::OwnedFd;
+use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
 
@@ -35,7 +36,7 @@ pub enum FrameData {
         modifier: u64,
     },
     Cpu {
-        data: Vec<u8>,
+        data: Arc<Vec<u8>>,
         width: u32,
         height: u32,
     },
