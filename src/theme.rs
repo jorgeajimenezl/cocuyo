@@ -1,9 +1,9 @@
 use iced::widget::{button, container, pick_list, rule};
-use iced::{color, Background, Border, Color, Font, Shadow, Theme};
+use iced::{color, Background, Border, Color, Shadow, Theme};
 
 // ── Heading font ─────────────────────────────────────────────
 
-pub const HEADING_FONT: Font = Font::with_name("Geist Pixel Circle");
+// pub const HEADING_FONT: Font = Font::with_name("Geist Pixel Circle");
 
 // ── Color palette ────────────────────────────────────────────
 

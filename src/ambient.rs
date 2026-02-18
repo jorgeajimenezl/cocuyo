@@ -56,17 +56,6 @@ pub fn map_to_bulb_color(r: u8, g: u8, b: u8) -> (BulbColor, u8) {
     }
 }
 
-/// Distribute bulb sample positions evenly across frame width, vertically centered.
-fn compute_bulb_positions(num_bulbs: usize, width: u32, height: u32) -> Vec<(u32, u32)> {
-    (0..num_bulbs)
-        .map(|i| {
-            let x = width * (i as u32 + 1) / (num_bulbs as u32 + 1);
-            let y = height / 2;
-            (x, y)
-        })
-        .collect()
-}
-
 /// Send mapped colors to WiZ bulbs concurrently.
 async fn send_colors_to_bulbs(targets: Vec<(IpAddr, BulbColor, u8)>) {
     let futs: Vec<_> = targets
@@ -120,26 +109,30 @@ pub async fn discover_bulbs() -> Vec<BulbInfo> {
     }
 }
 
-/// Sample frame colors at bulb positions, map them to valid WiZ colors,
-/// and build a target list for sending.
-/// Returns `None` if no valid samples could be taken (e.g. DmaBuf frame).
-pub fn sample_frame_for_bulbs(
+/// Sample frame colors using region-based sampling.
+/// Each region with a `bulb_mac` is sampled and mapped to the corresponding bulb.
+pub fn sample_frame_for_regions(
     frame: &Arc<FrameData>,
-    selected_macs: &[String],
+    regions: &[crate::region::Region],
     bulbs: &[BulbInfo],
 ) -> Option<Vec<(IpAddr, BulbColor, u8)>> {
-    let positions = compute_bulb_positions(selected_macs.len(), frame.width(), frame.height());
     let mut targets = Vec::new();
 
-    for (i, mac) in selected_macs.iter().enumerate() {
-        if let Some(&(x, y)) = positions.get(i) {
-            if let Some((r, g, b)) = frame.sample_pixel(x, y) {
-                if let Some(bulb) = bulbs.iter().find(|b| &b.mac == mac) {
-                    let (color, brightness) = map_to_bulb_color(r, g, b);
-                    targets.push((bulb.ip, color, brightness));
-                }
-            }
-        }
+    for region in regions {
+        let Some(mac) = &region.bulb_mac else { continue };
+        let Some((r, g, b)) = frame.sample_region_average(
+            region.x,
+            region.y,
+            region.width,
+            region.height,
+        ) else {
+            continue;
+        };
+        let Some(bulb) = bulbs.iter().find(|b| &b.mac == mac) else {
+            continue;
+        };
+        let (color, brightness) = map_to_bulb_color(r, g, b);
+        targets.push((bulb.ip, color, brightness));
     }
 
     if targets.is_empty() {

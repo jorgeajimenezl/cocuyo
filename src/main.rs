@@ -6,6 +6,7 @@ mod bulb_setup;
 mod frame;
 mod platform;
 mod recording;
+mod region;
 mod screen;
 mod theme;
 mod widget;
