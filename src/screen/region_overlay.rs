@@ -156,11 +156,13 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
         // leaves the widget bounds.
         if let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
             let interaction = std::mem::replace(&mut state.interaction, Interaction::None);
-            state.cache.clear();
 
             return match interaction {
                 Interaction::Dragging { .. }
-                | Interaction::Resizing { .. } => Some(Action::capture()),
+                | Interaction::Resizing { .. } => {
+                    state.cache.clear();
+                    Some(Action::capture())
+                }
                 Interaction::None => None,
             };
         }
@@ -238,8 +240,8 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                             new_x, new_y, bounds, self.frame_width, self.frame_height,
                         );
 
-                        let new_x = fx.max(0.0).min(self.frame_width as f32 - region.width);
-                        let new_y = fy.max(0.0).min(self.frame_height as f32 - region.height);
+                        let new_x = fx.max(0.0).min((self.frame_width as f32 - region.width).max(0.0));
+                        let new_y = fy.max(0.0).min((self.frame_height as f32 - region.height).max(0.0));
 
                         Some(
                             Action::publish(Message::RegionUpdate(RegionMessage::Updated(
@@ -430,7 +432,10 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
 
         match &state.interaction {
             Interaction::Dragging { .. } => mouse::Interaction::Grabbing,
-            Interaction::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
+            Interaction::Resizing { handle, .. } => match handle {
+                Handle::TopLeft | Handle::BottomRight => mouse::Interaction::ResizingDiagonallyDown,
+                Handle::TopRight | Handle::BottomLeft => mouse::Interaction::ResizingDiagonallyUp,
+            },
             Interaction::None => {
                 // Check handles of selected region
                 if let Some(sel_id) = self.selected_region {
@@ -441,8 +446,11 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                             self.frame_width,
                             self.frame_height,
                         );
-                        if hit_test_handle(wrect, pos).is_some() {
-                            return mouse::Interaction::ResizingDiagonallyDown;
+                        if let Some(handle) = hit_test_handle(wrect, pos) {
+                            return match handle {
+                                Handle::TopLeft | Handle::BottomRight => mouse::Interaction::ResizingDiagonallyDown,
+                                Handle::TopRight | Handle::BottomLeft => mouse::Interaction::ResizingDiagonallyUp,
+                            };
                         }
                     }
                 }

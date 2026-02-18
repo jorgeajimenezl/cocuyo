@@ -5,10 +5,6 @@ use iced::{color, Background, Border, Color, Shadow, Theme, border::Radius};
 
 use crate::app::Cocuyo;
 
-// ── Heading font ─────────────────────────────────────────────
-
-// pub const HEADING_FONT: Font = Font::with_name("Geist Pixel Circle");
-
 // ── Color palette ────────────────────────────────────────────
 
 pub const BG: Color = color!(0x2b292d);
