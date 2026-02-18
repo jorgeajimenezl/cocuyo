@@ -349,11 +349,9 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                 );
 
                 // Label: show bulb name or MAC suffix
-                let label = if let Some(mac) = &region.bulb_mac {
-                    format!("R{} ({})", i + 1, &mac[mac.len().saturating_sub(5)..])
-                } else {
-                    format!("R{}", i + 1)
-                };
+                let label = format!("R{} ({})", i + 1, 
+                    &region.bulb_mac[region.bulb_mac.len().saturating_sub(5)..]);
+                    
                 frame.fill_text(Text {
                     content: label,
                     position: Point::new(wrect.x + 4.0, wrect.y + 2.0),

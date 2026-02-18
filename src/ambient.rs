@@ -119,7 +119,7 @@ pub fn sample_frame_for_regions(
     let mut targets = Vec::new();
 
     for region in regions {
-        let Some(mac) = &region.bulb_mac else { continue };
+        let mac = &region.bulb_mac;
         let Some((r, g, b)) = frame.sample_region_average(
             region.x,
             region.y,

@@ -8,7 +8,7 @@ pub struct Region {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub bulb_mac: Option<String>,
+    pub bulb_mac: String,
     pub sampled_color: Option<(u8, u8, u8)>,
 }
 

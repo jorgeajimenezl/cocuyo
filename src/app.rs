@@ -370,9 +370,7 @@ impl Cocuyo {
 
         // Remove regions whose bulb_mac is no longer selected
         self.regions.retain(|r| {
-            r.bulb_mac
-                .as_ref()
-                .is_some_and(|mac| selected_macs.contains(mac))
+            selected_macs.contains(&r.bulb_mac)
         });
 
         // Clear selected_region if it was removed
@@ -386,7 +384,7 @@ impl Cocuyo {
         let existing_macs: Vec<String> = self
             .regions
             .iter()
-            .filter_map(|r| r.bulb_mac.clone())
+            .map(|r| r.bulb_mac.clone())
             .collect();
 
         let num_total = selected_macs.len();
@@ -413,7 +411,7 @@ impl Cocuyo {
                 y: cy,
                 width: default_w,
                 height: default_h,
-                bulb_mac: Some(mac.clone()),
+                bulb_mac: mac.clone(),
                 sampled_color: None,
             };
             self.next_region_id += 1;

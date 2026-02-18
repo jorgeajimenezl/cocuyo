@@ -138,11 +138,9 @@ pub fn view<'a>(
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let label = if let Some(mac) = &r.bulb_mac {
-                    format!("R{}: {}", i + 1, &mac[mac.len().saturating_sub(8)..])
-                } else {
-                    format!("R{}: (no bulb)", i + 1)
-                };
+                let label = format!("R{} ({})", i + 1, 
+                    &r.bulb_mac[r.bulb_mac.len().saturating_sub(8)..]);
+
                 let color_indicator: Element<'a, Message> = if let Some((cr, cg, cb)) = r.sampled_color {
                     container(text(""))
                         .width(14)
