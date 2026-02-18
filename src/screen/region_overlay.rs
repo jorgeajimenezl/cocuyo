@@ -197,11 +197,9 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                         let new_x = pos.x - offset.x;
                         let new_y = pos.y - offset.y;
 
-                        let Some((fx, fy)) = region::widget_to_frame(
+                        let (fx, fy) = region::widget_to_frame_unclamped(
                             new_x, new_y, bounds, self.frame_width, self.frame_height,
-                        ) else {
-                            return Some(Action::capture());
-                        };
+                        );
 
                         let new_x = fx.max(0.0).min(self.frame_width as f32 - region.width);
                         let new_y = fy.max(0.0).min(self.frame_height as f32 - region.height);

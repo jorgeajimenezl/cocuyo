@@ -57,6 +57,39 @@ pub fn widget_to_frame(
     Some((frame_x, frame_y))
 }
 
+/// Like `widget_to_frame`, but without the bounds check.
+/// Useful during dragging where the mouse may leave the frame area
+/// but the result will be clamped afterwards.
+pub fn widget_to_frame_unclamped(
+    widget_x: f32,
+    widget_y: f32,
+    widget_bounds: Rectangle,
+    frame_w: u32,
+    frame_h: u32,
+) -> (f32, f32) {
+    let frame_aspect = frame_w as f32 / frame_h as f32;
+    let bounds_aspect = widget_bounds.width / widget_bounds.height;
+
+    let (scale_x, scale_y) = if frame_aspect > bounds_aspect {
+        (1.0, bounds_aspect / frame_aspect)
+    } else {
+        (frame_aspect / bounds_aspect, 1.0)
+    };
+
+    let rendered_w = widget_bounds.width * scale_x;
+    let rendered_h = widget_bounds.height * scale_y;
+    let offset_x = (widget_bounds.width - rendered_w) * 0.5;
+    let offset_y = (widget_bounds.height - rendered_h) * 0.5;
+
+    let local_x = widget_x - offset_x;
+    let local_y = widget_y - offset_y;
+
+    let frame_x = (local_x / rendered_w) * frame_w as f32;
+    let frame_y = (local_y / rendered_h) * frame_h as f32;
+
+    (frame_x, frame_y)
+}
+
 /// Convert a frame-space region to widget-space rectangle for drawing.
 pub fn frame_to_widget(
     region: &Region,
