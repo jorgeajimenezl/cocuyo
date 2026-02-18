@@ -7,6 +7,7 @@ mod frame;
 mod platform;
 mod recording;
 mod region;
+mod sampling;
 mod screen;
 mod theme;
 mod widget;

@@ -8,6 +8,7 @@ use crate::frame::FrameData;
 use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
+use crate::sampling::SamplingStrategy;
 use crate::screen::WindowKind;
 use crate::screen::region_overlay::RegionMessage;
 use crate::widget::Element;
@@ -43,6 +44,7 @@ pub enum Message {
     StopAmbient,
     BulbStatesSaved(Vec<SavedBulbState>),
     RegionUpdate(RegionMessage),
+    RegionStrategyChanged(usize, SamplingStrategy),
     ExitApp,
     Noop,
 }
@@ -250,11 +252,13 @@ impl Cocuyo {
 
                         // Update region sampled colors
                         for region in &mut self.regions {
-                            region.sampled_color = frame.sample_region_average(
+                            region.sampled_color = crate::sampling::sample_region(
+                                frame,
                                 region.x,
                                 region.y,
                                 region.width,
                                 region.height,
+                                region.strategy,
                             );
                         }
 
@@ -285,6 +289,12 @@ impl Cocuyo {
                             }
                         }
                     }
+                }
+                Task::none()
+            }
+            Message::RegionStrategyChanged(id, strategy) => {
+                if let Some(region) = self.regions.iter_mut().find(|r| r.id == id) {
+                    region.strategy = strategy;
                 }
                 Task::none()
             }
@@ -409,6 +419,7 @@ impl Cocuyo {
                 height: default_h,
                 bulb_mac: mac.clone(),
                 sampled_color: None,
+                strategy: SamplingStrategy::default(),
             };
             self.next_region_id += 1;
             self.regions.push(region);

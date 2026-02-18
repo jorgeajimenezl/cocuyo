@@ -1,10 +1,11 @@
-use iced::widget::{button, center, column, container, row, rule, scrollable, shader, stack, text};
+use iced::widget::{button, center, column, container, pick_list, row, rule, scrollable, shader, stack, text};
 use iced::window;
 use iced::{Center, Color, Fill, Length};
 
 use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
 use crate::region::Region;
+use crate::sampling::SamplingStrategy;
 use crate::screen::region_overlay::RegionOverlay;
 use crate::screen::title_bar;
 use crate::screen::video_shader::VideoScene;
@@ -166,12 +167,25 @@ pub fn view<'a>(
                         .into()
                 };
 
-                row![
-                    color_indicator,
-                    text(label).size(12).color(theme::TEXT),
+                let region_id = r.id;
+                let strategy_picker = pick_list(
+                    SamplingStrategy::ALL,
+                    Some(r.strategy),
+                    move |s| Message::RegionStrategyChanged(region_id, s),
+                )
+                .text_size(11)
+                .style(theme::styled_pick_list);
+
+                column![
+                    row![
+                        color_indicator,
+                        text(label).size(12).color(theme::TEXT),
+                    ]
+                    .spacing(5)
+                    .align_y(Center),
+                    strategy_picker,
                 ]
-                .spacing(5)
-                .align_y(Center)
+                .spacing(3)
                 .into()
             })
             .collect();

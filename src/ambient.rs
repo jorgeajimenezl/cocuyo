@@ -120,11 +120,13 @@ pub fn sample_frame_for_regions(
 
     for region in regions {
         let mac = &region.bulb_mac;
-        let Some((r, g, b)) = frame.sample_region_average(
+        let Some((r, g, b)) = crate::sampling::sample_region(
+            frame,
             region.x,
             region.y,
             region.width,
             region.height,
+            region.strategy,
         ) else {
             continue;
         };
