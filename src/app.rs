@@ -71,6 +71,7 @@ impl Cocuyo {
             size: Size::new(1200.0, 750.0),
             min_size: Some(Size::new(800.0, 500.0)),
             decorations: false,
+            transparent: true,
             ..Default::default()
         });
 
@@ -422,6 +423,7 @@ impl Cocuyo {
             size,
             min_size: Some(min_size),
             decorations: false,
+            transparent: true,
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))

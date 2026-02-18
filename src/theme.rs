@@ -1,7 +1,9 @@
 use std::sync::LazyLock;
 
-use iced::widget::{button, container, pick_list, rule};
-use iced::{color, Background, Border, Color, Shadow, Theme};
+use iced::widget::{button, container, pick_list, rule, theme};
+use iced::{color, Background, Border, Color, Shadow, Theme, border::Radius};
+
+use crate::app::Cocuyo;
 
 // ── Heading font ─────────────────────────────────────────────
 
@@ -47,6 +49,14 @@ fn rounded_border(color: Color, radius: f32) -> Border {
         radius: radius.into(),
         width: 1.0,
         color,
+    }
+}
+
+// ── App Style ───────────────────────────────────────────────────
+pub fn app_style(_state: &Cocuyo, _theme: &Theme) -> theme::Style {
+    theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
     }
 }
 
@@ -122,7 +132,10 @@ pub fn title_bar_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
-        border: Border::default(),
+        border: Border {
+            radius: Radius::default().top(7.0),
+            ..Border::default()
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -144,7 +157,10 @@ pub fn styled_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG)),
-        border: Border::default(),
+        border: Border {
+            radius: Radius::default().bottom(7.0),
+            ..Border::default()
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -169,7 +185,7 @@ pub fn status_bar_container(_theme: &Theme) -> container::Style {
         text_color: Some(TEXT),
         background: Some(Background::Color(BG_SECONDARY)),
         border: Border {
-            radius: 0.0.into(),
+            radius: Radius::default().bottom(7.0),
             width: 0.0,
             color: Color::TRANSPARENT,
         },
