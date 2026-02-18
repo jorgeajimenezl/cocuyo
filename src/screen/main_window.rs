@@ -68,15 +68,10 @@ pub fn view<'a>(
 
     // Right panel: controls
     let ambient_controls: Element<'_, Message> = if is_ambient_active {
-        column![
-            text("Ambient active").size(14).color(theme::SUCCESS),
-            button("Stop Ambient")
-                .on_press(Message::StopAmbient)
-                .style(theme::styled_button),
-        ]
-        .spacing(8)
-        .align_x(Center)
-        .into()
+        button("Stop Ambient")
+            .on_press(Message::StopAmbient)
+            .style(theme::styled_button)
+            .into()
     } else if has_selected_bulbs {
         button("Start Ambient")
             .on_press(Message::StartAmbient)
@@ -203,40 +198,6 @@ pub fn view<'a>(
     .width(Length::Fixed(250.0))
     .height(Fill);
 
-    // Bottom: color swatches strip
-    let swatch_row: Element<'a, Message> = if regions.is_empty() {
-        container(text("").size(1)).height(0).into()
-    } else {
-        let swatches: Vec<Element<'a, Message>> = regions
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let bg = if let Some((cr, cg, cb)) = r.sampled_color {
-                    Color::from_rgb8(cr, cg, cb)
-                } else {
-                    theme::BG_SECONDARY
-                };
-                container(
-                    text(format!("R{}", i + 1))
-                        .size(10)
-                        .color(Color::WHITE)
-                        .align_x(Center),
-                )
-                .width(Fill)
-                .height(24)
-                .center_x(Fill)
-                .center_y(24)
-                .style(move |_: &_| container::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    ..Default::default()
-                })
-                .into()
-            })
-            .collect();
-
-        row(swatches).spacing(1).height(24).width(Fill).into()
-    };
-
     // Status bar
     let status_text = if is_ambient_active {
         text(format!(
@@ -290,8 +251,6 @@ pub fn view<'a>(
             controls_panel,
         ]
         .height(Fill),
-        rule::horizontal(1).style(theme::styled_rule),
-        swatch_row,
         rule::horizontal(1).style(theme::styled_rule),
         status_bar,
     ]
