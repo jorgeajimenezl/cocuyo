@@ -273,7 +273,7 @@ impl Cocuyo {
 
                                 // Use region-based sampling when regions exist
                                 if self.regions.is_empty() {
-                                    tracing::debug!("No regions defined, skipping bulb update");
+                                    return Task::none();
                                 }
 
                                 if let Some(targets) = crate::ambient::sample_frame_for_regions(
