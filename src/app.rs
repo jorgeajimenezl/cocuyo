@@ -407,14 +407,14 @@ impl Cocuyo {
                 .unwrap_or((1920.0, 1080.0));
 
             let default_w = (frame_w / (num_total as f32 + 1.0)).min(frame_w * 0.3);
-            let default_h = (frame_h * 0.4).min(frame_h * 0.6);
+            let default_h = frame_h * 0.4;
             let cx = frame_w * (i as f32 + 1.0) / (num_total as f32 + 1.0);
             let cy = frame_h / 2.0;
 
             let region = Region {
                 id: self.next_region_id,
                 x: cx - default_w / 2.0,
-                y: cy,
+                y: (cy - default_h / 2.0).clamp(0.0, frame_h - default_h),
                 width: default_w,
                 height: default_h,
                 bulb_mac: mac.clone(),

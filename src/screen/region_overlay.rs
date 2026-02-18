@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::hash::{Hash, Hasher};
+
 use iced::mouse;
 use iced::widget::canvas;
 use iced::widget::canvas::{Action, Cache, Canvas, Event, Geometry, Path, Stroke, Text};
@@ -34,6 +37,9 @@ enum Handle {
 pub struct OverlayState {
     interaction: Interaction,
     cache: Cache,
+    /// Fingerprint of the last drawn region data; used to invalidate cache on
+    /// external state changes (region add/remove, selection sync, etc.).
+    last_fingerprint: Cell<u64>,
 }
 
 impl Default for OverlayState {
@@ -41,8 +47,25 @@ impl Default for OverlayState {
         Self {
             interaction: Interaction::None,
             cache: Cache::new(),
+            last_fingerprint: Cell::new(0),
         }
     }
+}
+
+/// Compute a cheap fingerprint over the fields that affect drawing.
+fn region_fingerprint(regions: &[Region], selected: Option<usize>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    regions.len().hash(&mut h);
+    selected.hash(&mut h);
+    for r in regions {
+        r.id.hash(&mut h);
+        r.x.to_bits().hash(&mut h);
+        r.y.to_bits().hash(&mut h);
+        r.width.to_bits().hash(&mut h);
+        r.height.to_bits().hash(&mut h);
+        r.bulb_mac.hash(&mut h);
+    }
+    h.finish()
 }
 
 pub struct RegionOverlay<'a> {
@@ -128,6 +151,20 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<Action<Message>> {
+        // Handle ButtonReleased regardless of cursor position to avoid
+        // interaction getting stuck in Dragging/Resizing when the cursor
+        // leaves the widget bounds.
+        if let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
+            let interaction = std::mem::replace(&mut state.interaction, Interaction::None);
+            state.cache.clear();
+
+            return match interaction {
+                Interaction::Dragging { .. }
+                | Interaction::Resizing { .. } => Some(Action::capture()),
+                Interaction::None => None,
+            };
+        }
+
         let Some(pos) = cursor.position_in(bounds) else {
             return None;
         };
@@ -280,17 +317,6 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                 }
             }
 
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                let interaction = std::mem::replace(&mut state.interaction, Interaction::None);
-                state.cache.clear();
-
-                match interaction {
-                    Interaction::Dragging { .. }
-                    | Interaction::Resizing { .. } => Some(Action::capture()),
-                    Interaction::None => None,
-                }
-            }
-
             _ => None,
         }
     }
@@ -304,7 +330,14 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
         cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let _ = cursor;
-        let _ = state;
+
+        // Invalidate cache when region data changes externally (add/remove,
+        // selection sync, etc.) — not only on mouse events.
+        let fp = region_fingerprint(self.regions, self.selected_region);
+        if fp != state.last_fingerprint.get() {
+            state.cache.clear();
+            state.last_fingerprint.set(fp);
+        }
 
         let geom = state.cache.draw(renderer, bounds.size(), |frame| {
             let region_colors = [
