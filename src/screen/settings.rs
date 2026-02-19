@@ -1,6 +1,6 @@
-use iced::widget::{column, container, pick_list, rule, text};
-use iced::window;
+use iced::widget::{column, container, pick_list, row, rule, text, tooltip};
 use iced::{Fill, padding};
+use iced::window;
 
 use crate::adapters::{AdapterSelection, GpuAdapterInfo};
 use crate::app::Message;
@@ -33,17 +33,30 @@ pub fn view<'a>(
 
     let adapter_options = crate::adapters::build_picker_options(available_adapters);
     let mut adapter_col = column![
-        text("GPU Adapter").size(18).color(theme::TEXT),
+        row![
+            text("GPU Adapter").size(18).color(theme::TEXT), 
+            tooltip(
+                "🛈",
+                container(
+                    text(
+                        "On hybrid GPU systems, selecting the correct adapter can improve performance \
+                        and compatibility. If unsure, start with 'Auto' or match the adapter used by \
+                        your Wayland compositor.",
+                    ),
+                )
+                .padding(10)
+                .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            ).style(theme::styled_tooltip)
+        ].spacing(5),
         pick_list(
             adapter_options,
             Some(selected_adapter),
             Message::AdapterSelected,
         )
-        .style(theme::styled_pick_list),
+        .style(theme::styled_pick_list)
+        .width(Fill),
         text(active_label).size(12).color(theme::TEXT_DIM),
-        text("On hybrid GPU systems, select the adapter that matches your Wayland compositor.")
-            .size(12)
-            .color(theme::TEXT_DIM),
     ]
     .spacing(10);
 
@@ -69,7 +82,8 @@ pub fn view<'a>(
                 Message::BackendSelected(idx)
             },
         )
-        .style(theme::styled_pick_list),
+        .style(theme::styled_pick_list)
+        .width(Fill),
         text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")
             .size(12)
             .color(theme::TEXT_DIM),
