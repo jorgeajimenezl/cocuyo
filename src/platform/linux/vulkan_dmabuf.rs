@@ -150,6 +150,13 @@ pub unsafe fn import_dmabuf_texture(
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
             .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
 
+        // Use UNDEFINED as initial layout for GPU-written external DMA-BUF memory.
+        // wgpu-hal tracks new external textures as starting from UNDEFINED, so when it
+        // first uses this texture it will issue a UNDEFINED → SHADER_READ_ONLY_OPTIMAL
+        // barrier. This barrier also triggers the DRM implicit-sync fence wait in Mesa
+        // (the driver waits for the compositor's write fence before our GPU reads begin).
+        // Using PREINITIALIZED here would cause a spec-violating oldLayout mismatch in
+        // the barrier, potentially skipping the fence wait and causing torn frames.
         let image_info = vk::ImageCreateInfo::default()
             .push_next(&mut external_memory_info)
             .image_type(vk::ImageType::TYPE_2D)
@@ -163,9 +170,9 @@ pub unsafe fn import_dmabuf_texture(
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::LINEAR)
-            .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST)
+            .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_SRC)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .initial_layout(vk::ImageLayout::PREINITIALIZED);
+            .initial_layout(vk::ImageLayout::UNDEFINED);
 
         let vk_image = unsafe {
             ash_device.create_image(&image_info, None).map_err(|e| {
@@ -269,7 +276,7 @@ pub unsafe fn import_dmabuf_texture(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu_format,
-            usage: wgpu::TextureUses::RESOURCE,
+            usage: wgpu::TextureUses::RESOURCE | wgpu::TextureUses::COPY_SRC,
             memory_flags: wgpu_hal::MemoryFlags::empty(),
             view_formats: vec![],
         };
@@ -291,7 +298,7 @@ pub unsafe fn import_dmabuf_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     };
 

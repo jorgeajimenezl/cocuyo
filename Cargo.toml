@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 ash = "0.38"
-ashpd = { version = "0.12.0", default-features = true, features = [ "pipewire", "wayland" ] }
+ashpd = { version = "0.12.2", default-features = true, features = [ "pipewire", "wayland" ] }
 drm-fourcc = "2.2"
 gstreamer = "0.23"
 gstreamer-allocators = { version = "0.23", features = ["v1_16"] }
@@ -15,7 +15,7 @@ iced = { version = "0.14", default-features = false, features = ["wgpu", "tokio"
 nix = { version = "0.29", features = ["fs", "mman"] }
 wgpu = "27"
 wgpu-hal = { version = "27", features = ["vulkan"] }
-pipewire = "0.8"
+pipewire = { version = "0.8", features = ["v0_3_77"] }
 tokio = { version = "1.41", features = [ "rt-multi-thread", "macros" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

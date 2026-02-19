@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
 
@@ -21,6 +22,21 @@ pub struct UserData {
     pub gst_converter: Option<gst_pipeline::GstVideoConverter>,
     pub mainloop: pw::main_loop::MainLoop,
     pub selected_backend: GpuBackend,
+    /// PipeWire buffers held back from being re-queued to give the GPU time
+    /// to submit rendering commands and attach DRM implicit-sync read fences.
+    ///
+    /// We hold up to 3 buffers (~50ms at 60fps). When the deque reaches 3,
+    /// the oldest buffer is released (dropped → `pw_stream_queue_buffer`).
+    /// This gives the UI thread enough time to import the DMA-BUF, copy it
+    /// to a local GPU texture, and call `queue.submit()` — which attaches
+    /// the read fence the compositor waits for before reusing the buffer.
+    ///
+    /// # Safety note
+    /// `Buffer<'a>` borrows the `StreamRef` for lifetime `'a`. We extend it to `'static` via
+    /// transmute because the `StreamRef` is guaranteed to outlive `UserData` (both are owned by
+    /// the same PipeWire stream, and streams outlive their listener/user-data in Rust's drop
+    /// order). All access is confined to the single PipeWire mainloop thread.
+    held_dmabuf_buffers: VecDeque<pw::buffer::Buffer<'static>>,
 }
 
 pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd, ashpd::desktop::Session<'static, Screencast<'static>>)> {
@@ -65,6 +81,7 @@ pub fn start_streaming(
         gst_converter: None,
         mainloop: mainloop.clone(),
         selected_backend,
+        held_dmabuf_buffers: VecDeque::new(),
     };
 
     let stream = pw::stream::Stream::new(
@@ -79,8 +96,11 @@ pub fn start_streaming(
 
     let _listener = stream
         .add_local_listener_with_user_data(data)
-        .state_changed(|_, _, old, new| {
+        .state_changed(|_, user_data, old, new| {
             debug!(?old, ?new, "Stream state changed");
+            // Release any held buffer on state transitions so we don't leak buffers
+            // when the stream pauses or errors out between on_process calls.
+            user_data.held_dmabuf_buffers.clear();
         })
         .param_changed(on_param_changed)
         .process(on_process)
@@ -88,18 +108,27 @@ pub fn start_streaming(
 
     debug!(?stream, "Created stream");
 
-    let params = build_stream_params();
-    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &pw::spa::pod::Value::Object(params),
-    )
-    .unwrap()
-    .0
-    .into_inner();
+    let serialize = |obj: pw::spa::pod::Object| -> Vec<u8> {
+        pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &pw::spa::pod::Value::Object(obj),
+        )
+        .unwrap()
+        .0
+        .into_inner()
+    };
 
-    let mut params = [spa::pod::Pod::from_bytes(&values).unwrap()];
+    // Two params: first advertises DMA-BUF with explicit modifier negotiation (preferred),
+    // second is the CPU/GStreamer fallback without modifiers.
+    let dmabuf_values = serialize(build_dmabuf_modifier_format_param());
+    let cpu_values = serialize(build_stream_params());
 
-    info!("Attempting to connect with DMA-BUF support");
+    let mut params = [
+        spa::pod::Pod::from_bytes(&dmabuf_values).unwrap(),
+        spa::pod::Pod::from_bytes(&cpu_values).unwrap(),
+    ];
+
+    info!("Attempting to connect with DMA-BUF modifier negotiation");
     stream.connect(
         spa::utils::Direction::Input,
         Some(node_id),
@@ -173,19 +202,41 @@ fn on_param_changed(
 }
 
 fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
+    // Evict the oldest held buffer if we've accumulated 3 or more.
+    // Each dropped buffer calls pw_stream_queue_buffer, returning it to PipeWire.
+    // By holding up to 3 buffers (~50ms at 60fps), we give the UI thread enough time
+    // to import the DMA-BUF, copy to a local GPU texture, and call queue.submit()
+    // — which attaches the DRM read fence the compositor waits for.
+    while user_data.held_dmabuf_buffers.len() >= 3 {
+        user_data.held_dmabuf_buffers.pop_front();
+    }
+
     let Some(mut buffer) = stream.dequeue_buffer() else {
         warn!("Out of buffers");
         return;
     };
 
     if let Some(frame) = try_process_dmabuf(&mut buffer, user_data) {
+        let is_vulkan_zerocopy = matches!(frame, FrameData::DmaBuf { .. });
         send_frame(frame, user_data);
+
+        if is_vulkan_zerocopy {
+            // Extend Buffer<'_> lifetime to 'static so it can be stored in UserData.
+            // SAFETY: The StreamRef that Buffer holds a reference to is guaranteed to
+            // outlive UserData (both belong to the same pw::stream::Stream, and in Rust's
+            // drop order the Stream outlives the listener/user-data). All access is on the
+            // single PipeWire mainloop thread.
+            let held: pw::buffer::Buffer<'static> = unsafe { std::mem::transmute(buffer) };
+            user_data.held_dmabuf_buffers.push_back(held);
+        }
+        // If GStreamer path (FrameData::Cpu): buffer drops here → queue_buffer immediately
         return;
     }
 
     if let Some(frame) = try_process_cpu(&mut buffer, user_data) {
         send_frame(frame, user_data);
     }
+    // buffer drops here → queue_buffer
 }
 
 fn try_process_dmabuf(
@@ -366,6 +417,86 @@ fn send_frame(frame: FrameData, user_data: &UserData) {
             user_data.mainloop.quit();
         }
     }
+}
+
+/// Builds a format param that advertises DMA-BUF with explicit DRM modifier negotiation.
+/// Only includes Vulkan-importable formats; the modifier is locked to DRM_FORMAT_MOD_LINEAR.
+/// When PipeWire selects this param, it sets SPA_VIDEO_FLAG_MODIFIER so we can trust the
+/// modifier value and take the zero-copy Vulkan import path.
+fn build_dmabuf_modifier_format_param() -> pw::spa::pod::Object {
+    use pw::spa::pod::{Property, PropertyFlags};
+    use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+
+    const DRM_FORMAT_MOD_LINEAR: i64 = 0;
+
+    pw::spa::pod::object!(
+        pw::spa::utils::SpaTypes::ObjectParamFormat,
+        pw::spa::param::ParamType::EnumFormat,
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaType,
+            Id,
+            pw::spa::param::format::MediaType::Video
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaSubtype,
+            Id,
+            pw::spa::param::format::MediaSubtype::Raw
+        ),
+        // Only Vulkan-importable formats: BGRx→Xrgb8888, RGBA→Abgr8888, RGBx→Xbgr8888
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::RGBA,
+            pw::spa::param::video::VideoFormat::RGBx,
+        ),
+        // Modifier with MANDATORY|DONT_FIXATE so PipeWire does explicit modifier negotiation
+        // and sets SPA_VIDEO_FLAG_MODIFIER in the negotiated format.
+        Property {
+            key: pw::spa::param::format::FormatProperties::VideoModifier.as_raw(),
+            flags: PropertyFlags::MANDATORY | PropertyFlags::DONT_FIXATE,
+            value: pw::spa::pod::Value::Choice(pw::spa::pod::ChoiceValue::Long(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Enum {
+                    default: DRM_FORMAT_MOD_LINEAR,
+                    alternatives: vec![DRM_FORMAT_MOD_LINEAR],
+                },
+            ))),
+        },
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            pw::spa::utils::Rectangle {
+                width: 320,
+                height: 240
+            },
+            pw::spa::utils::Rectangle {
+                width: 1,
+                height: 1
+            },
+            pw::spa::utils::Rectangle {
+                width: 4096,
+                height: 4096
+            }
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            pw::spa::utils::Fraction { num: 25, denom: 1 },
+            pw::spa::utils::Fraction { num: 0, denom: 1 },
+            pw::spa::utils::Fraction {
+                num: 1000,
+                denom: 1
+            }
+        ),
+    )
 }
 
 fn build_stream_params() -> pw::spa::pod::Object {

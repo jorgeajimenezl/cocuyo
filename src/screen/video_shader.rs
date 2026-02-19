@@ -316,10 +316,65 @@ impl VideoPipeline {
         };
 
         match result {
-            Ok((texture, _wgpu_format)) => {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((imported_texture, wgpu_format)) => {
+                // Create a local GPU texture to snapshot the DMA-BUF content.
+                // This decouples rendering from the DMA-BUF entirely.
+                let local_texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("dmabuf_snapshot"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu_format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+
+                // Copy imported DMA-BUF texture → local texture
+                let mut encoder = device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("dmabuf_copy"),
+                    },
+                );
+                let copy_size = wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                };
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &imported_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &local_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    copy_size,
+                );
+
+                // Submit immediately — this triggers vkQueueSubmit which attaches
+                // the DRM implicit-sync read fence to the DMA-BUF. The compositor
+                // must wait for this fence before reusing the buffer.
+                queue.submit(std::iter::once(encoder.finish()));
+
+                // Use the local texture (not the imported one) for rendering
+                let view = local_texture.create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
-                self._current_texture = Some(texture);
+
+                // Store the local texture to keep the bind group reference alive.
+                // imported_texture is dropped here — wgpu defers the actual Vulkan
+                // resource cleanup (vkDestroyImage + vkFreeMemory) until the GPU
+                // finishes the copy command submitted above.
+                self._current_texture = Some(local_texture);
             }
             Err(e) => {
                 error!(
