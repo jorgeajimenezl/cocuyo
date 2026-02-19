@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::adapters::{AdapterSelection, GpuAdapterInfo, enumerate_vulkan_adapters, resolve_selection};
+use crate::adapters::{AdapterSelection, enumerate_vulkan_adapters, resolve_selection};
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::config::AppConfig;
@@ -71,7 +71,7 @@ pub struct Cocuyo {
     // Backend and adapter selection
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
-    available_adapters: Vec<GpuAdapterInfo>,
+    available_adapters: Vec<String>,
     selected_adapter: AdapterSelection,
     active_adapter_preference: Option<String>,
 }
@@ -188,7 +188,7 @@ impl Cocuyo {
                 self.selected_adapter = selection.clone();
                 let preferred = match &selection {
                     AdapterSelection::Auto => None,
-                    AdapterSelection::Named(info) => Some(info.name.clone()),
+                    AdapterSelection::Named(name) => Some(name.clone()),
                 };
                 let mut cfg = AppConfig::load();
                 cfg.preferred_adapter = preferred;
