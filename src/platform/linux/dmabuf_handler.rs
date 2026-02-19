@@ -11,9 +11,7 @@ pub struct DmaBufBuffer {
     pub height: u32,
     pub format: drm_fourcc::DrmFourcc,
     pub stride: u32,
-    #[allow(dead_code)]
     pub offset: u32,
-    #[allow(dead_code)]
     pub modifier: u64,
 }
 
