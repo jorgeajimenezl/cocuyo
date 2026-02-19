@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::adapters::{AdapterSelection, GpuAdapterInfo, enumerate_vulkan_adapters, resolve_selection};
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
+use crate::config::AppConfig;
 use crate::frame::FrameData;
-use crate::platform::linux::gst_pipeline::GpuBackend;
+use crate::platform::linux::gst_pipeline::{GpuBackend, detect_available_backends};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
@@ -16,6 +18,7 @@ use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
@@ -38,6 +41,7 @@ pub enum Message {
     StartRecording,
     StopRecording,
     BackendSelected(usize),
+    AdapterSelected(AdapterSelection),
     RecordingEvent(RecordingEvent),
     BulbSetup(BulbSetupMessage),
     StartAmbient,
@@ -55,8 +59,6 @@ pub struct Cocuyo {
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
-    available_backends: Vec<GpuBackend>,
-    selected_backend_index: usize,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
     bulb_setup: BulbSetupState,
     is_ambient_active: bool,
@@ -65,10 +67,25 @@ pub struct Cocuyo {
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
+    
+    // Backend and adapter selection
+    available_backends: Vec<GpuBackend>,
+    selected_backend_index: usize,
+    available_adapters: Vec<GpuAdapterInfo>,
+    selected_adapter: AdapterSelection,
+    active_adapter_preference: Option<String>,
 }
 
 impl Cocuyo {
-    pub fn new(available_backends: Vec<GpuBackend>) -> (Self, Task<Message>) {
+    pub fn new(preferred_adapter: Option<String>) -> (Self, Task<Message>) {
+        let available_backends = detect_available_backends();
+        info!(backends = ?available_backends, "Detected GPU backends");
+
+        // TODO: we should enumerate adapters for all backends, but for now just do Vulkan 
+        // since it's the most relevant for Linux screen capture
+        let available_adapters = enumerate_vulkan_adapters();
+        let selected_adapter = resolve_selection(preferred_adapter.as_deref(), &available_adapters);
+
         let (id, open) = window::open(window::Settings {
             size: Size::new(1200.0, 750.0),
             min_size: Some(Size::new(800.0, 500.0)),
@@ -94,6 +111,9 @@ impl Cocuyo {
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
+            available_adapters,
+            selected_adapter,
+            active_adapter_preference: preferred_adapter,
         };
 
         (
@@ -144,7 +164,7 @@ impl Cocuyo {
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings => self.open_window(
                 WindowKind::Settings,
-                Size::new(400.0, 300.0),
+                Size::new(500.0, 500.0),
                 Size::new(300.0, 200.0),
             ),
             Message::StartRecording => {
@@ -162,6 +182,17 @@ impl Cocuyo {
             }
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
+                Task::none()
+            }
+            Message::AdapterSelected(selection) => {
+                self.selected_adapter = selection.clone();
+                let preferred = match &selection {
+                    AdapterSelection::Auto => None,
+                    AdapterSelection::Named(info) => Some(info.name.clone()),
+                };
+                let mut cfg = AppConfig::load();
+                cfg.preferred_adapter = preferred;
+                cfg.save();
                 Task::none()
             }
             Message::OpenBulbSetup => self.open_window(
@@ -335,7 +366,14 @@ impl Cocuyo {
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
-                crate::screen::settings::view(window_id, &self.available_backends, selected)
+                crate::screen::settings::view(
+                    window_id,
+                    &self.available_backends,
+                    selected,
+                    &self.available_adapters,
+                    &self.selected_adapter,
+                    self.active_adapter_preference.as_deref(),
+                )
             }
             Some(WindowKind::BulbSetup) => {
                 crate::screen::bulb_setup::view(window_id, &self.bulb_setup)

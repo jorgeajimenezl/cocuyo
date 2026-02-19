@@ -1,8 +1,10 @@
 use tracing::info;
 
+mod adapters;
 mod ambient;
 mod app;
 mod bulb_setup;
+mod config;
 mod frame;
 mod platform;
 mod recording;
@@ -13,7 +15,6 @@ mod theme;
 mod widget;
 
 use app::Cocuyo;
-use platform::linux::gst_pipeline::detect_available_backends;
 
 fn main() -> iced::Result {
     tracing_subscriber::fmt()
@@ -28,16 +29,19 @@ fn main() -> iced::Result {
 
     pipewire::init();
 
-    let available_backends = detect_available_backends();
-    info!(
-        backends = ?available_backends,
-        "Detected GPU backends"
-    );
+    // Apply adapter preference before iced creates its wgpu Instance inside run().
+    let app_config = config::AppConfig::load();
+    if let Some(ref name) = app_config.preferred_adapter {
+        unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
+        info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
+    }
+    let preferred_adapter = app_config.preferred_adapter;
 
-    iced::daemon({
-        let backends = available_backends;
-        move || Cocuyo::new(backends.clone())
-    },
+    iced::daemon(
+        {
+            let preferred = preferred_adapter;
+            move || Cocuyo::new(preferred.clone())
+        },
         Cocuyo::update,
         Cocuyo::view,
     )
