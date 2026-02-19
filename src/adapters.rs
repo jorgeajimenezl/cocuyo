@@ -1,15 +1,10 @@
-use tracing::info;
-
-/// The value type used by the iced pick_list in the Settings UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdapterSelection {
-    /// Let wgpu pick the default adapter.
+pub enum GpuAdapterSelection {
     Auto,
-    /// A specific adapter chosen by name.
     Named(String),
 }
 
-impl std::fmt::Display for AdapterSelection {
+impl std::fmt::Display for GpuAdapterSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Auto => write!(f, "Auto (wgpu default)"),
@@ -18,8 +13,6 @@ impl std::fmt::Display for AdapterSelection {
     }
 }
 
-/// Enumerates Vulkan adapters using a temporary wgpu Instance.
-/// Called once before `iced::daemon().run()`.
 pub fn enumerate_vulkan_adapters() -> Vec<String> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
@@ -32,19 +25,13 @@ pub fn enumerate_vulkan_adapters() -> Vec<String> {
         .map(|adapter| adapter.get_info().name)
         .collect();
 
-    info!(count = adapters.len(), "Enumerated Vulkan adapters");
-    for a in &adapters {
-        info!(adapter = %a, "Found adapter");
-    }
-
     adapters
 }
 
-/// Builds the complete pick_list option list: [Auto, Named(a0), Named(a1), ...].
-pub fn build_picker_options(adapters: &[String]) -> Vec<AdapterSelection> {
+pub fn build_picker_options(adapters: &[String]) -> Vec<GpuAdapterSelection> {
     let mut options = Vec::with_capacity(adapters.len() + 1);
-    options.push(AdapterSelection::Auto);
-    options.extend(adapters.iter().cloned().map(AdapterSelection::Named));
+    options.push(GpuAdapterSelection::Auto);
+    options.extend(adapters.iter().cloned().map(GpuAdapterSelection::Named));
     options
 }
 
@@ -53,15 +40,15 @@ pub fn build_picker_options(adapters: &[String]) -> Vec<AdapterSelection> {
 pub fn resolve_selection(
     preferred: Option<&str>,
     adapters: &[String],
-) -> AdapterSelection {
+) -> GpuAdapterSelection {
     let Some(pref) = preferred else {
-        return AdapterSelection::Auto;
+        return GpuAdapterSelection::Auto;
     };
     let pref_lower = pref.to_lowercase();
     adapters
         .iter()
         .find(|a| a.to_lowercase().contains(&pref_lower))
         .cloned()
-        .map(AdapterSelection::Named)
-        .unwrap_or(AdapterSelection::Auto)
+        .map(GpuAdapterSelection::Named)
+        .unwrap_or(GpuAdapterSelection::Auto)
 }

@@ -181,24 +181,6 @@ fn on_param_changed(
         framerate_denom = user_data.format.framerate().denom,
         "Got video format"
     );
-
-    let width = user_data.format.size().width;
-    let height = user_data.format.size().height;
-    let format = user_data.format.format();
-    let backend = user_data.selected_backend.clone();
-
-    match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
-        Ok(converter) => {
-            info!(
-                backend = %converter.backend(),
-                "GStreamer converter initialized successfully"
-            );
-            user_data.gst_converter = Some(converter);
-        }
-        Err(e) => {
-            error!(error = %e, "Failed to create GStreamer converter");
-        }
-    }
 }
 
 fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
@@ -335,10 +317,45 @@ fn try_process_dmabuf(
     try_process_dmabuf_gstreamer(&dmabuf, user_data)
 }
 
+/// Lazily initializes the GStreamer converter on the first frame.
+///
+/// For `Auto`, `dmabuf_fd` is used to detect the compositor's GPU via
+/// `/proc/self/fdinfo/<fd>` and pick the matching backend. For explicit
+/// backends the value is used directly.
+fn lazy_setup_gst_converter(user_data: &mut UserData, dmabuf_fd: Option<std::os::fd::RawFd>) {
+    if user_data.gst_converter.is_some() {
+        return;
+    }
+
+    let backend = match user_data.selected_backend {
+        GpuBackend::Auto => gst_pipeline::resolve_auto_backend(dmabuf_fd),
+        ref b => b.clone(),
+    };
+
+    let width = user_data.format.size().width;
+    let height = user_data.format.size().height;
+    let format = user_data.format.format();
+
+    match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
+        Ok(converter) => {
+            info!(
+                backend = %converter.backend(),
+                "GStreamer converter initialized"
+            );
+            user_data.gst_converter = Some(converter);
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to create GStreamer converter");
+        }
+    }
+}
+
 fn try_process_dmabuf_gstreamer(
     dmabuf: &dmabuf_handler::DmaBufBuffer,
     user_data: &mut UserData,
 ) -> Option<FrameData> {
+    lazy_setup_gst_converter(user_data, Some(dmabuf.fd));
+
     let buffer_size = (dmabuf.stride * dmabuf.height) as usize;
     let converter = user_data.gst_converter.as_mut()?;
 
@@ -365,6 +382,8 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     ONCE.call_once(|| {
         warn!("Using CPU memory copy path (no DMA-BUF available)");
     });
+
+    lazy_setup_gst_converter(user_data, None);
 
     let datas = buffer.datas_mut();
     if datas.is_empty() {

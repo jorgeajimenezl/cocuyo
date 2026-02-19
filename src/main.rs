@@ -35,13 +35,9 @@ fn main() -> iced::Result {
         unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
         info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
     }
-    let preferred_adapter = app_config.preferred_adapter;
 
     iced::daemon(
-        {
-            let preferred = preferred_adapter;
-            move || Cocuyo::new(preferred.clone())
-        },
+        move || Cocuyo::new(app_config.clone()),
         Cocuyo::update,
         Cocuyo::view,
     )

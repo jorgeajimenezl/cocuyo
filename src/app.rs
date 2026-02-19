@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::adapters::{AdapterSelection, enumerate_vulkan_adapters, resolve_selection};
+use crate::adapters::{self, GpuAdapterSelection};
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::config::AppConfig;
 use crate::frame::FrameData;
-use crate::platform::linux::gst_pipeline::{GpuBackend, detect_available_backends};
+use crate::platform::linux::gst_pipeline::{self, GpuBackend};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
@@ -41,7 +41,7 @@ pub enum Message {
     StartRecording,
     StopRecording,
     BackendSelected(usize),
-    AdapterSelected(AdapterSelection),
+    AdapterSelected(GpuAdapterSelection),
     RecordingEvent(RecordingEvent),
     BulbSetup(BulbSetupMessage),
     StartAmbient,
@@ -72,19 +72,30 @@ pub struct Cocuyo {
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
     available_adapters: Vec<String>,
-    selected_adapter: AdapterSelection,
+    selected_adapter: GpuAdapterSelection,
     active_adapter_preference: Option<String>,
 }
 
 impl Cocuyo {
-    pub fn new(preferred_adapter: Option<String>) -> (Self, Task<Message>) {
-        let available_backends = detect_available_backends();
-        info!(backends = ?available_backends, "Detected GPU backends");
+    pub fn new(config: AppConfig) -> (Self, Task<Message>) {
+        let detected_backends = gst_pipeline::detect_available_backends();
+        info!(backends = ?detected_backends, "Detected GPU backends");
 
-        // TODO: we should enumerate adapters for all backends, but for now just do Vulkan 
+        let mut available_backends = Vec::with_capacity(detected_backends.len() + 1);
+        available_backends.push(GpuBackend::Auto);
+        available_backends.extend(detected_backends);
+
+        let selected_backend_index = config
+            .preferred_backend
+            .as_deref()
+            .and_then(|key| available_backends.iter().position(|b| b.config_key() == key))
+            .unwrap_or(0);
+
+        // TODO: we should enumerate adapters for all backends, but for now just do Vulkan
         // since it's the most relevant for Linux screen capture
-        let available_adapters = enumerate_vulkan_adapters();
-        let selected_adapter = resolve_selection(preferred_adapter.as_deref(), &available_adapters);
+        let available_adapters = adapters::enumerate_vulkan_adapters();
+        let selected_adapter =
+            adapters::resolve_selection(config.preferred_adapter.as_deref(), &available_adapters);
 
         let (id, open) = window::open(window::Settings {
             size: Size::new(1200.0, 750.0),
@@ -102,7 +113,7 @@ impl Cocuyo {
             is_recording: false,
             session_id: 0,
             available_backends,
-            selected_backend_index: 0,
+            selected_backend_index,
             recording_cmd_tx: None,
             bulb_setup: BulbSetupState::new(),
             is_ambient_active: false,
@@ -113,7 +124,7 @@ impl Cocuyo {
             selected_region: None,
             available_adapters,
             selected_adapter,
-            active_adapter_preference: preferred_adapter,
+            active_adapter_preference: config.preferred_adapter,
         };
 
         (
@@ -182,13 +193,18 @@ impl Cocuyo {
             }
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
+                if let Some(backend) = self.available_backends.get(idx) {
+                    let mut cfg = AppConfig::load();
+                    cfg.preferred_backend = Some(backend.config_key().to_string());
+                    cfg.save();
+                }
                 Task::none()
             }
             Message::AdapterSelected(selection) => {
                 self.selected_adapter = selection.clone();
                 let preferred = match &selection {
-                    AdapterSelection::Auto => None,
-                    AdapterSelection::Named(name) => Some(name.clone()),
+                    GpuAdapterSelection::Auto => None,
+                    GpuAdapterSelection::Named(name) => Some(name.clone()),
                 };
                 let mut cfg = AppConfig::load();
                 cfg.preferred_adapter = preferred;

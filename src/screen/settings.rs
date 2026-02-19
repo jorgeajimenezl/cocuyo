@@ -2,7 +2,7 @@ use iced::widget::{column, container, pick_list, row, rule, text, tooltip};
 use iced::{Fill, padding};
 use iced::window;
 
-use crate::adapters::AdapterSelection;
+use crate::adapters::GpuAdapterSelection;
 use crate::app::Message;
 use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::screen::title_bar;
@@ -14,7 +14,7 @@ pub fn view<'a>(
     available_backends: &'a [GpuBackend],
     selected_backend: Option<&'a GpuBackend>,
     available_adapters: &'a [String],
-    selected_adapter: &'a AdapterSelection,
+    selected_adapter: &'a GpuAdapterSelection,
     active_adapter_preference: Option<&'a str>,
 ) -> Element<'a, Message> {
     // Adapter section
@@ -24,8 +24,8 @@ pub fn view<'a>(
     };
 
     let pending_restart = match (selected_adapter, active_adapter_preference) {
-        (AdapterSelection::Auto, None) => false,
-        (AdapterSelection::Named(name), Some(active)) => {
+        (GpuAdapterSelection::Auto, None) => false,
+        (GpuAdapterSelection::Named(name), Some(active)) => {
             name.to_lowercase() != active.to_lowercase()
         }
         _ => true,

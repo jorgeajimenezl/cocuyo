@@ -5,6 +5,7 @@ use tracing::warn;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub preferred_adapter: Option<String>,
+    pub preferred_backend: Option<String>,
 }
 
 impl AppConfig {
