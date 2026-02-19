@@ -218,9 +218,9 @@ fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
 
     if let Some(frame) = try_process_dmabuf(&mut buffer, user_data) {
         let is_vulkan_zerocopy = matches!(frame, FrameData::DmaBuf { .. });
-        send_frame(frame, user_data);
+        let delivered = send_frame(frame, user_data);
 
-        if is_vulkan_zerocopy {
+        if is_vulkan_zerocopy && delivered {
             // Extend Buffer<'_> lifetime to 'static so it can be stored in UserData.
             // SAFETY: The StreamRef that Buffer holds a reference to is guaranteed to
             // outlive UserData (both belong to the same pw::stream::Stream, and in Rust's
@@ -405,16 +405,18 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     })
 }
 
-fn send_frame(frame: FrameData, user_data: &UserData) {
+fn send_frame(frame: FrameData, user_data: &UserData) -> bool {
     let frame = Arc::new(frame);
     match user_data.frame_sender.try_send(frame) {
-        Ok(()) => {}
+        Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(_)) => {
             // Backpressure: drop frame
+            false
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
             // Receiver dropped — stop the mainloop
             user_data.mainloop.quit();
+            false
         }
     }
 }

@@ -22,6 +22,7 @@ enum FrameInfo {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
     },
     Cpu {
         data: Arc<Vec<u8>>,
@@ -39,6 +40,7 @@ impl VideoScene {
                 height,
                 drm_format,
                 stride,
+                offset,
                 ..
             } => FrameInfo::DmaBuf {
                 fd: fd.as_raw_fd(),
@@ -46,6 +48,7 @@ impl VideoScene {
                 height: *height,
                 drm_format: *drm_format,
                 stride: *stride,
+                offset: *offset,
             },
             FrameData::Cpu {
                 data,
@@ -79,12 +82,14 @@ impl<Message> shader::Program<Message> for VideoScene {
                 height,
                 drm_format,
                 stride,
+                offset,
             }) => VideoPrimitive::DmaBuf {
                 fd: *fd,
                 width: *width,
                 height: *height,
                 drm_format: *drm_format,
                 stride: *stride,
+                offset: *offset,
                 bounds,
             },
             Some(FrameInfo::Cpu {
@@ -111,6 +116,7 @@ pub enum VideoPrimitive {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
         bounds: Rectangle,
     },
     Cpu {
@@ -140,9 +146,20 @@ impl shader::Primitive for VideoPrimitive {
                 height,
                 drm_format,
                 stride,
+                offset,
                 bounds,
             } => {
-                pipeline.prepare_dmabuf(device, queue, *fd, *width, *height, *drm_format, *stride, *bounds);
+                pipeline.prepare_dmabuf(
+                    device,
+                    queue,
+                    *fd,
+                    *width,
+                    *height,
+                    *drm_format,
+                    *stride,
+                    *offset,
+                    *bounds,
+                );
             }
             VideoPrimitive::Cpu {
                 data,
@@ -309,10 +326,19 @@ impl VideoPipeline {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
         bounds: Rectangle,
     ) {
         let result = unsafe {
-            vulkan_dmabuf::import_dmabuf_texture(device, fd, width, height, drm_format, stride)
+            vulkan_dmabuf::import_dmabuf_texture(
+                device,
+                fd,
+                width,
+                height,
+                drm_format,
+                stride,
+                offset,
+            )
         };
 
         match result {

@@ -72,6 +72,7 @@ pub unsafe fn import_dmabuf_texture(
     height: u32,
     drm_format: DrmFourcc,
     _stride: u32,
+    offset: u32,
 ) -> Result<(wgpu::Texture, wgpu::TextureFormat), DmaBufImportError> {
     let vk_format =
         formats::drm_to_vk_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
@@ -150,13 +151,6 @@ pub unsafe fn import_dmabuf_texture(
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
             .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
 
-        // Use UNDEFINED as initial layout for GPU-written external DMA-BUF memory.
-        // wgpu-hal tracks new external textures as starting from UNDEFINED, so when it
-        // first uses this texture it will issue a UNDEFINED → SHADER_READ_ONLY_OPTIMAL
-        // barrier. This barrier also triggers the DRM implicit-sync fence wait in Mesa
-        // (the driver waits for the compositor's write fence before our GPU reads begin).
-        // Using PREINITIALIZED here would cause a spec-violating oldLayout mismatch in
-        // the barrier, potentially skipping the fence wait and causing torn frames.
         let image_info = vk::ImageCreateInfo::default()
             .push_next(&mut external_memory_info)
             .image_type(vk::ImageType::TYPE_2D)
@@ -208,17 +202,22 @@ pub unsafe fn import_dmabuf_texture(
         // Reset seek position
         let _ = nix::unistd::lseek(import_fd, 0, nix::unistd::Whence::SeekSet);
 
-        // Use the actual DMA-BUF size if available, otherwise fall back to mem_reqs.size.
-        // The allocation size must be >= mem_reqs.size for the image to be usable.
+        let bind_offset = u64::from(offset);
+        let required_bound_size = bind_offset.saturating_add(mem_reqs.size);
+
+        // Use the actual DMA-BUF size if available, otherwise fall back to required_bound_size.
+        // The allocation size must satisfy bind offset + image memory requirements.
         let allocation_size = if dmabuf_size > 0 {
-            dmabuf_size.max(mem_reqs.size)
+            dmabuf_size.max(required_bound_size)
         } else {
-            mem_reqs.size
+            required_bound_size
         };
 
         debug!(
             memory_type_index,
             mem_reqs_size = mem_reqs.size,
+            bind_offset,
+            required_bound_size,
             dmabuf_size,
             allocation_size,
             "Importing DMA-BUF memory"
@@ -249,7 +248,7 @@ pub unsafe fn import_dmabuf_texture(
         // Bind the imported memory to the image
         unsafe {
             ash_device
-                .bind_image_memory(vk_image, memory, 0)
+                .bind_image_memory(vk_image, memory, bind_offset)
                 .map_err(|e| {
                     ash_device.free_memory(memory, None);
                     ash_device.destroy_image(vk_image, None);
