@@ -200,7 +200,7 @@ impl Cocuyo {
                 self.selected_backend_index = idx;
                 if let Some(backend) = self.available_backends.get(idx) {
                     let mut cfg = AppConfig::load();
-                    cfg.preferred_backend = Some(backend.config_key().to_string());
+                    cfg.preferred_backend = Some(backend.config_key());
                     cfg.save();
                 }
                 Task::none()
