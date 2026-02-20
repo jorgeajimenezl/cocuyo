@@ -68,7 +68,7 @@ pub struct Cocuyo {
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
-    
+
     // Backend and adapter selection
     available_backends: Vec<GpuBackend>,
     selected_backend_index: usize,
@@ -89,7 +89,11 @@ impl Cocuyo {
         let selected_backend_index = config
             .preferred_backend
             .as_deref()
-            .and_then(|key| available_backends.iter().position(|b| b.config_key() == key))
+            .and_then(|key| {
+                available_backends
+                    .iter()
+                    .position(|b| b.config_key() == key)
+            })
             .unwrap_or(0);
 
         // TODO: we should enumerate adapters for all backends, but for now just do Vulkan
@@ -298,18 +302,6 @@ impl Cocuyo {
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
-                        // Update region sampled colors
-                        for region in &mut self.regions {
-                            region.sampled_color = crate::sampling::sample_region(
-                                frame,
-                                region.x,
-                                region.y,
-                                region.width,
-                                region.height,
-                                region.strategy,
-                            );
-                        }
-
                         if self.is_ambient_active {
                             let should_update = self
                                 .last_bulb_update
@@ -326,21 +318,48 @@ impl Cocuyo {
 
                                 // Read pixel data on demand — only here, every ~150ms
                                 let sampling_frame: Option<Arc<FrameData>> = match frame.as_ref() {
-                                    FrameData::DmaBuf { fd, width, height, stride, offset, drm_format, .. } => {
+                                    FrameData::DmaBuf {
+                                        fd,
+                                        width,
+                                        height,
+                                        stride,
+                                        offset,
+                                        drm_format,
+                                        ..
+                                    } => {
                                         crate::platform::linux::dmabuf_handler::read_dmabuf_pixels(
-                                            fd.as_raw_fd(), *width, *height, *stride, *offset, *drm_format,
+                                            fd.as_raw_fd(),
+                                            *width,
+                                            *height,
+                                            *stride,
+                                            *offset,
+                                            *drm_format,
                                         )
                                         .ok()
-                                        .map(|pixels| Arc::new(FrameData::Cpu {
-                                            data: Arc::new(pixels),
-                                            width: *width,
-                                            height: *height,
-                                        }))
+                                        .map(|pixels| {
+                                            Arc::new(FrameData::Cpu {
+                                                data: Arc::new(pixels),
+                                                width: *width,
+                                                height: *height,
+                                            })
+                                        })
                                     }
                                     FrameData::Cpu { .. } => Some(frame.clone()),
                                 };
 
                                 if let Some(ref sf) = sampling_frame {
+                                    // Update region sampled colors
+                                    for region in &mut self.regions {
+                                        region.sampled_color = crate::sampling::sample_region(
+                                            sf,
+                                            region.x,
+                                            region.y,
+                                            region.width,
+                                            region.height,
+                                            region.strategy,
+                                        );
+                                    }
+
                                     if let Some(targets) = crate::ambient::sample_frame_for_regions(
                                         sf,
                                         &self.regions,
@@ -454,9 +473,7 @@ impl Cocuyo {
         let selected_macs = self.bulb_setup.selected_bulbs_vec();
 
         // Remove regions whose bulb_mac is no longer selected
-        self.regions.retain(|r| {
-            selected_macs.contains(&r.bulb_mac)
-        });
+        self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
 
         // Clear selected_region if it was removed
         if let Some(sel) = self.selected_region {
