@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ashpd::desktop::{
     PersistMode,
@@ -15,6 +16,15 @@ use crate::frame::FrameData;
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
+
+/// Global flag indicating whether ambient color sampling is active.
+/// When true, DMA-BUF frames will include CPU-readable pixel data.
+static AMBIENT_SAMPLING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Set whether ambient sampling needs CPU pixel data from DMA-BUF frames.
+pub fn set_ambient_sampling(active: bool) {
+    AMBIENT_SAMPLING_ACTIVE.store(active, Ordering::Relaxed);
+}
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -283,6 +293,26 @@ fn try_process_dmabuf(
             );
         });
 
+        // Read CPU pixel data if ambient sampling is active
+        let rgba_pixels = if AMBIENT_SAMPLING_ACTIVE.load(Ordering::Relaxed) {
+            match dmabuf_handler::read_dmabuf_pixels(
+                dmabuf.fd,
+                dmabuf.width,
+                dmabuf.height,
+                dmabuf.stride,
+                dmabuf.offset,
+                dmabuf.format,
+            ) {
+                Ok(pixels) => Some(Arc::new(pixels)),
+                Err(e) => {
+                    warn!(error = %e, "Failed to read DMA-BUF pixels for ambient sampling");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         return Some(FrameData::DmaBuf {
             fd: duped_fd,
             width: dmabuf.width,
@@ -291,6 +321,7 @@ fn try_process_dmabuf(
             stride: dmabuf.stride,
             offset: dmabuf.offset,
             modifier: dmabuf.modifier,
+            rgba_pixels,
         });
     }
 

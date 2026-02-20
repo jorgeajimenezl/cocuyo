@@ -257,6 +257,7 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
+                crate::platform::linux::stream::set_ambient_sampling(true);
                 if !self.is_recording {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
@@ -267,6 +268,7 @@ impl Cocuyo {
             Message::StopAmbient => {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
+                crate::platform::linux::stream::set_ambient_sampling(false);
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -290,6 +292,7 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
+                            crate::platform::linux::stream::set_ambient_sampling(false);
                         }
                         self.recording_state = state;
                     }
