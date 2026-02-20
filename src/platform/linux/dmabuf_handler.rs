@@ -155,6 +155,9 @@ pub fn read_dmabuf_pixels(
     }
 
     let row_bytes = (width as usize) * 4;
+    if (stride as usize) < row_bytes {
+        return Err(DmaBufReadError::InvalidBufferSize);
+    }
     let map_size = offset as usize + (stride as usize) * (height as usize);
 
     let map_len =
