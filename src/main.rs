@@ -29,9 +29,9 @@ fn main() -> iced::Result {
 
     pipewire::init();
 
-    // Apply adapter preference before iced creates its wgpu Instance inside run().
     let app_config = config::AppConfig::load();
     if let Some(ref name) = app_config.preferred_adapter {
+        // NOTE: This is safe because there are no concurrent threads at this point, and we set the env var before any wgpu code runs.
         unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
         info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
     }
