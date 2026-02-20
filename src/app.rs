@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -257,7 +258,6 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
-                crate::platform::linux::stream::set_ambient_sampling(true);
                 if !self.is_recording {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
@@ -268,7 +268,6 @@ impl Cocuyo {
             Message::StopAmbient => {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
-                crate::platform::linux::stream::set_ambient_sampling(false);
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -292,7 +291,6 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
-                            crate::platform::linux::stream::set_ambient_sampling(false);
                         }
                         self.recording_state = state;
                     }
@@ -326,15 +324,33 @@ impl Cocuyo {
                                     return Task::none();
                                 }
 
-                                if let Some(targets) = crate::ambient::sample_frame_for_regions(
-                                    frame,
-                                    &self.regions,
-                                    self.bulb_setup.discovered_bulbs(),
-                                ) {
-                                    return Task::perform(
-                                        crate::ambient::dispatch_bulb_colors(targets),
-                                        |()| Message::Noop,
-                                    );
+                                // Read pixel data on demand — only here, every ~150ms
+                                let sampling_frame: Option<Arc<FrameData>> = match frame.as_ref() {
+                                    FrameData::DmaBuf { fd, width, height, stride, offset, drm_format, .. } => {
+                                        crate::platform::linux::dmabuf_handler::read_dmabuf_pixels(
+                                            fd.as_raw_fd(), *width, *height, *stride, *offset, *drm_format,
+                                        )
+                                        .ok()
+                                        .map(|pixels| Arc::new(FrameData::Cpu {
+                                            data: Arc::new(pixels),
+                                            width: *width,
+                                            height: *height,
+                                        }))
+                                    }
+                                    FrameData::Cpu { .. } => Some(frame.clone()),
+                                };
+
+                                if let Some(ref sf) = sampling_frame {
+                                    if let Some(targets) = crate::ambient::sample_frame_for_regions(
+                                        sf,
+                                        &self.regions,
+                                        self.bulb_setup.discovered_bulbs(),
+                                    ) {
+                                        return Task::perform(
+                                            crate::ambient::dispatch_bulb_colors(targets),
+                                            |()| Message::Noop,
+                                        );
+                                    }
                                 }
                             }
                         }
