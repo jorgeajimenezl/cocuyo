@@ -41,6 +41,7 @@ pub enum Message {
     OpenBulbSetup(window::Id),
     StartRecording,
     StopRecording,
+    #[cfg(target_os = "linux")]
     BackendSelected(usize),
     AdapterSelected(GpuAdapterSelection),
     RecordingEvent(RecordingEvent),
@@ -74,6 +75,9 @@ pub struct Cocuyo {
     available_backends: Vec<GpuBackend>,
     #[cfg(target_os = "linux")]
     selected_backend_index: usize,
+
+    // Adapter used for displaying recording and 
+    // sampling frames (if applicable)
     available_adapters: Vec<String>,
     selected_adapter: GpuAdapterSelection,
     config: AppConfig,
@@ -210,16 +214,13 @@ impl Cocuyo {
                 self.current_frame = None;
                 Task::none()
             }
+            #[cfg(target_os = "linux")]
             Message::BackendSelected(idx) => {
-                #[cfg(target_os = "linux")]
-                {
-                    self.selected_backend_index = idx;
-                    if let Some(backend) = self.available_backends.get(idx) {
-                        self.config.preferred_backend = Some(backend.config_key());
-                        self.config.save();
-                    }
+                self.selected_backend_index = idx;
+                if let Some(backend) = self.available_backends.get(idx) {
+                    self.config.preferred_backend = Some(backend.config_key());
+                    self.config.save();
                 }
-                let _ = idx;
                 Task::none()
             }
             Message::AdapterSelected(selection) => {
@@ -344,7 +345,7 @@ impl Cocuyo {
                                 // NOTE: this data can be stale maybe because the recording thread may
                                 // have already moved on to a newer frame, but that's ok since ambient
                                 // lighting doesn't need to be perfectly in sync
-                                let sampling_frame =  frame.convert_to_cpu();
+                                let sampling_frame = frame.convert_to_cpu();
 
                                 if let Some(ref sf) = sampling_frame {
                                     // Update region sampled colors
@@ -530,7 +531,13 @@ impl Cocuyo {
         }
     }
 
-    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size, parent: Option<window::Id>) -> Task<Message> {
+    fn open_window(
+        &self,
+        kind: WindowKind,
+        size: Size,
+        min_size: Size,
+        parent: Option<window::Id>,
+    ) -> Task<Message> {
         if self.windows.values().any(|k| *k == kind) {
             return Task::none();
         }

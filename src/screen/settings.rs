@@ -98,11 +98,17 @@ fn build_adapter_section<'a>(
             tooltip(
                 "🛈",
                 container(
+                    #[cfg(target_os = "linux")]
                     text(
                         "On hybrid GPU systems, selecting the correct adapter can improve performance \
                         and compatibility. If unsure, start with 'Auto' or match the adapter used by \
                         your Wayland compositor.",
                     ),
+                    #[cfg(not(target_os = "linux"))]
+                    text(
+                        "Selecting the correct GPU adapter can improve performance and compatibility. \
+                        If unsure, 'Auto' is a good choice.",
+                    )
                 )
                 .padding(10)
                 .style(container::rounded_box),
