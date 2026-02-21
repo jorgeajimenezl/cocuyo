@@ -1,11 +1,14 @@
+#[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
 use drm_fourcc::DrmFourcc;
 
 impl std::fmt::Debug for FrameData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
                 width,
                 height,
@@ -27,6 +30,7 @@ impl std::fmt::Debug for FrameData {
 }
 
 pub enum FrameData {
+    #[cfg(target_os = "linux")]
     DmaBuf {
         fd: OwnedFd,
         width: u32,
@@ -48,6 +52,7 @@ pub enum FrameData {
 impl FrameData {
     pub fn width(&self) -> u32 {
         match self {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf { width, .. } => *width,
             FrameData::Cpu { width, .. } => *width,
         }
@@ -55,6 +60,7 @@ impl FrameData {
 
     pub fn height(&self) -> u32 {
         match self {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf { height, .. } => *height,
             FrameData::Cpu { height, .. } => *height,
         }
@@ -64,12 +70,14 @@ impl FrameData {
     pub fn pixels(&self) -> Option<&[u8]> {
         match self {
             FrameData::Cpu { data, .. } => Some(data.as_slice()),
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf { .. } => None,
         }
     }
 
     pub fn convert_to_cpu(self: &Arc<Self>) -> Option<Arc<FrameData>> {
         match self.as_ref() {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
                 fd,
                 width,

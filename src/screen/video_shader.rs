@@ -1,12 +1,15 @@
+#[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
 use drm_fourcc::DrmFourcc;
 use iced::widget::shader;
 use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
 use crate::frame::FrameData;
+#[cfg(target_os = "linux")]
 use crate::platform::linux::vulkan_dmabuf;
 
 /// Scene data passed to the shader widget each frame.
@@ -16,6 +19,7 @@ pub struct VideoScene {
 
 /// Extracted frame information for the shader primitive.
 enum FrameInfo {
+    #[cfg(target_os = "linux")]
     DmaBuf {
         fd: std::os::fd::RawFd,
         width: u32,
@@ -34,6 +38,7 @@ enum FrameInfo {
 impl VideoScene {
     pub fn new(frame: Option<&FrameData>) -> Self {
         let frame = frame.map(|f| match f {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
                 fd,
                 width,
@@ -76,6 +81,7 @@ impl<Message> shader::Program<Message> for VideoScene {
         bounds: Rectangle,
     ) -> Self::Primitive {
         match &self.frame {
+            #[cfg(target_os = "linux")]
             Some(FrameInfo::DmaBuf {
                 fd,
                 width,
@@ -110,6 +116,7 @@ impl<Message> shader::Program<Message> for VideoScene {
 /// Primitive that carries per-frame data to the GPU pipeline.
 #[derive(Debug)]
 pub enum VideoPrimitive {
+    #[cfg(target_os = "linux")]
     DmaBuf {
         fd: std::os::fd::RawFd,
         width: u32,
@@ -140,6 +147,7 @@ impl shader::Primitive for VideoPrimitive {
         _viewport: &iced::advanced::graphics::Viewport,
     ) {
         match self {
+            #[cfg(target_os = "linux")]
             VideoPrimitive::DmaBuf {
                 fd,
                 width,
@@ -364,6 +372,7 @@ impl VideoPipeline {
         &self.cached_texture.as_ref().unwrap().texture
     }
 
+    #[cfg(target_os = "linux")]
     fn prepare_dmabuf(
         &mut self,
         device: &wgpu::Device,

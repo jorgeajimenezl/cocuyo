@@ -31,10 +31,13 @@ fn main() -> iced::Result {
         info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
     }
 
-    gstreamer::init().expect("Failed to initialize GStreamer");
-    info!("GStreamer initialized");
+    #[cfg(target_os = "linux")]
+    {
+        gstreamer::init().expect("Failed to initialize GStreamer");
+        info!("GStreamer initialized");
 
-    pipewire::init();
+        pipewire::init();
+    }
 
     iced::daemon(
         move || Cocuyo::new(app_config.clone()),

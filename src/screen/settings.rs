@@ -4,11 +4,13 @@ use iced::window;
 
 use crate::adapters::GpuAdapterSelection;
 use crate::app::Message;
+#[cfg(target_os = "linux")]
 use crate::platform::linux::gst_pipeline::GpuBackend;
 use crate::screen::title_bar;
 use crate::theme;
 use crate::widget::Element;
 
+#[cfg(target_os = "linux")]
 pub fn view<'a>(
     window_id: window::Id,
     available_backends: &'a [GpuBackend],
@@ -17,7 +19,65 @@ pub fn view<'a>(
     selected_adapter: &'a GpuAdapterSelection,
     active_adapter_preference: Option<&'a str>,
 ) -> Element<'a, Message> {
-    // Adapter section
+    let adapter_col = build_adapter_section(available_adapters, selected_adapter, active_adapter_preference);
+    let backend_section = build_backend_section(available_backends, selected_backend);
+
+    column![
+        title_bar::view(window_id, "Settings"),
+        rule::horizontal(1).style(theme::styled_rule),
+        container(
+            column![
+                adapter_col,
+                rule::horizontal(1).style(theme::styled_rule),
+                backend_section,
+            ]
+            .spacing(20)
+            .width(Fill)
+            .padding(padding::all(20)),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(theme::styled_container),
+    ]
+    .width(Fill)
+    .height(Fill)
+    .into()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn view<'a>(
+    window_id: window::Id,
+    available_adapters: &'a [String],
+    selected_adapter: &'a GpuAdapterSelection,
+    active_adapter_preference: Option<&'a str>,
+) -> Element<'a, Message> {
+    let adapter_col = build_adapter_section(available_adapters, selected_adapter, active_adapter_preference);
+
+    column![
+        title_bar::view(window_id, "Settings"),
+        rule::horizontal(1).style(theme::styled_rule),
+        container(
+            column![
+                adapter_col,
+            ]
+            .spacing(20)
+            .width(Fill)
+            .padding(padding::all(20)),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(theme::styled_container),
+    ]
+    .width(Fill)
+    .height(Fill)
+    .into()
+}
+
+fn build_adapter_section<'a>(
+    available_adapters: &'a [String],
+    selected_adapter: &'a GpuAdapterSelection,
+    active_adapter_preference: Option<&'a str>,
+) -> iced::widget::Column<'a, Message> {
     let active_label = match active_adapter_preference {
         None => "Currently active: Auto (wgpu default)".to_string(),
         Some(name) => format!("Currently active: {}", name),
@@ -34,7 +94,7 @@ pub fn view<'a>(
     let adapter_options = crate::adapters::build_picker_options(available_adapters);
     let mut adapter_col = column![
         row![
-            text("GPU Adapter").size(18).color(theme::TEXT), 
+            text("GPU Adapter").size(18).color(theme::TEXT),
             tooltip(
                 "🛈",
                 container(
@@ -68,8 +128,15 @@ pub fn view<'a>(
         );
     }
 
-    // Backend section (existing)
-    let backend_section = column![
+    adapter_col
+}
+
+#[cfg(target_os = "linux")]
+fn build_backend_section<'a>(
+    available_backends: &'a [GpuBackend],
+    selected_backend: Option<&'a GpuBackend>,
+) -> iced::widget::Column<'a, Message> {
+    column![
         text("Video Processing").size(18).color(theme::TEXT),
         pick_list(
             available_backends,
@@ -88,26 +155,5 @@ pub fn view<'a>(
             .size(12)
             .color(theme::TEXT_DIM),
     ]
-    .spacing(10);
-
-    column![
-        title_bar::view(window_id, "Settings"),
-        rule::horizontal(1).style(theme::styled_rule),
-        container(
-            column![
-                adapter_col,
-                rule::horizontal(1).style(theme::styled_rule),
-                backend_section,
-            ]
-            .spacing(20)
-            .width(Fill)
-            .padding(padding::all(20)),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(theme::styled_container),
-    ]
-    .width(Fill)
-    .height(Fill)
-    .into()
+    .spacing(10)
 }

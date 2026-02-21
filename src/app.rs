@@ -7,6 +7,7 @@ use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
 use crate::config::AppConfig;
 use crate::frame::FrameData;
+#[cfg(target_os = "linux")]
 use crate::platform::linux::gst_pipeline::{self, GpuBackend};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
@@ -69,7 +70,9 @@ pub struct Cocuyo {
     selected_region: Option<usize>,
 
     // Backend and adapter selection
+    #[cfg(target_os = "linux")]
     available_backends: Vec<GpuBackend>,
+    #[cfg(target_os = "linux")]
     selected_backend_index: usize,
     available_adapters: Vec<String>,
     selected_adapter: GpuAdapterSelection,
@@ -78,22 +81,27 @@ pub struct Cocuyo {
 
 impl Cocuyo {
     pub fn new(config: AppConfig) -> (Self, Task<Message>) {
-        let detected_backends = gst_pipeline::detect_available_backends();
-        info!(backends = ?detected_backends, "Detected GPU backends");
+        #[cfg(target_os = "linux")]
+        let (available_backends, selected_backend_index) = {
+            let detected_backends = gst_pipeline::detect_available_backends();
+            info!(backends = ?detected_backends, "Detected GPU backends");
 
-        let mut available_backends = Vec::with_capacity(detected_backends.len() + 1);
-        available_backends.push(GpuBackend::Auto);
-        available_backends.extend(detected_backends);
+            let mut available_backends = Vec::with_capacity(detected_backends.len() + 1);
+            available_backends.push(GpuBackend::Auto);
+            available_backends.extend(detected_backends);
 
-        let selected_backend_index = config
-            .preferred_backend
-            .as_deref()
-            .and_then(|key| {
-                available_backends
-                    .iter()
-                    .position(|b| b.config_key() == key)
-            })
-            .unwrap_or(0);
+            let selected_backend_index = config
+                .preferred_backend
+                .as_deref()
+                .and_then(|key| {
+                    available_backends
+                        .iter()
+                        .position(|b| b.config_key() == key)
+                })
+                .unwrap_or(0);
+
+            (available_backends, selected_backend_index)
+        };
 
         // TODO: we should enumerate adapters for all backends, but for now just do Vulkan
         // since it's the most relevant for Linux screen capture
@@ -119,7 +127,9 @@ impl Cocuyo {
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
+            #[cfg(target_os = "linux")]
             available_backends,
+            #[cfg(target_os = "linux")]
             selected_backend_index,
             recording_cmd_tx: None,
             bulb_setup: BulbSetupState::new(saved_bulbs, selected_macs),
@@ -187,6 +197,7 @@ impl Cocuyo {
                 Some(parent),
             ),
             Message::StartRecording => {
+                #[cfg(target_os = "linux")]
                 crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                 self.is_recording = true;
                 self.session_id += 1;
@@ -200,11 +211,15 @@ impl Cocuyo {
                 Task::none()
             }
             Message::BackendSelected(idx) => {
-                self.selected_backend_index = idx;
-                if let Some(backend) = self.available_backends.get(idx) {
-                    self.config.preferred_backend = Some(backend.config_key());
-                    self.config.save();
+                #[cfg(target_os = "linux")]
+                {
+                    self.selected_backend_index = idx;
+                    if let Some(backend) = self.available_backends.get(idx) {
+                        self.config.preferred_backend = Some(backend.config_key());
+                        self.config.save();
+                    }
                 }
+                let _ = idx;
                 Task::none()
             }
             Message::AdapterSelected(selection) => {
@@ -271,6 +286,7 @@ impl Cocuyo {
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 if !self.is_recording {
+                    #[cfg(target_os = "linux")]
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
@@ -402,15 +418,27 @@ impl Cocuyo {
                 )
             }
             Some(WindowKind::Settings) => {
-                let selected = self.available_backends.get(self.selected_backend_index);
-                crate::screen::settings::view(
-                    window_id,
-                    &self.available_backends,
-                    selected,
-                    &self.available_adapters,
-                    &self.selected_adapter,
-                    self.config.preferred_adapter.as_deref(),
-                )
+                #[cfg(target_os = "linux")]
+                {
+                    let selected = self.available_backends.get(self.selected_backend_index);
+                    crate::screen::settings::view(
+                        window_id,
+                        &self.available_backends,
+                        selected,
+                        &self.available_adapters,
+                        &self.selected_adapter,
+                        self.config.preferred_adapter.as_deref(),
+                    )
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    crate::screen::settings::view(
+                        window_id,
+                        &self.available_adapters,
+                        &self.selected_adapter,
+                        self.config.preferred_adapter.as_deref(),
+                    )
+                }
             }
             Some(WindowKind::BulbSetup) => {
                 crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
@@ -434,19 +462,22 @@ impl Cocuyo {
         let mut subs = vec![window::close_events().map(Message::WindowClosed)];
 
         if self.is_recording {
-            let backend = self
-                .available_backends
-                .get(self.selected_backend_index)
-                .cloned()
-                .unwrap_or(GpuBackend::Cpu);
+            #[cfg(target_os = "linux")]
+            {
+                let backend = self
+                    .available_backends
+                    .get(self.selected_backend_index)
+                    .cloned()
+                    .unwrap_or(GpuBackend::Cpu);
 
-            subs.push(
-                Subscription::run_with(
-                    (self.session_id, backend),
-                    recording::recording_subscription,
-                )
-                .map(Message::RecordingEvent),
-            );
+                subs.push(
+                    Subscription::run_with(
+                        (self.session_id, backend),
+                        recording::recording_subscription,
+                    )
+                    .map(Message::RecordingEvent),
+                );
+            }
         }
 
         Subscription::batch(subs)
