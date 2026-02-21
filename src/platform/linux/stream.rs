@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
 
@@ -11,10 +12,30 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::frame::FrameData;
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
+use crate::frame::FrameData;
+
+struct HeldBuffer {
+    inner: ManuallyDrop<pw::buffer::Buffer<'static>>,
+}
+
+impl HeldBuffer {
+    /// Takes ownership of a PipeWire buffer, preventing its automatic re-queuing.
+    unsafe fn new(buffer: pw::buffer::Buffer<'_>) -> Self {
+        let erased: pw::buffer::Buffer<'static> = unsafe { std::mem::transmute(buffer) };
+        Self {
+            inner: ManuallyDrop::new(erased),
+        }
+    }
+}
+
+impl Drop for HeldBuffer {
+    fn drop(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.inner) }
+    }
+}
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -30,16 +51,14 @@ pub struct UserData {
     /// This gives the UI thread enough time to import the DMA-BUF, copy it
     /// to a local GPU texture, and call `queue.submit()` — which attaches
     /// the read fence the compositor waits for before reusing the buffer.
-    ///
-    /// # Safety note
-    /// `Buffer<'a>` borrows the `StreamRef` for lifetime `'a`. We extend it to `'static` via
-    /// transmute because the `StreamRef` is guaranteed to outlive `UserData` (both are owned by
-    /// the same PipeWire stream, and streams outlive their listener/user-data in Rust's drop
-    /// order). All access is confined to the single PipeWire mainloop thread.
-    held_dmabuf_buffers: VecDeque<pw::buffer::Buffer<'static>>,
+    held_dmabuf_buffers: VecDeque<HeldBuffer>,
 }
 
-pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd, ashpd::desktop::Session<'static, Screencast<'static>>)> {
+pub async fn open_portal() -> ashpd::Result<(
+    ScreencastStream,
+    OwnedFd,
+    ashpd::desktop::Session<'static, Screencast<'static>>,
+)> {
     let proxy = Screencast::new().await?;
     let session = proxy.create_session().await?;
     proxy
@@ -184,11 +203,6 @@ fn on_param_changed(
 }
 
 fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
-    // Evict the oldest held buffer if we've accumulated 3 or more.
-    // Each dropped buffer calls pw_stream_queue_buffer, returning it to PipeWire.
-    // By holding up to 3 buffers (~50ms at 60fps), we give the UI thread enough time
-    // to import the DMA-BUF, copy to a local GPU texture, and call queue.submit()
-    // — which attaches the DRM read fence the compositor waits for.
     while user_data.held_dmabuf_buffers.len() >= 3 {
         user_data.held_dmabuf_buffers.pop_front();
     }
@@ -203,12 +217,7 @@ fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
         let delivered = send_frame(frame, user_data);
 
         if is_vulkan_zerocopy && delivered {
-            // Extend Buffer<'_> lifetime to 'static so it can be stored in UserData.
-            // SAFETY: The StreamRef that Buffer holds a reference to is guaranteed to
-            // outlive UserData (both belong to the same pw::stream::Stream, and in Rust's
-            // drop order the Stream outlives the listener/user-data). All access is on the
-            // single PipeWire mainloop thread.
-            let held: pw::buffer::Buffer<'static> = unsafe { std::mem::transmute(buffer) };
+            let held = unsafe { HeldBuffer::new(buffer) };
             user_data.held_dmabuf_buffers.push_back(held);
         }
         // If GStreamer path (FrameData::Cpu): buffer drops here → queue_buffer immediately
@@ -291,7 +300,6 @@ fn try_process_dmabuf(
             stride: dmabuf.stride,
             offset: dmabuf.offset,
             modifier: dmabuf.modifier,
-            rgba_pixels: None,
         });
     }
 
@@ -329,7 +337,10 @@ fn lazy_setup_gst_converter(user_data: &mut UserData, dmabuf_fd: Option<std::os:
     }
 
     let backend = match user_data.selected_backend {
-        GpuBackend::Auto => gst_pipeline::resolve_auto_backend(dmabuf_fd),
+        GpuBackend::Auto => {
+            let available = gst_pipeline::detect_available_backends();
+            gst_pipeline::resolve_auto_backend(dmabuf_fd, &available)
+        }
         ref b => b.clone(),
     };
 

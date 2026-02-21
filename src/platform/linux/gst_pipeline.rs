@@ -410,9 +410,7 @@ fn build_pipeline_with_elements(
 /// For DMA-BUF frames, reads `/proc/self/fdinfo/<fd>` to detect the DRM driver
 /// and selects a matching backend. For CPU frames (`dmabuf_fd` is `None`), returns
 /// the best available backend (CUDA > OpenGL > CPU).
-pub fn resolve_auto_backend(dmabuf_fd: Option<RawFd>) -> GpuBackend {
-    let available = detect_available_backends();
-
+pub fn resolve_auto_backend(dmabuf_fd: Option<RawFd>, available: &[GpuBackend]) -> GpuBackend {
     if let Some(fd) = dmabuf_fd {
         if let Some(driver) = read_drm_driver(fd) {
             info!(driver = %driver, "Detected DRM driver from DMA-BUF fd");
@@ -431,7 +429,7 @@ pub fn resolve_auto_backend(dmabuf_fd: Option<RawFd>) -> GpuBackend {
     }
 
     // Fallback: best available (CUDA > OpenGL > CPU)
-    best_available_backend(&available)
+    best_available_backend(available)
 }
 
 fn best_available_backend(available: &[GpuBackend]) -> GpuBackend {

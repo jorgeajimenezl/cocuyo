@@ -317,35 +317,10 @@ impl Cocuyo {
                                 }
 
                                 // Read pixel data on demand — only here, every ~150ms
-                                let sampling_frame: Option<Arc<FrameData>> = match frame.as_ref() {
-                                    FrameData::DmaBuf {
-                                        fd,
-                                        width,
-                                        height,
-                                        stride,
-                                        offset,
-                                        drm_format,
-                                        ..
-                                    } => {
-                                        crate::platform::linux::dmabuf_handler::read_dmabuf_pixels(
-                                            fd.as_raw_fd(),
-                                            *width,
-                                            *height,
-                                            *stride,
-                                            *offset,
-                                            *drm_format,
-                                        )
-                                        .ok()
-                                        .map(|pixels| {
-                                            Arc::new(FrameData::Cpu {
-                                                data: Arc::new(pixels),
-                                                width: *width,
-                                                height: *height,
-                                            })
-                                        })
-                                    }
-                                    FrameData::Cpu { .. } => Some(frame.clone()),
-                                };
+                                // NOTE: this data can be stale maybe because the recording thread may
+                                // have already moved on to a newer frame, but that's ok since ambient
+                                // lighting doesn't need to be perfectly in sync
+                                let sampling_frame =  frame.convert_to_cpu();
 
                                 if let Some(ref sf) = sampling_frame {
                                     // Update region sampled colors
