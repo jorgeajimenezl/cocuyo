@@ -14,16 +14,14 @@ impl std::fmt::Display for GpuAdapterSelection {
 }
 
 pub fn enumerate_vulkan_adapters() -> Vec<String> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let adapters: Vec<String> = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
         ..Default::default()
-    });
-
-    let adapters: Vec<String> = instance
-        .enumerate_adapters(wgpu::Backends::VULKAN)
-        .into_iter()
-        .map(|adapter| adapter.get_info().name)
-        .collect();
+    })
+    .enumerate_adapters(wgpu::Backends::VULKAN)
+    .into_iter()
+    .map(|adapter| adapter.get_info().name)
+    .collect();
 
     adapters
 }
@@ -37,10 +35,7 @@ pub fn build_picker_options(adapters: &[String]) -> Vec<GpuAdapterSelection> {
 
 /// Given a saved preference string, find the matching AdapterSelection.
 /// Uses case-insensitive substring match, consistent with WGPU_ADAPTER_NAME.
-pub fn resolve_selection(
-    preferred: Option<&str>,
-    adapters: &[String],
-) -> GpuAdapterSelection {
+pub fn resolve_selection(preferred: Option<&str>, adapters: &[String]) -> GpuAdapterSelection {
     let Some(pref) = preferred else {
         return GpuAdapterSelection::Auto;
     };

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -74,7 +73,7 @@ pub struct Cocuyo {
     selected_backend_index: usize,
     available_adapters: Vec<String>,
     selected_adapter: GpuAdapterSelection,
-    active_adapter_preference: Option<String>,
+    config: AppConfig,
 }
 
 impl Cocuyo {
@@ -112,6 +111,7 @@ impl Cocuyo {
 
         let _ = id;
         let app = Self {
+            config,
             windows: BTreeMap::new(),
             current_frame: None,
             recording_state: RecordingState::Idle,
@@ -129,7 +129,6 @@ impl Cocuyo {
             selected_region: None,
             available_adapters,
             selected_adapter,
-            active_adapter_preference: config.preferred_adapter,
         };
 
         (
@@ -199,9 +198,8 @@ impl Cocuyo {
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
                 if let Some(backend) = self.available_backends.get(idx) {
-                    let mut cfg = AppConfig::load();
-                    cfg.preferred_backend = Some(backend.config_key());
-                    cfg.save();
+                    self.config.preferred_backend = Some(backend.config_key());
+                    self.config.save();
                 }
                 Task::none()
             }
@@ -211,9 +209,8 @@ impl Cocuyo {
                     GpuAdapterSelection::Auto => None,
                     GpuAdapterSelection::Named(name) => Some(name.clone()),
                 };
-                let mut cfg = AppConfig::load();
-                cfg.preferred_adapter = preferred;
-                cfg.save();
+                self.config.preferred_adapter = preferred;
+                self.config.save();
                 Task::none()
             }
             Message::OpenBulbSetup => self.open_window(
@@ -401,7 +398,7 @@ impl Cocuyo {
                     selected,
                     &self.available_adapters,
                     &self.selected_adapter,
-                    self.active_adapter_preference.as_deref(),
+                    self.config.preferred_adapter.as_deref(),
                 )
             }
             Some(WindowKind::BulbSetup) => {
