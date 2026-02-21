@@ -26,10 +26,10 @@ pub fn view<'a>(
     let menu_bar = container(
         row![
             button("Bulbs")
-                .on_press(Message::OpenBulbSetup)
+                .on_press(Message::OpenBulbSetup(window_id))
                 .style(theme::styled_button),
             button("Settings")
-                .on_press(Message::OpenSettings)
+                .on_press(Message::OpenSettings(window_id))
                 .style(theme::styled_button),
         ]
         .spacing(5)

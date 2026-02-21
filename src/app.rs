@@ -36,8 +36,8 @@ pub enum Message {
     CloseWindow(window::Id),
     MinimizeWindow(window::Id),
     MaximizeWindow(window::Id),
-    OpenSettings,
-    OpenBulbSetup,
+    OpenSettings(window::Id),
+    OpenBulbSetup(window::Id),
     StartRecording,
     StopRecording,
     BackendSelected(usize),
@@ -180,10 +180,11 @@ impl Cocuyo {
             Message::CloseWindow(id) => window::close(id),
             Message::MinimizeWindow(id) => window::minimize(id, true),
             Message::MaximizeWindow(id) => window::maximize(id, true),
-            Message::OpenSettings => self.open_window(
+            Message::OpenSettings(parent) => self.open_window(
                 WindowKind::Settings,
                 Size::new(500.0, 500.0),
                 Size::new(300.0, 200.0),
+                Some(parent),
             ),
             Message::StartRecording => {
                 crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
@@ -216,10 +217,11 @@ impl Cocuyo {
                 self.config.save();
                 Task::none()
             }
-            Message::OpenBulbSetup => self.open_window(
+            Message::OpenBulbSetup(parent) => self.open_window(
                 WindowKind::BulbSetup,
                 Size::new(500.0, 400.0),
                 Size::new(350.0, 300.0),
+                Some(parent),
             ),
             Message::BulbSetup(msg) => {
                 if matches!(msg, BulbSetupMessage::Done) {
@@ -497,7 +499,7 @@ impl Cocuyo {
         }
     }
 
-    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size) -> Task<Message> {
+    fn open_window(&self, kind: WindowKind, size: Size, min_size: Size, parent: Option<window::Id>) -> Task<Message> {
         if self.windows.values().any(|k| *k == kind) {
             return Task::none();
         }
@@ -506,6 +508,7 @@ impl Cocuyo {
             min_size: Some(min_size),
             decorations: false,
             transparent: true,
+            parent,
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))
