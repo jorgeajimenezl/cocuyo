@@ -28,3 +28,6 @@ iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "316900763ee7
 nix = { version = "0.29", features = ["fs", "mman", "ioctl"] }
 wgpu-hal = { version = "27", features = ["vulkan"] }
 pipewire = { version = "0.8", features = ["v0_3_77"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-capture = "2.0.0-alpha"

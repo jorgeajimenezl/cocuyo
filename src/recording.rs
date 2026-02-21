@@ -22,3 +22,6 @@ pub enum RecordingEvent {
 
 #[cfg(target_os = "linux")]
 pub use crate::platform::linux::recording::recording_subscription;
+
+#[cfg(target_os = "windows")]
+pub use crate::platform::windows::recording::recording_subscription;

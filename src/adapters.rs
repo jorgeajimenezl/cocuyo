@@ -13,12 +13,21 @@ impl std::fmt::Display for GpuAdapterSelection {
     }
 }
 
-pub fn enumerate_vulkan_adapters() -> Vec<String> {
+pub fn enumerate_adapters() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    let backends = wgpu::Backends::VULKAN;
+
+    #[cfg(target_os = "windows")]
+    let backends = wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    let backends = wgpu::Backends::PRIMARY;
+
     let adapters: Vec<String> = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::VULKAN,
+        backends,
         ..Default::default()
     })
-    .enumerate_adapters(wgpu::Backends::VULKAN)
+    .enumerate_adapters(backends)
     .into_iter()
     .map(|adapter| adapter.get_info().name)
     .collect();

@@ -737,6 +737,7 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "wgpu-hal",
+ "windows-capture",
  "wiz-lights-rs",
 ]
 
@@ -1942,7 +1943,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5487,6 +5488,19 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-future",
  "windows-numerics",
+]
+
+[[package]]
+name = "windows-capture"
+version = "2.0.0-alpha.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dcd037f0a621bbbb3d6a6b895ddd5b0d691b008b2f9d6980e2d367b16ab5bf6"
+dependencies = [
+ "parking_lot",
+ "rayon",
+ "thiserror 2.0.18",
+ "windows 0.62.2",
+ "windows-future",
 ]
 
 [[package]]

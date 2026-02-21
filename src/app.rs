@@ -76,7 +76,7 @@ pub struct Cocuyo {
     #[cfg(target_os = "linux")]
     selected_backend_index: usize,
 
-    // Adapter used for displaying recording and 
+    // Adapter used for displaying recording and
     // sampling frames (if applicable)
     available_adapters: Vec<String>,
     selected_adapter: GpuAdapterSelection,
@@ -107,9 +107,7 @@ impl Cocuyo {
             (available_backends, selected_backend_index)
         };
 
-        // TODO: we should enumerate adapters for all backends, but for now just do Vulkan
-        // since it's the most relevant for Linux screen capture
-        let available_adapters = adapters::enumerate_vulkan_adapters();
+        let available_adapters = adapters::enumerate_adapters();
         let selected_adapter =
             adapters::resolve_selection(config.preferred_adapter.as_deref(), &available_adapters);
 
@@ -463,25 +461,31 @@ impl Cocuyo {
         let mut subs = vec![window::close_events().map(Message::WindowClosed)];
 
         if self.is_recording {
-            #[cfg(target_os = "linux")]
-            {
-                let backend = self
-                    .available_backends
-                    .get(self.selected_backend_index)
-                    .cloned()
-                    .unwrap_or(GpuBackend::Cpu);
-
-                subs.push(
-                    Subscription::run_with(
-                        (self.session_id, backend),
-                        recording::recording_subscription,
-                    )
-                    .map(Message::RecordingEvent),
-                );
-            }
+            subs.push(self.build_recording_subscription());
         }
 
         Subscription::batch(subs)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn build_recording_subscription(&self) -> Subscription<Message> {
+        let backend = self
+            .available_backends
+            .get(self.selected_backend_index)
+            .cloned()
+            .unwrap_or(GpuBackend::Cpu);
+
+        Subscription::run_with(
+            (self.session_id, backend),
+            recording::recording_subscription,
+        )
+        .map(Message::RecordingEvent)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn build_recording_subscription(&self) -> Subscription<Message> {
+        Subscription::run_with(self.session_id, recording::recording_subscription)
+            .map(Message::RecordingEvent)
     }
 
     fn sync_regions_to_bulbs(&mut self) {
