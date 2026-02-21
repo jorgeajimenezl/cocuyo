@@ -24,17 +24,17 @@ fn main() -> iced::Result {
         )
         .init();
 
-    gstreamer::init().expect("Failed to initialize GStreamer");
-    info!("GStreamer initialized");
-
-    pipewire::init();
-
     let app_config = config::AppConfig::load();
     if let Some(ref name) = app_config.preferred_adapter {
         // NOTE: This is safe because there are no concurrent threads at this point, and we set the env var before any wgpu code runs.
         unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
         info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
     }
+
+    gstreamer::init().expect("Failed to initialize GStreamer");
+    info!("GStreamer initialized");
+
+    pipewire::init();
 
     iced::daemon(
         move || Cocuyo::new(app_config.clone()),
