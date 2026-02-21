@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::adapters::{self, GpuAdapterSelection};
 use crate::ambient::SavedBulbState;
 use crate::bulb_setup::{BulbSetupMessage, BulbSetupState};
+use crate::config::AppConfig;
 use crate::frame::FrameData;
-use crate::platform::linux::gst_pipeline::GpuBackend;
+use crate::platform::linux::gst_pipeline::{self, GpuBackend};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
@@ -16,6 +18,7 @@ use iced::widget::container;
 use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
@@ -38,6 +41,7 @@ pub enum Message {
     StartRecording,
     StopRecording,
     BackendSelected(usize),
+    AdapterSelected(GpuAdapterSelection),
     RecordingEvent(RecordingEvent),
     BulbSetup(BulbSetupMessage),
     StartAmbient,
@@ -55,8 +59,6 @@ pub struct Cocuyo {
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
-    available_backends: Vec<GpuBackend>,
-    selected_backend_index: usize,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
     bulb_setup: BulbSetupState,
     is_ambient_active: bool,
@@ -65,10 +67,40 @@ pub struct Cocuyo {
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
+
+    // Backend and adapter selection
+    available_backends: Vec<GpuBackend>,
+    selected_backend_index: usize,
+    available_adapters: Vec<String>,
+    selected_adapter: GpuAdapterSelection,
+    config: AppConfig,
 }
 
 impl Cocuyo {
-    pub fn new(available_backends: Vec<GpuBackend>) -> (Self, Task<Message>) {
+    pub fn new(config: AppConfig) -> (Self, Task<Message>) {
+        let detected_backends = gst_pipeline::detect_available_backends();
+        info!(backends = ?detected_backends, "Detected GPU backends");
+
+        let mut available_backends = Vec::with_capacity(detected_backends.len() + 1);
+        available_backends.push(GpuBackend::Auto);
+        available_backends.extend(detected_backends);
+
+        let selected_backend_index = config
+            .preferred_backend
+            .as_deref()
+            .and_then(|key| {
+                available_backends
+                    .iter()
+                    .position(|b| b.config_key() == key)
+            })
+            .unwrap_or(0);
+
+        // TODO: we should enumerate adapters for all backends, but for now just do Vulkan
+        // since it's the most relevant for Linux screen capture
+        let available_adapters = adapters::enumerate_vulkan_adapters();
+        let selected_adapter =
+            adapters::resolve_selection(config.preferred_adapter.as_deref(), &available_adapters);
+
         let (id, open) = window::open(window::Settings {
             size: Size::new(1200.0, 750.0),
             min_size: Some(Size::new(800.0, 500.0)),
@@ -79,13 +111,14 @@ impl Cocuyo {
 
         let _ = id;
         let app = Self {
+            config,
             windows: BTreeMap::new(),
             current_frame: None,
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
             available_backends,
-            selected_backend_index: 0,
+            selected_backend_index,
             recording_cmd_tx: None,
             bulb_setup: BulbSetupState::new(),
             is_ambient_active: false,
@@ -94,6 +127,8 @@ impl Cocuyo {
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
+            available_adapters,
+            selected_adapter,
         };
 
         (
@@ -144,7 +179,7 @@ impl Cocuyo {
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings => self.open_window(
                 WindowKind::Settings,
-                Size::new(400.0, 300.0),
+                Size::new(500.0, 500.0),
                 Size::new(300.0, 200.0),
             ),
             Message::StartRecording => {
@@ -162,6 +197,20 @@ impl Cocuyo {
             }
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
+                if let Some(backend) = self.available_backends.get(idx) {
+                    self.config.preferred_backend = Some(backend.config_key());
+                    self.config.save();
+                }
+                Task::none()
+            }
+            Message::AdapterSelected(selection) => {
+                self.selected_adapter = selection.clone();
+                let preferred = match &selection {
+                    GpuAdapterSelection::Auto => None,
+                    GpuAdapterSelection::Named(name) => Some(name.clone()),
+                };
+                self.config.preferred_adapter = preferred;
+                self.config.save();
                 Task::none()
             }
             Message::OpenBulbSetup => self.open_window(
@@ -250,18 +299,6 @@ impl Cocuyo {
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
-                        // Update region sampled colors
-                        for region in &mut self.regions {
-                            region.sampled_color = crate::sampling::sample_region(
-                                frame,
-                                region.x,
-                                region.y,
-                                region.width,
-                                region.height,
-                                region.strategy,
-                            );
-                        }
-
                         if self.is_ambient_active {
                             let should_update = self
                                 .last_bulb_update
@@ -276,15 +313,35 @@ impl Cocuyo {
                                     return Task::none();
                                 }
 
-                                if let Some(targets) = crate::ambient::sample_frame_for_regions(
-                                    frame,
-                                    &self.regions,
-                                    self.bulb_setup.discovered_bulbs(),
-                                ) {
-                                    return Task::perform(
-                                        crate::ambient::dispatch_bulb_colors(targets),
-                                        |()| Message::Noop,
-                                    );
+                                // Read pixel data on demand — only here, every ~150ms
+                                // NOTE: this data can be stale maybe because the recording thread may
+                                // have already moved on to a newer frame, but that's ok since ambient
+                                // lighting doesn't need to be perfectly in sync
+                                let sampling_frame =  frame.convert_to_cpu();
+
+                                if let Some(ref sf) = sampling_frame {
+                                    // Update region sampled colors
+                                    for region in &mut self.regions {
+                                        region.sampled_color = crate::sampling::sample_region(
+                                            sf,
+                                            region.x,
+                                            region.y,
+                                            region.width,
+                                            region.height,
+                                            region.strategy,
+                                        );
+                                    }
+
+                                    if let Some(targets) = crate::ambient::sample_frame_for_regions(
+                                        sf,
+                                        &self.regions,
+                                        self.bulb_setup.discovered_bulbs(),
+                                    ) {
+                                        return Task::perform(
+                                            crate::ambient::dispatch_bulb_colors(targets),
+                                            |()| Message::Noop,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -335,7 +392,14 @@ impl Cocuyo {
             }
             Some(WindowKind::Settings) => {
                 let selected = self.available_backends.get(self.selected_backend_index);
-                crate::screen::settings::view(window_id, &self.available_backends, selected)
+                crate::screen::settings::view(
+                    window_id,
+                    &self.available_backends,
+                    selected,
+                    &self.available_adapters,
+                    &self.selected_adapter,
+                    self.config.preferred_adapter.as_deref(),
+                )
             }
             Some(WindowKind::BulbSetup) => {
                 crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
@@ -381,9 +445,7 @@ impl Cocuyo {
         let selected_macs = self.bulb_setup.selected_bulbs_vec();
 
         // Remove regions whose bulb_mac is no longer selected
-        self.regions.retain(|r| {
-            selected_macs.contains(&r.bulb_mac)
-        });
+        self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
 
         // Clear selected_region if it was removed
         if let Some(sel) = self.selected_region {

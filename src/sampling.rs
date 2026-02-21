@@ -33,9 +33,9 @@ fn luminance_u32(r: u8, g: u8, b: u8) -> u32 {
     299 * r as u32 + 587 * g as u32 + 114 * b as u32
 }
 
-/// Sample a rectangular region of a CPU frame using the given strategy.
+/// Sample a rectangular region of a frame using the given strategy.
 ///
-/// Returns `None` for DMA-BUF frames or empty/invalid regions.
+/// Returns `None` if pixel data is unavailable or the region is empty/invalid.
 /// Uses strided sampling (~1000 pixels max) to avoid processing every pixel.
 pub fn sample_region(
     frame: &FrameData,
@@ -45,12 +45,9 @@ pub fn sample_region(
     h: f32,
     strategy: SamplingStrategy,
 ) -> Option<(u8, u8, u8)> {
-    let FrameData::Cpu { data, width, height } = frame else {
-        return None;
-    };
-
-    let width = *width;
-    let height = *height;
+    let data = frame.pixels()?;
+    let width = frame.width();
+    let height = frame.height();
 
     let x0 = (x as u32).min(width);
     let y0 = (y as u32).min(height);

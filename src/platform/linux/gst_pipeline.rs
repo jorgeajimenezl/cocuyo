@@ -11,17 +11,31 @@ use super::formats::to_gst_format;
 /// Available GPU backends for video processing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GpuBackend {
+    /// Automatically select the best backend based on the compositor's GPU.
+    Auto,
     Cuda(CudaDevice),
-    Vaapi(VaapiDevice),
+    OpenGL,
     Cpu,
 }
 
 impl std::fmt::Display for GpuBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            GpuBackend::Auto => write!(f, "Auto"),
             GpuBackend::Cuda(dev) => write!(f, "{}", dev.name),
-            GpuBackend::Vaapi(dev) => write!(f, "{}", dev.name),
+            GpuBackend::OpenGL => write!(f, "OpenGL (GPU)"),
             GpuBackend::Cpu => write!(f, "CPU (Software)"),
+        }
+    }
+}
+
+impl GpuBackend {
+    pub fn config_key(&self) -> String {
+        match self {
+            GpuBackend::Auto => "auto".into(),
+            GpuBackend::Cuda(dev) => format!("cuda:{}", dev.index),
+            GpuBackend::OpenGL => "opengl".into(),
+            GpuBackend::Cpu => "cpu".into(),
         }
     }
 }
@@ -29,12 +43,6 @@ impl std::fmt::Display for GpuBackend {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CudaDevice {
     pub index: i32,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VaapiDevice {
-    pub path: String,
     pub name: String,
 }
 
@@ -65,8 +73,8 @@ pub fn detect_available_backends() -> Vec<GpuBackend> {
         backends.push(GpuBackend::Cuda(cuda));
     }
 
-    if let Some(opengl) = detect_opengl_devices() {
-        backends.extend(opengl.into_iter().map(GpuBackend::Vaapi));
+    if detect_opengl_available() {
+        backends.push(GpuBackend::OpenGL);
     }
 
     backends.push(GpuBackend::Cpu);
@@ -91,34 +99,36 @@ fn detect_cuda_device() -> Option<CudaDevice> {
 }
 
 fn get_nvidia_gpu_name() -> Option<String> {
-    for entry in std::fs::read_dir("/sys/class/drm").ok()? {
-        let entry = entry.ok()?;
+    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
+    for entry in entries.flatten() {
         let path = entry.path();
-
         let name = path.file_name()?.to_str()?;
-        if !name.starts_with("card") || name.contains("render") {
+        if !name.starts_with("renderD") {
             continue;
         }
 
-        let vendor_path = path.join("device/vendor");
-        let vendor = std::fs::read_to_string(&vendor_path).ok()?;
-        if vendor.trim() == "0x10de" {
+        let vendor = std::fs::read_to_string(path.join("device/vendor"))
+            .ok()?
+            .trim()
+            .to_lowercase();
+
+        if vendor == "0x10de" {
             return Some("NVIDIA GPU".to_string());
         }
     }
     None
 }
 
-fn detect_opengl_devices() -> Option<Vec<VaapiDevice>> {
-    let factory = gst::ElementFactory::find("glcolorconvert")?;
-    let _element = factory.create().build().ok()?;
+fn detect_opengl_available() -> bool {
+    let available = gst::ElementFactory::find("glcolorconvert")
+        .and_then(|factory| factory.create().build().ok())
+        .is_some();
 
-    info!("OpenGL colorspace conversion available");
+    if available {
+        info!("OpenGL colorspace conversion available");
+    }
 
-    Some(vec![VaapiDevice {
-        path: "opengl".to_string(),
-        name: "OpenGL (GPU)".to_string(),
-    }])
+    available
 }
 
 pub struct GstVideoConverter {
@@ -205,6 +215,9 @@ impl GstVideoConverter {
         backend: &GpuBackend,
     ) -> Result<GpuBackend, GstError> {
         match backend {
+            GpuBackend::Auto => {
+                unreachable!("Auto backend must be resolved before creating GstVideoConverter")
+            }
             GpuBackend::Cuda(device) => {
                 match Self::try_build_cuda_pipeline(pipeline, appsrc, appsink, device.index) {
                     Ok(()) => Ok(backend.clone()),
@@ -215,11 +228,11 @@ impl GstVideoConverter {
                     }
                 }
             }
-            GpuBackend::Vaapi(device) => {
+            GpuBackend::OpenGL => {
                 match Self::try_build_opengl_pipeline(pipeline, appsrc, appsink) {
                     Ok(()) => Ok(backend.clone()),
                     Err(e) => {
-                        warn!(error = %e, device = %device.name, "Failed to create OpenGL pipeline, falling back to CPU");
+                        warn!(error = %e, "Failed to create OpenGL pipeline, falling back to CPU");
                         Self::build_cpu_pipeline(pipeline, appsrc, appsink)?;
                         Ok(GpuBackend::Cpu)
                     }
@@ -390,4 +403,55 @@ fn build_pipeline_with_elements(
         .map_err(|e| GstError::PipelineError(format!("Failed to link {} elements: {}", label, e)))?;
 
     Ok(())
+}
+
+/// Resolves the Auto backend selection to a concrete backend.
+///
+/// For DMA-BUF frames, reads `/proc/self/fdinfo/<fd>` to detect the DRM driver
+/// and selects a matching backend. For CPU frames (`dmabuf_fd` is `None`), returns
+/// the best available backend (CUDA > OpenGL > CPU).
+pub fn resolve_auto_backend(dmabuf_fd: Option<RawFd>, available: &[GpuBackend]) -> GpuBackend {
+    if let Some(fd) = dmabuf_fd {
+        if let Some(driver) = read_drm_driver(fd) {
+            info!(driver = %driver, "Detected DRM driver from DMA-BUF fd");
+
+            if driver.contains("nvidia") {
+                if let Some(cuda) = available.iter().find(|b| matches!(b, GpuBackend::Cuda(_))) {
+                    return cuda.clone();
+                }
+            }
+
+            // Non-NVIDIA driver (amdgpu, i915, xe, etc.) → prefer OpenGL
+            if available.iter().any(|b| matches!(b, GpuBackend::OpenGL)) {
+                return GpuBackend::OpenGL;
+            }
+        }
+    }
+
+    // Fallback: best available (CUDA > OpenGL > CPU)
+    best_available_backend(available)
+}
+
+fn best_available_backend(available: &[GpuBackend]) -> GpuBackend {
+    for backend in available {
+        if matches!(backend, GpuBackend::Cuda(_)) {
+            return backend.clone();
+        }
+    }
+    if available.iter().any(|b| matches!(b, GpuBackend::OpenGL)) {
+        return GpuBackend::OpenGL;
+    }
+    GpuBackend::Cpu
+}
+
+fn read_drm_driver(fd: RawFd) -> Option<String> {
+    let path = format!("/proc/self/fdinfo/{}", fd);
+    let content = std::fs::read_to_string(&path).ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(driver) = line.strip_prefix("drm-driver:") {
+            return Some(driver.trim().to_lowercase());
+        }
+    }
+    None
 }

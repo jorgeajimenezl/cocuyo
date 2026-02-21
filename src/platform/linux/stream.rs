@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
 
@@ -10,10 +12,30 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::frame::FrameData;
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
+use crate::frame::FrameData;
+
+struct HeldBuffer {
+    inner: ManuallyDrop<pw::buffer::Buffer<'static>>,
+}
+
+impl HeldBuffer {
+    /// Takes ownership of a PipeWire buffer, preventing its automatic re-queuing.
+    unsafe fn new(buffer: pw::buffer::Buffer<'_>) -> Self {
+        let erased: pw::buffer::Buffer<'static> = unsafe { std::mem::transmute(buffer) };
+        Self {
+            inner: ManuallyDrop::new(erased),
+        }
+    }
+}
+
+impl Drop for HeldBuffer {
+    fn drop(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.inner) }
+    }
+}
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -21,9 +43,22 @@ pub struct UserData {
     pub gst_converter: Option<gst_pipeline::GstVideoConverter>,
     pub mainloop: pw::main_loop::MainLoop,
     pub selected_backend: GpuBackend,
+    /// PipeWire buffers held back from being re-queued to give the GPU time
+    /// to submit rendering commands and attach DRM implicit-sync read fences.
+    ///
+    /// We hold up to 3 buffers (~50ms at 60fps). When the deque reaches 3,
+    /// the oldest buffer is released (dropped → `pw_stream_queue_buffer`).
+    /// This gives the UI thread enough time to import the DMA-BUF, copy it
+    /// to a local GPU texture, and call `queue.submit()` — which attaches
+    /// the read fence the compositor waits for before reusing the buffer.
+    held_dmabuf_buffers: VecDeque<HeldBuffer>,
 }
 
-pub async fn open_portal() -> ashpd::Result<(ScreencastStream, OwnedFd, ashpd::desktop::Session<'static, Screencast<'static>>)> {
+pub async fn open_portal() -> ashpd::Result<(
+    ScreencastStream,
+    OwnedFd,
+    ashpd::desktop::Session<'static, Screencast<'static>>,
+)> {
     let proxy = Screencast::new().await?;
     let session = proxy.create_session().await?;
     proxy
@@ -65,6 +100,7 @@ pub fn start_streaming(
         gst_converter: None,
         mainloop: mainloop.clone(),
         selected_backend,
+        held_dmabuf_buffers: VecDeque::new(),
     };
 
     let stream = pw::stream::Stream::new(
@@ -79,8 +115,11 @@ pub fn start_streaming(
 
     let _listener = stream
         .add_local_listener_with_user_data(data)
-        .state_changed(|_, _, old, new| {
+        .state_changed(|_, user_data, old, new| {
             debug!(?old, ?new, "Stream state changed");
+            // Release any held buffer on state transitions so we don't leak buffers
+            // when the stream pauses or errors out between on_process calls.
+            user_data.held_dmabuf_buffers.clear();
         })
         .param_changed(on_param_changed)
         .process(on_process)
@@ -88,18 +127,27 @@ pub fn start_streaming(
 
     debug!(?stream, "Created stream");
 
-    let params = build_stream_params();
-    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &pw::spa::pod::Value::Object(params),
-    )
-    .unwrap()
-    .0
-    .into_inner();
+    let serialize = |obj: pw::spa::pod::Object| -> Vec<u8> {
+        pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &pw::spa::pod::Value::Object(obj),
+        )
+        .unwrap()
+        .0
+        .into_inner()
+    };
 
-    let mut params = [spa::pod::Pod::from_bytes(&values).unwrap()];
+    // Two params: first advertises DMA-BUF with explicit modifier negotiation (preferred),
+    // second is the CPU/GStreamer fallback without modifiers.
+    let dmabuf_values = serialize(build_dmabuf_modifier_format_param());
+    let cpu_values = serialize(build_stream_params());
 
-    info!("Attempting to connect with DMA-BUF support");
+    let mut params = [
+        spa::pod::Pod::from_bytes(&dmabuf_values).unwrap(),
+        spa::pod::Pod::from_bytes(&cpu_values).unwrap(),
+    ];
+
+    info!("Attempting to connect with DMA-BUF modifier negotiation");
     stream.connect(
         spa::utils::Direction::Input,
         Some(node_id),
@@ -152,40 +200,34 @@ fn on_param_changed(
         framerate_denom = user_data.format.framerate().denom,
         "Got video format"
     );
-
-    let width = user_data.format.size().width;
-    let height = user_data.format.size().height;
-    let format = user_data.format.format();
-    let backend = user_data.selected_backend.clone();
-
-    match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
-        Ok(converter) => {
-            info!(
-                backend = %converter.backend(),
-                "GStreamer converter initialized successfully"
-            );
-            user_data.gst_converter = Some(converter);
-        }
-        Err(e) => {
-            error!(error = %e, "Failed to create GStreamer converter");
-        }
-    }
 }
 
 fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
+    while user_data.held_dmabuf_buffers.len() >= 3 {
+        user_data.held_dmabuf_buffers.pop_front();
+    }
+
     let Some(mut buffer) = stream.dequeue_buffer() else {
         warn!("Out of buffers");
         return;
     };
 
     if let Some(frame) = try_process_dmabuf(&mut buffer, user_data) {
-        send_frame(frame, user_data);
+        let is_vulkan_zerocopy = matches!(frame, FrameData::DmaBuf { .. });
+        let delivered = send_frame(frame, user_data);
+
+        if is_vulkan_zerocopy && delivered {
+            let held = unsafe { HeldBuffer::new(buffer) };
+            user_data.held_dmabuf_buffers.push_back(held);
+        }
+        // If GStreamer path (FrameData::Cpu): buffer drops here → queue_buffer immediately
         return;
     }
 
     if let Some(frame) = try_process_cpu(&mut buffer, user_data) {
         send_frame(frame, user_data);
     }
+    // buffer drops here → queue_buffer
 }
 
 fn try_process_dmabuf(
@@ -284,10 +326,48 @@ fn try_process_dmabuf(
     try_process_dmabuf_gstreamer(&dmabuf, user_data)
 }
 
+/// Lazily initializes the GStreamer converter on the first frame.
+///
+/// For `Auto`, `dmabuf_fd` is used to detect the compositor's GPU via
+/// `/proc/self/fdinfo/<fd>` and pick the matching backend. For explicit
+/// backends the value is used directly.
+fn lazy_setup_gst_converter(user_data: &mut UserData, dmabuf_fd: Option<std::os::fd::RawFd>) {
+    if user_data.gst_converter.is_some() {
+        return;
+    }
+
+    let backend = match user_data.selected_backend {
+        GpuBackend::Auto => {
+            let available = gst_pipeline::detect_available_backends();
+            gst_pipeline::resolve_auto_backend(dmabuf_fd, &available)
+        }
+        ref b => b.clone(),
+    };
+
+    let width = user_data.format.size().width;
+    let height = user_data.format.size().height;
+    let format = user_data.format.format();
+
+    match gst_pipeline::GstVideoConverter::new(width, height, format, backend) {
+        Ok(converter) => {
+            info!(
+                backend = %converter.backend(),
+                "GStreamer converter initialized"
+            );
+            user_data.gst_converter = Some(converter);
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to create GStreamer converter");
+        }
+    }
+}
+
 fn try_process_dmabuf_gstreamer(
     dmabuf: &dmabuf_handler::DmaBufBuffer,
     user_data: &mut UserData,
 ) -> Option<FrameData> {
+    lazy_setup_gst_converter(user_data, Some(dmabuf.fd));
+
     let buffer_size = (dmabuf.stride * dmabuf.height) as usize;
     let converter = user_data.gst_converter.as_mut()?;
 
@@ -314,6 +394,8 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     ONCE.call_once(|| {
         warn!("Using CPU memory copy path (no DMA-BUF available)");
     });
+
+    lazy_setup_gst_converter(user_data, None);
 
     let datas = buffer.datas_mut();
     if datas.is_empty() {
@@ -354,18 +436,100 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     })
 }
 
-fn send_frame(frame: FrameData, user_data: &UserData) {
+fn send_frame(frame: FrameData, user_data: &UserData) -> bool {
     let frame = Arc::new(frame);
     match user_data.frame_sender.try_send(frame) {
-        Ok(()) => {}
+        Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(_)) => {
             // Backpressure: drop frame
+            false
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
             // Receiver dropped — stop the mainloop
             user_data.mainloop.quit();
+            false
         }
     }
+}
+
+/// Builds a format param that advertises DMA-BUF with explicit DRM modifier negotiation.
+/// Only includes Vulkan-importable formats; the modifier is locked to DRM_FORMAT_MOD_LINEAR.
+/// When PipeWire selects this param, it sets SPA_VIDEO_FLAG_MODIFIER so we can trust the
+/// modifier value and take the zero-copy Vulkan import path.
+fn build_dmabuf_modifier_format_param() -> pw::spa::pod::Object {
+    use pw::spa::pod::{Property, PropertyFlags};
+    use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+
+    const DRM_FORMAT_MOD_LINEAR: i64 = 0;
+
+    pw::spa::pod::object!(
+        pw::spa::utils::SpaTypes::ObjectParamFormat,
+        pw::spa::param::ParamType::EnumFormat,
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaType,
+            Id,
+            pw::spa::param::format::MediaType::Video
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaSubtype,
+            Id,
+            pw::spa::param::format::MediaSubtype::Raw
+        ),
+        // Only Vulkan-importable formats: BGRx→Xrgb8888, RGBA→Abgr8888, RGBx→Xbgr8888
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::RGBA,
+            pw::spa::param::video::VideoFormat::RGBx,
+        ),
+        // Modifier with MANDATORY|DONT_FIXATE so PipeWire does explicit modifier negotiation
+        // and sets SPA_VIDEO_FLAG_MODIFIER in the negotiated format.
+        Property {
+            key: pw::spa::param::format::FormatProperties::VideoModifier.as_raw(),
+            flags: PropertyFlags::MANDATORY | PropertyFlags::DONT_FIXATE,
+            value: pw::spa::pod::Value::Choice(pw::spa::pod::ChoiceValue::Long(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Enum {
+                    default: DRM_FORMAT_MOD_LINEAR,
+                    alternatives: vec![DRM_FORMAT_MOD_LINEAR],
+                },
+            ))),
+        },
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            pw::spa::utils::Rectangle {
+                width: 320,
+                height: 240
+            },
+            pw::spa::utils::Rectangle {
+                width: 1,
+                height: 1
+            },
+            pw::spa::utils::Rectangle {
+                width: 4096,
+                height: 4096
+            }
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            pw::spa::utils::Fraction { num: 25, denom: 1 },
+            pw::spa::utils::Fraction { num: 0, denom: 1 },
+            pw::spa::utils::Fraction {
+                num: 1000,
+                denom: 1
+            }
+        ),
+    )
 }
 
 fn build_stream_params() -> pw::spa::pod::Object {

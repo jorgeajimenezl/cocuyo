@@ -217,3 +217,14 @@ pub fn styled_pick_list(_theme: &Theme, status: pick_list::Status) -> pick_list:
         border: rounded_border(border_color, 6.0),
     }
 }
+
+// ── Tooltip ─────────────────────────────────────────────────
+pub fn styled_tooltip(_theme: &Theme) -> container::Style {
+    container::Style {
+        text_color: Some(TEXT),
+        background: Some(Background::Color(BG_SECONDARY)),
+        border: rounded_border(BORDER, 6.0),
+        shadow: Shadow::default(),
+        snap: false,
+    }
+}

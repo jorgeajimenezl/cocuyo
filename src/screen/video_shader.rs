@@ -22,6 +22,7 @@ enum FrameInfo {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
     },
     Cpu {
         data: Arc<Vec<u8>>,
@@ -39,6 +40,7 @@ impl VideoScene {
                 height,
                 drm_format,
                 stride,
+                offset,
                 ..
             } => FrameInfo::DmaBuf {
                 fd: fd.as_raw_fd(),
@@ -46,6 +48,7 @@ impl VideoScene {
                 height: *height,
                 drm_format: *drm_format,
                 stride: *stride,
+                offset: *offset,
             },
             FrameData::Cpu {
                 data,
@@ -79,12 +82,14 @@ impl<Message> shader::Program<Message> for VideoScene {
                 height,
                 drm_format,
                 stride,
+                offset,
             }) => VideoPrimitive::DmaBuf {
                 fd: *fd,
                 width: *width,
                 height: *height,
                 drm_format: *drm_format,
                 stride: *stride,
+                offset: *offset,
                 bounds,
             },
             Some(FrameInfo::Cpu {
@@ -111,6 +116,7 @@ pub enum VideoPrimitive {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
         bounds: Rectangle,
     },
     Cpu {
@@ -140,9 +146,20 @@ impl shader::Primitive for VideoPrimitive {
                 height,
                 drm_format,
                 stride,
+                offset,
                 bounds,
             } => {
-                pipeline.prepare_dmabuf(device, queue, *fd, *width, *height, *drm_format, *stride, *bounds);
+                pipeline.prepare_dmabuf(
+                    device,
+                    queue,
+                    *fd,
+                    *width,
+                    *height,
+                    *drm_format,
+                    *stride,
+                    *offset,
+                    *bounds,
+                );
             }
             VideoPrimitive::Cpu {
                 data,
@@ -169,6 +186,14 @@ impl shader::Primitive for VideoPrimitive {
     }
 }
 
+/// Cached GPU texture reused across frames when dimensions and format are unchanged.
+struct CachedTexture {
+    texture: wgpu::Texture,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+}
+
 /// GPU pipeline that manages the render pipeline and textures.
 pub struct VideoPipeline {
     render_pipeline: wgpu::RenderPipeline,
@@ -176,8 +201,7 @@ pub struct VideoPipeline {
     sampler: wgpu::Sampler,
     uniform_buffer: wgpu::Buffer,
     current_bind_group: Option<wgpu::BindGroup>,
-    // Keep the imported texture alive until the next frame replaces it
-    _current_texture: Option<wgpu::Texture>,
+    cached_texture: Option<CachedTexture>,
     #[allow(dead_code)]
     target_format: wgpu::TextureFormat,
 }
@@ -293,13 +317,53 @@ impl shader::Pipeline for VideoPipeline {
             sampler,
             uniform_buffer,
             current_bind_group: None,
-            _current_texture: None,
+            cached_texture: None,
             target_format: format,
         }
     }
 }
 
 impl VideoPipeline {
+    /// Returns a reference to a cached texture with the given dimensions and format,
+    /// creating a new one only when the parameters change.
+    fn get_or_create_texture(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::Texture {
+        let needs_recreate = match &self.cached_texture {
+            Some(ct) => ct.width != width || ct.height != height || ct.format != format,
+            None => true,
+        };
+
+        if needs_recreate {
+            self.cached_texture = Some(CachedTexture {
+                texture: device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("video_frame"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                }),
+                width,
+                height,
+                format,
+            });
+        }
+
+        &self.cached_texture.as_ref().unwrap().texture
+    }
+
     fn prepare_dmabuf(
         &mut self,
         device: &wgpu::Device,
@@ -309,17 +373,70 @@ impl VideoPipeline {
         height: u32,
         drm_format: DrmFourcc,
         stride: u32,
+        offset: u32,
         bounds: Rectangle,
     ) {
         let result = unsafe {
-            vulkan_dmabuf::import_dmabuf_texture(device, fd, width, height, drm_format, stride)
+            vulkan_dmabuf::import_dmabuf_texture(
+                device,
+                fd,
+                width,
+                height,
+                drm_format,
+                stride,
+                offset,
+            )
         };
 
         match result {
-            Ok((texture, _wgpu_format)) => {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((imported_texture, wgpu_format)) => {
+                // Reuse the local GPU texture across frames when resolution is unchanged.
+                // The copy decouples rendering from the DMA-BUF lifetime.
+                let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
+
+                // Copy imported DMA-BUF texture → local texture
+                let mut encoder = device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("dmabuf_copy"),
+                    },
+                );
+                let copy_size = wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                };
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &imported_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: local_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    copy_size,
+                );
+
+                // Submit immediately — this triggers vkQueueSubmit which attaches
+                // the DRM implicit-sync read fence to the DMA-BUF. The compositor
+                // must wait for this fence before reusing the buffer.
+                queue.submit(std::iter::once(encoder.finish()));
+
+                // Use the local texture (not the imported one) for rendering.
+                // imported_texture is dropped here — wgpu defers the actual Vulkan
+                // resource cleanup (vkDestroyImage + vkFreeMemory) until the GPU
+                // finishes the copy command submitted above.
+                let view = self
+                    .cached_texture
+                    .as_ref()
+                    .unwrap()
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
-                self._current_texture = Some(texture);
             }
             Err(e) => {
                 error!(
@@ -332,7 +449,7 @@ impl VideoPipeline {
                 );
                 vulkan_dmabuf::mark_dmabuf_import_failed();
                 self.current_bind_group = None;
-                self._current_texture = None;
+                self.cached_texture = None;
             }
         }
     }
@@ -354,28 +471,16 @@ impl VideoPipeline {
                 "CPU frame data too small"
             );
             self.current_bind_group = None;
-            self._current_texture = None;
+            self.cached_texture = None;
             return;
         }
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cpu_frame"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &texture,
+                texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -393,9 +498,13 @@ impl VideoPipeline {
             },
         );
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = self
+            .cached_texture
+            .as_ref()
+            .unwrap()
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         self.update_bind_group(device, queue, &view, width, height, bounds);
-        self._current_texture = Some(texture);
     }
 
     fn update_bind_group(
