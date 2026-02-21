@@ -2,10 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
+use crate::ambient::BulbInfo;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub preferred_adapter: Option<String>,
     pub preferred_backend: Option<String>,
+    #[serde(default)]
+    pub saved_bulbs: Vec<BulbInfo>,
+    #[serde(default)]
+    pub selected_bulb_macs: Vec<String>,
 }
 
 impl AppConfig {

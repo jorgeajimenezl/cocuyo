@@ -19,10 +19,15 @@ pub struct BulbSetupState {
 }
 
 impl BulbSetupState {
-    pub fn new() -> Self {
+    pub fn new(saved_bulbs: Vec<BulbInfo>, selected_macs: HashSet<String>) -> Self {
+        // Only keep selections that correspond to known bulbs
+        let valid_selections: HashSet<String> = selected_macs
+            .into_iter()
+            .filter(|mac| saved_bulbs.iter().any(|b| b.mac == *mac))
+            .collect();
         Self {
-            discovered_bulbs: Vec::new(),
-            selected_bulbs: HashSet::new(),
+            discovered_bulbs: saved_bulbs,
+            selected_bulbs: valid_selections,
             is_scanning: false,
         }
     }
@@ -31,15 +36,28 @@ impl BulbSetupState {
         match msg {
             BulbSetupMessage::Scan => {
                 self.is_scanning = true;
-                self.discovered_bulbs.clear();
                 Task::perform(
                     crate::ambient::discover_bulbs(),
                     BulbSetupMessage::BulbsDiscovered,
                 )
             }
-            BulbSetupMessage::BulbsDiscovered(bulbs) => {
+            BulbSetupMessage::BulbsDiscovered(new_bulbs) => {
                 self.is_scanning = false;
-                self.discovered_bulbs = bulbs;
+                for discovered in new_bulbs {
+                    if let Some(existing) = self
+                        .discovered_bulbs
+                        .iter_mut()
+                        .find(|b| b.mac == discovered.mac)
+                    {
+                        // Update IP (may have changed via DHCP)
+                        existing.ip = discovered.ip;
+                        if discovered.name.is_some() {
+                            existing.name = discovered.name;
+                        }
+                    } else {
+                        self.discovered_bulbs.push(discovered);
+                    }
+                }
                 Task::none()
             }
             BulbSetupMessage::ToggleBulb(mac) => {

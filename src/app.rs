@@ -110,7 +110,9 @@ impl Cocuyo {
         });
 
         let _ = id;
-        let app = Self {
+        let saved_bulbs = config.saved_bulbs.clone();
+        let selected_macs = config.selected_bulb_macs.iter().cloned().collect();
+        let mut app = Self {
             config,
             windows: BTreeMap::new(),
             current_frame: None,
@@ -120,7 +122,7 @@ impl Cocuyo {
             available_backends,
             selected_backend_index,
             recording_cmd_tx: None,
-            bulb_setup: BulbSetupState::new(),
+            bulb_setup: BulbSetupState::new(saved_bulbs, selected_macs),
             is_ambient_active: false,
             last_bulb_update: None,
             saved_bulb_states: None,
@@ -130,6 +132,7 @@ impl Cocuyo {
             available_adapters,
             selected_adapter,
         };
+        app.sync_regions_to_bulbs();
 
         (
             app,
@@ -221,6 +224,7 @@ impl Cocuyo {
             Message::BulbSetup(msg) => {
                 if matches!(msg, BulbSetupMessage::Done) {
                     self.sync_regions_to_bulbs();
+                    self.save_bulb_config();
                     if let Some((&id, _)) = self
                         .windows
                         .iter()
@@ -231,9 +235,14 @@ impl Cocuyo {
                     return Task::none();
                 }
                 let is_toggle = matches!(msg, BulbSetupMessage::ToggleBulb(_));
+                let is_discovered = matches!(msg, BulbSetupMessage::BulbsDiscovered(_));
                 let task = self.bulb_setup.update(msg).map(Message::BulbSetup);
                 if is_toggle {
                     self.sync_regions_to_bulbs();
+                    self.save_bulb_config();
+                }
+                if is_discovered {
+                    self.save_bulb_config();
                 }
                 task
             }
@@ -500,5 +509,11 @@ impl Cocuyo {
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))
+    }
+
+    fn save_bulb_config(&mut self) {
+        self.config.saved_bulbs = self.bulb_setup.discovered_bulbs().to_vec();
+        self.config.selected_bulb_macs = self.bulb_setup.selected_bulbs_vec();
+        self.config.save();
     }
 }

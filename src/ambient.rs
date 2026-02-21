@@ -2,9 +2,11 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::frame::FrameData;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BulbInfo {
     pub mac: String,
     pub ip: IpAddr,

@@ -1,4 +1,6 @@
-use iced::widget::{button, center, checkbox, column, container, row, rule, scrollable, text};
+use iced::widget::{
+    button, center, checkbox, column, container, row, rule, scrollable, text,
+};
 use iced::window;
 use iced::{Center, Fill};
 
@@ -23,6 +25,7 @@ pub fn view<'a>(
 
     let header = row![
         text("Bulb Discovery").size(18).color(theme::TEXT),
+        iced::widget::space().width(Fill),
         scan_button,
     ]
     .spacing(15)
@@ -86,7 +89,7 @@ pub fn view<'a>(
         .style(theme::styled_button);
 
     let bottom_bar = container(
-        row![status_text, done_btn]
+        row![status_text, iced::widget::space().width(Fill), done_btn]
             .spacing(10)
             .align_y(Center),
     )
