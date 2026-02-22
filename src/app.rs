@@ -90,7 +90,7 @@ pub struct Cocuyo {
 
 impl Cocuyo {
     pub fn new(config: AppConfig) -> (Self, Task<Message>) {
-        let (id, open) = window::open(window::Settings {
+        let (_, open) = window::open(window::Settings {
             size: Size::new(1200.0, 750.0),
             min_size: Some(Size::new(800.0, 500.0)),
             decorations: false,

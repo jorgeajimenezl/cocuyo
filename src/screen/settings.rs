@@ -137,10 +137,6 @@ impl Settings {
             .unwrap_or(GpuBackend::Cpu)
     }
 
-    pub fn selected_adapter(&self) -> &GpuAdapterSelection {
-        &self.selected_adapter
-    }
-
     fn build_adapter_section(&self) -> iced::widget::Column<'_, Message> {
         let active_label = match &self.active_adapter_preference {
             None => "Currently active: Auto (wgpu default)".to_string(),
