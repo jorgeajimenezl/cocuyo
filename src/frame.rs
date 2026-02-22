@@ -20,6 +20,14 @@ impl std::fmt::Debug for FrameData {
                 .field("height", height)
                 .field("drm_format", drm_format)
                 .finish(),
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared {
+                width, height, ..
+            } => f
+                .debug_struct("D3DShared")
+                .field("width", width)
+                .field("height", height)
+                .finish(),
             FrameData::Cpu { width, height, .. } => f
                 .debug_struct("Cpu")
                 .field("width", width)
@@ -42,6 +50,12 @@ pub enum FrameData {
         #[allow(dead_code)]
         modifier: u64,
     },
+    #[cfg(target_os = "windows")]
+    D3DShared {
+        slot: Arc<crate::platform::windows::shared_texture::SharedTextureSlot>,
+        width: u32,
+        height: u32,
+    },
     Cpu {
         data: Arc<Vec<u8>>,
         width: u32,
@@ -54,6 +68,8 @@ impl FrameData {
         match self {
             #[cfg(target_os = "linux")]
             FrameData::DmaBuf { width, .. } => *width,
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared { width, .. } => *width,
             FrameData::Cpu { width, .. } => *width,
         }
     }
@@ -62,6 +78,8 @@ impl FrameData {
         match self {
             #[cfg(target_os = "linux")]
             FrameData::DmaBuf { height, .. } => *height,
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared { height, .. } => *height,
             FrameData::Cpu { height, .. } => *height,
         }
     }
@@ -72,6 +90,8 @@ impl FrameData {
             FrameData::Cpu { data, .. } => Some(data.as_slice()),
             #[cfg(target_os = "linux")]
             FrameData::DmaBuf { .. } => None,
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared { .. } => None,
         }
     }
 
@@ -106,6 +126,8 @@ impl FrameData {
                     }
                 }
             }
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared { .. } => None,
             FrameData::Cpu { .. } => Some(self.clone()),
         }
     }

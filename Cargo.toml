@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "316900763ee710f719c390aa0a25c39a38d1ce12", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
-wgpu = "27"
+wgpu = { version = "27", features = ["serde"] }
 tokio = { version = "1.41", features = [ "rt-multi-thread", "macros" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -31,4 +31,9 @@ pipewire = { version = "0.8", features = ["v0_3_77"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = "2.0.0-alpha"
-windows = { version = "0.62", features = ["Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.58", features = [
+    "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common", "Win32_Foundation",
+] }
+wgpu-hal = { version = "27", features = ["dx12"] }

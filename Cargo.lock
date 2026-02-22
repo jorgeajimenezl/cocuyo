@@ -153,6 +153,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -450,6 +453,9 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "bitstream-io"
@@ -737,7 +743,7 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "wgpu-hal",
- "windows 0.62.2",
+ "windows 0.58.0",
  "windows-capture",
  "wiz-lights-rs",
 ]
@@ -1900,6 +1906,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
 dependencies = [
  "foldhash 0.2.0",
+ "serde",
 ]
 
 [[package]]
@@ -5325,6 +5332,7 @@ dependencies = [
  "profiling",
  "raw-window-handle",
  "rustc-hash 1.1.0",
+ "serde",
  "smallvec",
  "thiserror 2.0.18",
  "wgpu-core-deps-apple",
@@ -5420,6 +5428,7 @@ dependencies = [
  "bytemuck",
  "js-sys",
  "log",
+ "serde",
  "thiserror 2.0.18",
  "web-sys",
 ]
