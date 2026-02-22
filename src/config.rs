@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
-use crate::ambient::BulbInfo;
+use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
-    pub preferred_adapter: Option<String>,
+    pub preferred_adapter: Option<GpuAdapter>,
     pub preferred_backend: Option<String>,
     #[serde(default)]
     pub saved_bulbs: Vec<BulbInfo>,

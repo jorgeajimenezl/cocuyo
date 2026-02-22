@@ -270,6 +270,8 @@ impl Cocuyo {
                 if !self.is_recording {
                     #[cfg(target_os = "linux")]
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    #[cfg(target_os = "windows")]
+                    crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
                 }
@@ -514,6 +516,7 @@ impl Cocuyo {
 
                 match intent {
                     PickerIntent::StartRecording => {
+                        crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                         self.is_recording = true;
                         self.session_id += 1;
                         close_task

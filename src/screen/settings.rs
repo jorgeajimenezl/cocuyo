@@ -3,7 +3,7 @@ use iced::widget::{column, container, pick_list, row, text, tooltip};
 use iced::widget::rule;
 use iced::{Fill, Task, padding};
 
-use crate::adapters::{self, GpuAdapterSelection};
+use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
 use crate::config::AppConfig;
 #[cfg(target_os = "linux")]
 use crate::platform::linux::gst_pipeline::GpuBackend;
@@ -22,7 +22,7 @@ pub enum Message {
 pub enum Event {
     #[cfg(target_os = "linux")]
     BackendChanged(Option<String>),
-    AdapterChanged(Option<String>),
+    AdapterChanged(Option<GpuAdapter>),
 }
 
 pub struct Settings {
@@ -30,9 +30,9 @@ pub struct Settings {
     available_backends: Vec<GpuBackend>,
     #[cfg(target_os = "linux")]
     selected_backend_index: usize,
-    available_adapters: Vec<String>,
+    available_adapters: Vec<GpuAdapter>,
     selected_adapter: GpuAdapterSelection,
-    active_adapter_preference: Option<String>,
+    active_adapter_preference: Option<GpuAdapter>,
 }
 
 impl Settings {
@@ -64,7 +64,7 @@ impl Settings {
 
         let available_adapters = adapters::enumerate_adapters();
         let selected_adapter =
-            adapters::resolve_selection(config.preferred_adapter.as_deref(), &available_adapters);
+            adapters::resolve_selection(config.preferred_adapter.as_ref(), &available_adapters);
         let active_adapter_preference = config.preferred_adapter.clone();
 
         Self {
@@ -93,7 +93,7 @@ impl Settings {
                 self.selected_adapter = selection.clone();
                 let preferred = match &selection {
                     GpuAdapterSelection::Auto => None,
-                    GpuAdapterSelection::Named(name) => Some(name.clone()),
+                    GpuAdapterSelection::Named(adapter) => Some(adapter.clone()),
                 };
                 (Task::none(), Some(Event::AdapterChanged(preferred)))
             }
@@ -140,14 +140,14 @@ impl Settings {
     fn build_adapter_section(&self) -> iced::widget::Column<'_, Message> {
         let active_label = match &self.active_adapter_preference {
             None => "Currently active: Auto (wgpu default)".to_string(),
-            Some(name) => format!("Currently active: {}", name),
+            Some(adapter) => format!("Currently active: {}", adapter),
         };
 
         let pending_restart =
-            match (&self.selected_adapter, self.active_adapter_preference.as_deref()) {
+            match (&self.selected_adapter, self.active_adapter_preference.as_ref()) {
                 (GpuAdapterSelection::Auto, None) => false,
-                (GpuAdapterSelection::Named(name), Some(active)) => {
-                    name.to_lowercase() != active.to_lowercase()
+                (GpuAdapterSelection::Named(adapter), Some(active)) => {
+                    !adapter.name.eq_ignore_ascii_case(&active.name)
                 }
                 _ => true,
             };

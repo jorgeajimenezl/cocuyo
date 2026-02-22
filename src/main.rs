@@ -24,10 +24,14 @@ fn main() -> iced::Result {
         .init();
 
     let app_config = config::AppConfig::load();
-    if let Some(ref name) = app_config.preferred_adapter {
+    if let Some(ref adapter) = app_config.preferred_adapter {
         // NOTE: This is safe because there are no concurrent threads at this point, and we set the env var before any wgpu code runs.
-        unsafe { std::env::set_var("WGPU_ADAPTER_NAME", name) };
-        info!(adapter = %name, "Set WGPU_ADAPTER_NAME from config");
+        unsafe { 
+            std::env::set_var("WGPU_ADAPTER_NAME", &adapter.name);
+            std::env::set_var("WGPU_BACKEND", adapter.backend.to_string());
+        };
+
+        info!(adapter = %adapter.name, "Set WGPU_ADAPTER_NAME and WGPU_BACKEND from config");        
     }
 
     #[cfg(target_os = "linux")]
