@@ -6,6 +6,7 @@ use iced::widget::{
 use iced::{Center, Fill, Task};
 
 use crate::ambient::BulbInfo;
+use crate::config::AppConfig;
 use crate::theme;
 
 type Element<'a> = iced::Element<'a, Message, iced::Theme, iced::Renderer>;
@@ -32,7 +33,10 @@ pub struct BulbSetupState {
 }
 
 impl BulbSetupState {
-    pub fn new(saved_bulbs: Vec<BulbInfo>, selected_macs: HashSet<String>) -> Self {
+    pub fn new(config: &AppConfig) -> Self {
+        let saved_bulbs = config.saved_bulbs.clone();
+        let selected_macs: Vec<String> = config.selected_bulb_macs.iter().cloned().collect();
+        
         // Only keep selections that correspond to known bulbs
         let valid_selections: HashSet<String> = selected_macs
             .into_iter()

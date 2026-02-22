@@ -90,8 +90,6 @@ pub struct Cocuyo {
 
 impl Cocuyo {
     pub fn new(config: AppConfig) -> (Self, Task<Message>) {
-        let settings = settings::Settings::new(&config);
-
         let (id, open) = window::open(window::Settings {
             size: Size::new(1200.0, 750.0),
             min_size: Some(Size::new(800.0, 500.0)),
@@ -100,9 +98,6 @@ impl Cocuyo {
             ..Default::default()
         });
 
-        let _ = id;
-        let saved_bulbs = config.saved_bulbs.clone();
-        let selected_macs = config.selected_bulb_macs.iter().cloned().collect();
         let mut app = Self {
             windows: BTreeMap::new(),
             current_frame: None,
@@ -110,14 +105,14 @@ impl Cocuyo {
             is_recording: false,
             session_id: 0,
             recording_cmd_tx: None,
-            bulb_setup: bulb_setup::BulbSetupState::new(saved_bulbs, selected_macs),
+            bulb_setup: bulb_setup::BulbSetupState::new(&config),
             is_ambient_active: false,
             last_bulb_update: None,
             saved_bulb_states: None,
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
-            settings,
+            settings: settings::Settings::new(&config),
             config,
             #[cfg(target_os = "windows")]
             capture_picker: None,
@@ -624,7 +619,7 @@ impl Cocuyo {
         min_size: Size,
         parent: Option<window::Id>,
     ) -> Task<Message> {
-        if self.windows.values().any(|k| *k == kind) {
+        if self.find_window_id(kind).is_some() {
             return Task::none();
         }
         let (_id, open) = window::open(window::Settings {
