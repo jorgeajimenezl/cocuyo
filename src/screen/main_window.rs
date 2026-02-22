@@ -6,8 +6,8 @@ use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
-use crate::screen::region_overlay::RegionOverlay;
-use crate::screen::video_shader::VideoScene;
+use crate::widget::region_overlay::RegionOverlay;
+use crate::widget::video_shader::VideoScene;
 use crate::theme;
 use crate::widget::Element;
 

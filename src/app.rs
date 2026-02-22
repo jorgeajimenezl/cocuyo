@@ -2,25 +2,30 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use iced::widget::container;
+use iced::window;
+
+use iced::{Fill, Size, Subscription, Task, Theme};
+use tokio::sync::mpsc;
+
 use crate::ambient::SavedBulbState;
 use crate::config::AppConfig;
 use crate::frame::FrameData;
-#[cfg(target_os = "windows")]
-use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
-#[cfg(target_os = "windows")]
-use crate::screen::capture_picker;
-use crate::screen::settings;
 use crate::screen::WindowKind;
-use crate::screen::region_overlay::RegionMessage;
 use crate::screen::bulb_setup;
+use crate::screen::settings;
 use crate::widget::Element;
-use iced::widget::container;
-use iced::window;
-use iced::{Fill, Size, Subscription, Task, Theme};
-use tokio::sync::mpsc;
+use crate::widget::region_overlay::RegionMessage;
+
+#[cfg(target_os = "windows")]
+use {
+    crate::platform::windows::capture_target::{CaptureTarget, PickerIntent},
+    crate::screen::capture_picker,
+    iced::window::settings::{platform::CornerPreference, PlatformSpecific},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordingState {
@@ -90,14 +95,6 @@ pub struct Cocuyo {
 
 impl Cocuyo {
     pub fn new(config: AppConfig) -> (Self, Task<Message>) {
-        let (_, open) = window::open(window::Settings {
-            size: Size::new(1200.0, 750.0),
-            min_size: Some(Size::new(800.0, 500.0)),
-            decorations: false,
-            transparent: true,
-            ..Default::default()
-        });
-
         let mut app = Self {
             windows: BTreeMap::new(),
             current_frame: None,
@@ -121,10 +118,14 @@ impl Cocuyo {
         };
         app.sync_regions_to_bulbs();
 
-        (
-            app,
-            open.map(move |id| Message::WindowOpened(id, WindowKind::Main)),
-        )
+        let task = app.open_window(
+            WindowKind::Main,
+            Size::new(1200.0, 750.0),
+            Size::new(800.0, 500.0),
+            None,
+        );
+
+        (app, task)
     }
 
     pub fn title(&self, window_id: window::Id) -> String {
@@ -333,13 +334,11 @@ impl Cocuyo {
                                         );
                                     }
 
-                                    if let Some(targets) =
-                                        crate::ambient::sample_frame_for_regions(
-                                            sf,
-                                            &self.regions,
-                                            self.bulb_setup.discovered_bulbs(),
-                                        )
-                                    {
+                                    if let Some(targets) = crate::ambient::sample_frame_for_regions(
+                                        sf,
+                                        &self.regions,
+                                        self.bulb_setup.discovered_bulbs(),
+                                    ) {
                                         return Task::perform(
                                             crate::ambient::dispatch_bulb_colors(targets),
                                             |()| Message::Noop,
@@ -361,9 +360,7 @@ impl Cocuyo {
             Message::RegionUpdate(msg) => {
                 match msg {
                     RegionMessage::Updated(id, x, y, w, h) => {
-                        if let Some(existing) =
-                            self.regions.iter_mut().find(|reg| reg.id == id)
-                        {
+                        if let Some(existing) = self.regions.iter_mut().find(|reg| reg.id == id) {
                             existing.x = x;
                             existing.y = y;
                             existing.width = w;
@@ -380,8 +377,8 @@ impl Cocuyo {
     }
 
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
+        use crate::widget::title_bar;
         use iced::widget::{column, rule};
-        use crate::screen::title_bar;
 
         let title = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => "Cocuyo",
@@ -394,8 +391,7 @@ impl Cocuyo {
 
         let screen_content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => {
-                let frame_info =
-                    self.current_frame.as_ref().map(|f| (f.width(), f.height()));
+                let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
                 crate::screen::main_window::view(
                     window_id,
                     self.current_frame.as_ref().map(|f| f.as_ref()),
@@ -408,14 +404,8 @@ impl Cocuyo {
                     self.selected_region,
                 )
             }
-            Some(WindowKind::Settings) => self
-                .settings
-                .view()
-                .map(Message::Settings),
-            Some(WindowKind::BulbSetup) => self
-                .bulb_setup
-                .view()
-                .map(Message::BulbSetup),
+            Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
+            Some(WindowKind::BulbSetup) => self.bulb_setup.view().map(Message::BulbSetup),
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => {
                 if let Some(ref picker) = self.capture_picker {
@@ -473,11 +463,8 @@ impl Cocuyo {
         let target = self
             .capture_target
             .expect("capture_target must be set before recording");
-        Subscription::run_with(
-            (self.session_id, target),
-            recording::recording_subscription,
-        )
-        .map(Message::RecordingEvent)
+        Subscription::run_with((self.session_id, target), recording::recording_subscription)
+            .map(Message::RecordingEvent)
     }
 
     // --- Event handlers for delegated screens ---
@@ -628,6 +615,11 @@ impl Cocuyo {
             decorations: false,
             transparent: true,
             parent,
+            #[cfg(target_os = "windows")]
+            platform_specific: PlatformSpecific {
+                corner_preference: CornerPreference::Round,
+                ..Default::default()
+            },
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))
