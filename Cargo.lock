@@ -737,6 +737,7 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "wgpu-hal",
+ "windows 0.62.2",
  "windows-capture",
  "wiz-lights-rs",
 ]

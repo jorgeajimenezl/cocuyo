@@ -4,6 +4,9 @@ use iced::{Center, Fill, Task};
 use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
 use crate::theme;
 
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::UI::WindowsAndMessaging::IsIconic;
 use windows_capture::monitor::Monitor;
 use windows_capture::window::Window;
 
@@ -23,6 +26,32 @@ pub enum Event {
     Cancelled,
 }
 
+/// Returns `true` if the window is actively displayed — not minimized
+/// and not cloaked (hidden/suspended by DWM, common with UWP apps).
+fn is_window_active(w: &Window) -> bool {
+    let hwnd = HWND(w.as_raw_hwnd());
+
+    if unsafe { IsIconic(hwnd) }.as_bool() {
+        return false;
+    }
+
+    let mut cloaked: u32 = 0;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut u32 as *mut core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+
+    if result.is_ok() && cloaked != 0 {
+        return false;
+    }
+
+    true
+}
+
 pub struct CapturePicker {
     monitors: Vec<Monitor>,
     windows: Vec<Window>,
@@ -38,6 +67,7 @@ impl CapturePicker {
             .unwrap_or_default()
             .into_iter()
             .filter(|w| w.title().map(|t| !t.is_empty()).unwrap_or(false))
+            .filter(|w| is_window_active(w))
             .collect();
 
         Self {
