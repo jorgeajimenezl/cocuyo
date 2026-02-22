@@ -3,7 +3,6 @@ use tracing::info;
 mod adapters;
 mod ambient;
 mod app;
-mod bulb_setup;
 mod config;
 mod frame;
 mod platform;

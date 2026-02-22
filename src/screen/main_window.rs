@@ -7,7 +7,6 @@ use crate::frame::FrameData;
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
 use crate::screen::region_overlay::RegionOverlay;
-use crate::screen::title_bar;
 use crate::screen::video_shader::VideoScene;
 use crate::theme;
 use crate::widget::Element;
@@ -255,8 +254,6 @@ pub fn view<'a>(
         .style(theme::status_bar_container);
 
     column![
-        title_bar::view(window_id, "Cocuyo"),
-        rule::horizontal(1).style(theme::styled_rule),
         menu_bar,
         rule::horizontal(1).style(theme::styled_rule),
         row![
