@@ -9,6 +9,8 @@ use crate::config::AppConfig;
 use crate::frame::FrameData;
 #[cfg(target_os = "linux")]
 use crate::platform::linux::gst_pipeline::{self, GpuBackend};
+#[cfg(target_os = "windows")]
+use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
@@ -51,6 +53,14 @@ pub enum Message {
     BulbStatesSaved(Vec<SavedBulbState>),
     RegionUpdate(RegionMessage),
     RegionStrategyChanged(usize, SamplingStrategy),
+    #[cfg(target_os = "windows")]
+    PickerSelectTarget(CaptureTarget),
+    #[cfg(target_os = "windows")]
+    PickerSwitchTab(PickerTab),
+    #[cfg(target_os = "windows")]
+    PickerConfirm,
+    #[cfg(target_os = "windows")]
+    PickerCancel,
     ExitApp,
     Noop,
 }
@@ -81,6 +91,20 @@ pub struct Cocuyo {
     available_adapters: Vec<String>,
     selected_adapter: GpuAdapterSelection,
     config: AppConfig,
+
+    // Windows capture picker state
+    #[cfg(target_os = "windows")]
+    capture_picker_monitors: Vec<windows_capture::monitor::Monitor>,
+    #[cfg(target_os = "windows")]
+    capture_picker_windows: Vec<windows_capture::window::Window>,
+    #[cfg(target_os = "windows")]
+    capture_picker_selected: Option<CaptureTarget>,
+    #[cfg(target_os = "windows")]
+    capture_picker_tab: PickerTab,
+    #[cfg(target_os = "windows")]
+    capture_target: Option<CaptureTarget>,
+    #[cfg(target_os = "windows")]
+    pending_picker_intent: Option<PickerIntent>,
 }
 
 impl Cocuyo {
@@ -143,6 +167,18 @@ impl Cocuyo {
             selected_region: None,
             available_adapters,
             selected_adapter,
+            #[cfg(target_os = "windows")]
+            capture_picker_monitors: Vec::new(),
+            #[cfg(target_os = "windows")]
+            capture_picker_windows: Vec::new(),
+            #[cfg(target_os = "windows")]
+            capture_picker_selected: None,
+            #[cfg(target_os = "windows")]
+            capture_picker_tab: PickerTab::Screens,
+            #[cfg(target_os = "windows")]
+            capture_target: None,
+            #[cfg(target_os = "windows")]
+            pending_picker_intent: None,
         };
         app.sync_regions_to_bulbs();
 
@@ -157,6 +193,8 @@ impl Cocuyo {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
             Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
+            #[cfg(target_os = "windows")]
+            Some(WindowKind::CapturePicker) => "Cocuyo - Select Target".to_string(),
             None => String::new(),
         }
     }
@@ -169,6 +207,12 @@ impl Cocuyo {
             }
             Message::WindowClosed(id) => {
                 let kind = self.windows.remove(&id);
+                #[cfg(target_os = "windows")]
+                if kind == Some(WindowKind::CapturePicker) {
+                    self.pending_picker_intent = None;
+                    self.capture_picker_selected = None;
+                    return Task::none();
+                }
                 if kind == Some(WindowKind::Main) || self.windows.is_empty() {
                     // Stop recording if active
                     if self.is_ambient_active || self.is_recording {
@@ -200,9 +244,16 @@ impl Cocuyo {
             ),
             Message::StartRecording => {
                 #[cfg(target_os = "linux")]
-                crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
-                self.is_recording = true;
-                self.session_id += 1;
+                {
+                    crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    self.is_recording = true;
+                    self.session_id += 1;
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    return self.open_capture_picker(PickerIntent::StartRecording);
+                }
+                #[allow(unreachable_code)]
                 Task::none()
             }
             Message::StopRecording => {
@@ -268,12 +319,19 @@ impl Cocuyo {
                 if !self.bulb_setup.has_selected_bulbs() {
                     return Task::none();
                 }
+                #[cfg(target_os = "windows")]
+                {
+                    return self.open_capture_picker(PickerIntent::StartAmbient);
+                }
                 // Phase 1: save bulb states before starting ambient
-                let bulbs = self.bulb_setup.selected_bulb_infos();
-                Task::perform(
-                    crate::ambient::save_bulb_states(bulbs),
-                    Message::BulbStatesSaved,
-                )
+                #[allow(unreachable_code)]
+                {
+                    let bulbs = self.bulb_setup.selected_bulb_infos();
+                    Task::perform(
+                        crate::ambient::save_bulb_states(bulbs),
+                        Message::BulbStatesSaved,
+                    )
+                }
             }
             Message::BulbStatesSaved(states) => {
                 // Phase 2: states saved, now start ambient
@@ -381,6 +439,69 @@ impl Cocuyo {
                 }
                 Task::none()
             }
+            #[cfg(target_os = "windows")]
+            Message::PickerSelectTarget(target) => {
+                self.capture_picker_selected = Some(target);
+                Task::none()
+            }
+            #[cfg(target_os = "windows")]
+            Message::PickerSwitchTab(tab) => {
+                self.capture_picker_tab = tab;
+                Task::none()
+            }
+            #[cfg(target_os = "windows")]
+            Message::PickerConfirm => {
+                let target = match self.capture_picker_selected.take() {
+                    Some(t) => t,
+                    None => return Task::none(),
+                };
+                self.capture_target = Some(target);
+
+                // Close the picker window
+                let close_task = if let Some((&id, _)) = self
+                    .windows
+                    .iter()
+                    .find(|(_, k)| **k == WindowKind::CapturePicker)
+                {
+                    window::close(id)
+                } else {
+                    Task::none()
+                };
+
+                match self.pending_picker_intent.take() {
+                    Some(PickerIntent::StartRecording) => {
+                        self.is_recording = true;
+                        self.session_id += 1;
+                        close_task
+                    }
+                    Some(PickerIntent::StartAmbient) => {
+                        // Trigger the ambient flow (save bulb states first)
+                        let bulbs = self.bulb_setup.selected_bulb_infos();
+                        Task::batch([
+                            close_task,
+                            Task::perform(
+                                crate::ambient::save_bulb_states(bulbs),
+                                Message::BulbStatesSaved,
+                            ),
+                        ])
+                    }
+                    None => close_task,
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Message::PickerCancel => {
+                self.pending_picker_intent = None;
+                self.capture_picker_selected = None;
+                if let Some((&id, _)) = self
+                    .windows
+                    .iter()
+                    .find(|(_, k)| **k == WindowKind::CapturePicker)
+                {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
+            }
             Message::RegionUpdate(msg) => {
                 match msg {
                     RegionMessage::Updated(id, x, y, w, h) => {
@@ -442,6 +563,16 @@ impl Cocuyo {
             Some(WindowKind::BulbSetup) => {
                 crate::screen::bulb_setup::view(window_id, &self.bulb_setup)
             }
+            #[cfg(target_os = "windows")]
+            Some(WindowKind::CapturePicker) => {
+                crate::screen::capture_picker::view(
+                    window_id,
+                    &self.capture_picker_monitors,
+                    &self.capture_picker_windows,
+                    self.capture_picker_selected.as_ref(),
+                    self.capture_picker_tab,
+                )
+            }
             None => iced::widget::space().into(),
         };
 
@@ -484,8 +615,14 @@ impl Cocuyo {
 
     #[cfg(target_os = "windows")]
     fn build_recording_subscription(&self) -> Subscription<Message> {
-        Subscription::run_with(self.session_id, recording::recording_subscription)
-            .map(Message::RecordingEvent)
+        let target = self
+            .capture_target
+            .expect("capture_target must be set before recording");
+        Subscription::run_with(
+            (self.session_id, target),
+            recording::recording_subscription,
+        )
+        .map(Message::RecordingEvent)
     }
 
     fn sync_regions_to_bulbs(&mut self) {
@@ -554,6 +691,35 @@ impl Cocuyo {
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn open_capture_picker(&mut self, intent: PickerIntent) -> Task<Message> {
+        use windows_capture::monitor::Monitor;
+        use windows_capture::window::Window;
+
+        self.capture_picker_monitors = Monitor::enumerate().unwrap_or_default();
+        self.capture_picker_windows = Window::enumerate()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| w.title().map(|t| !t.is_empty()).unwrap_or(false))
+            .collect();
+        self.capture_picker_selected = None;
+        self.capture_picker_tab = PickerTab::Screens;
+        self.pending_picker_intent = Some(intent);
+
+        let parent = self
+            .windows
+            .iter()
+            .find(|(_, k)| **k == WindowKind::Main)
+            .map(|(&id, _)| id);
+
+        self.open_window(
+            WindowKind::CapturePicker,
+            Size::new(500.0, 500.0),
+            Size::new(350.0, 300.0),
+            parent,
+        )
     }
 
     fn save_bulb_config(&mut self) {

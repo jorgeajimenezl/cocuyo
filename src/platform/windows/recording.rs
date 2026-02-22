@@ -7,12 +7,12 @@ use tracing::{error, info, warn};
 
 use crate::app::RecordingState;
 use crate::frame::FrameData;
+use crate::platform::windows::capture_target::CaptureTarget;
 use crate::recording::{RecordingCommand, RecordingEvent};
 
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::graphics_capture_picker::GraphicsCapturePicker;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
@@ -76,23 +76,15 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 }
 
-/// Result of the picker dialog, sent from the capture thread to the subscription.
-enum PickResult {
-    /// User selected a capture target; capture has started.
-    Started,
-    /// User cancelled the picker dialog.
-    Cancelled,
-    /// An error occurred.
-    Error(String),
-}
+pub fn recording_subscription(
+    input: &(u64, CaptureTarget),
+) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
+    let target = input.1;
 
-pub fn recording_subscription(_input: &u64) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
     Box::pin(iced::stream::channel(2, async move |mut output| {
         use iced::futures::SinkExt;
 
-        // Create command channel so the app can signal stop
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecordingCommand>(1);
-
         output.send(RecordingEvent::Ready(cmd_tx)).await.ok();
 
         output
@@ -102,83 +94,33 @@ pub fn recording_subscription(_input: &u64) -> Pin<Box<dyn Stream<Item = Recordi
 
         info!("Starting Windows screen capture");
 
-        // Create bounded channel for frames from capture thread
         let (frame_tx, mut frame_rx) = mpsc::channel::<Arc<FrameData>>(2);
 
-        // Oneshot to know whether the picker succeeded
-        let (pick_tx, pick_rx) = tokio::sync::oneshot::channel::<PickResult>();
+        let settings = Settings::new(
+            target,
+            CursorCaptureSettings::WithoutCursor,
+            DrawBorderSettings::WithoutBorder,
+            SecondaryWindowSettings::Default,
+            MinimumUpdateIntervalSettings::Default,
+            DirtyRegionSettings::Default,
+            ColorFormat::Rgba8,
+            frame_tx,
+        );
 
-        // Spawn a dedicated thread that runs both the picker dialog and the
-        // capture loop. PickedGraphicsCaptureItem is !Send so both operations
-        // must happen on the same thread.
-        let capture_handle = std::thread::spawn(move || {
-            let item = match GraphicsCapturePicker::pick_item() {
-                Ok(Some(item)) => item,
-                Ok(None) => {
-                    let _ = pick_tx.send(PickResult::Cancelled);
-                    return;
-                }
-                Err(e) => {
-                    let _ = pick_tx.send(PickResult::Error(e.to_string()));
-                    return;
-                }
-            };
-
-            // Signal that the picker succeeded; capture is about to start
-            let _ = pick_tx.send(PickResult::Started);
-
-            let settings = Settings::new(
-                item,
-                CursorCaptureSettings::WithoutCursor,
-                DrawBorderSettings::WithoutBorder,
-                SecondaryWindowSettings::Default,
-                MinimumUpdateIntervalSettings::Default,
-                DirtyRegionSettings::Default,
-                ColorFormat::Rgba8,
-                frame_tx,
-            );
-
-            // start() blocks this thread until capture ends.
-            // Capture ends when the handler calls capture_control.stop()
-            // (triggered by the frame channel closing).
-            if let Err(e) = CaptureHandler::start(settings) {
-                warn!(error = %e, "Capture error");
-            }
-        });
-
-        // Wait for the picker result
-        match pick_rx.await {
-            Ok(PickResult::Started) => {}
-            Ok(PickResult::Cancelled) => {
-                info!("Capture picker cancelled");
-                output
-                    .send(RecordingEvent::StateChanged(RecordingState::Idle))
-                    .await
-                    .ok();
-                std::future::pending::<()>().await;
-                return;
-            }
-            Ok(PickResult::Error(msg)) => {
-                error!(error = %msg, "Capture picker error");
-                output
-                    .send(RecordingEvent::StateChanged(RecordingState::Error(msg)))
-                    .await
-                    .ok();
-                std::future::pending::<()>().await;
-                return;
-            }
-            Err(_) => {
-                error!("Capture thread exited before sending pick result");
+        let capture_control = match CaptureHandler::start_free_threaded(settings) {
+            Ok(control) => control,
+            Err(e) => {
+                error!(error = %e, "Failed to start capture");
                 output
                     .send(RecordingEvent::StateChanged(RecordingState::Error(
-                        "Capture thread exited unexpectedly".to_string(),
+                        e.to_string(),
                     )))
                     .await
                     .ok();
                 std::future::pending::<()>().await;
                 return;
             }
-        }
+        };
 
         output
             .send(RecordingEvent::StateChanged(RecordingState::Recording))
@@ -205,15 +147,12 @@ pub fn recording_subscription(_input: &u64) -> Pin<Box<dyn Stream<Item = Recordi
                     match cmd {
                         Some(RecordingCommand::Stop) | None => {
                             info!("Stop command received, shutting down capture");
-                            // Drop frame_rx to close the channel — the handler
-                            // will detect Closed on its next try_send and call
-                            // capture_control.stop(), which breaks the message
-                            // loop and lets start() return.
+                            // Drop frame_rx so the handler sees Closed on next try_send
                             drop(frame_rx);
-                            // Wait for the capture thread to finish
+                            // Stop the capture thread and wait for it to finish
                             let _ = tokio::task::spawn_blocking(move || {
-                                if let Err(e) = capture_handle.join() {
-                                    warn!("Capture thread panicked: {:?}", e);
+                                if let Err(e) = capture_control.stop() {
+                                    warn!("Capture stop error: {:?}", e);
                                 }
                             })
                             .await;
