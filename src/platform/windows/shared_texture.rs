@@ -65,7 +65,7 @@ impl SharedTextureSlot {
 
         let mut staging: Option<ID3D11Texture2D> = None;
         unsafe {
-            device.CreateTexture2D(&staging_desc, None, Some(&mut staging as *mut _))?;
+            device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
         }
         let staging = staging.ok_or_else(|| {
             SharedTextureError::Windows(windows::core::Error::from_hresult(
@@ -73,9 +73,17 @@ impl SharedTextureSlot {
             ))
         })?;
 
+        unsafe {
+            self.keyed_mutex.AcquireSync(0, u32::MAX)?;
+        }
+
         // GPU-side copy on the same device
         unsafe {
             context.CopyResource(&staging, &self.texture);
+        }
+
+        unsafe {
+            self.keyed_mutex.ReleaseSync(0)?;
         }
 
         // Map with D3D11_MAP_READ + flags=0 blocks until the GPU copy completes.
@@ -84,15 +92,26 @@ impl SharedTextureSlot {
             context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
         }
 
-        let rgba = unsafe {
-            std::slice::from_raw_parts_mut(mapped.pData.cast(), (self.height * mapped.RowPitch) as usize)
-        };
+        // Copy mapped data into an owned Vec before unmapping.
+        let row_pitch = mapped.RowPitch as usize;
+        let row_bytes = (self.width as usize) * 4;
+        let mut rgba = vec![0u8; row_bytes * self.height as usize];
+
+        for y in 0..self.height as usize {
+            let src = unsafe {
+                std::slice::from_raw_parts(
+                    (mapped.pData as *const u8).add(y * row_pitch),
+                    row_bytes,
+                )
+            };
+            rgba[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
+        }
 
         unsafe {
             context.Unmap(&staging, 0);
         }
 
-        Ok(Vec::from(rgba))
+        Ok(rgba)
     }
 }
 
