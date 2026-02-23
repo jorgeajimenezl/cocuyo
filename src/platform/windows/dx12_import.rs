@@ -53,7 +53,7 @@ pub unsafe fn import_shared_texture(
     width: u32,
     height: u32,
 ) -> Result<(wgpu::Texture, wgpu::TextureFormat), Dx12ImportError> {
-    let wgpu_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+    let wgpu_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let size = wgpu::Extent3d {
         width,
         height,

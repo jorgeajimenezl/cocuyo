@@ -615,11 +615,7 @@ impl VideoPipeline {
             return;
         }
 
-        #[cfg(not(target_os = "windows"))]
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-        // On Windows, capture uses BGRA8 natively (ColorFormat::Bgra8)
-        #[cfg(target_os = "windows")]
-        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
         let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(

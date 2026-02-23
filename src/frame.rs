@@ -130,7 +130,21 @@ impl FrameData {
                 }
             }
             #[cfg(target_os = "windows")]
-            FrameData::D3DShared { .. } => None,
+            FrameData::D3DShared {
+                slot,
+                width,
+                height,
+            } => match slot.read_pixels() {
+                Ok(rgba_data) => Some(Arc::new(FrameData::Cpu {
+                    data: Arc::new(rgba_data),
+                    width: *width,
+                    height: *height,
+                })),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to read shared texture pixels");
+                    None
+                }
+            },
             FrameData::Cpu { .. } => Some(self.clone()),
         }
     }

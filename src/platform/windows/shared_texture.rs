@@ -5,10 +5,11 @@ use windows::core::Interface;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_QUERY_DESC,
+    D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX, D3D11_RESOURCE_MISC_SHARED_NTHANDLE,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{IDXGIKeyedMutex, IDXGIResource1, DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE};
 
 const POOL_SIZE: usize = 3;
@@ -30,6 +31,68 @@ impl Drop for SharedTextureSlot {
         unsafe {
             let _ = CloseHandle(self.shared_handle);
         }
+    }
+}
+
+impl SharedTextureSlot {
+    /// Read the shared texture's pixel data back to CPU as tightly-packed RGBA bytes.
+    ///
+    /// Creates a staging texture, copies the GPU data into it, maps it.
+    ///
+    /// Thread-safety: the `Arc::strong_count` check in
+    /// `SharedTexturePool::acquire_and_copy` prevents the capture handler from
+    /// reusing a slot while the UI holds a reference, so no concurrent writer
+    /// can exist when this method is called.
+    pub fn read_pixels(&self) -> Result<Vec<u8>, SharedTextureError> {
+        let device = unsafe { self.texture.GetDevice()? };
+        let context = unsafe { device.GetImmediateContext()? };
+
+        let staging_desc = D3D11_TEXTURE2D_DESC {
+            Width: self.width,
+            Height: self.height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            MiscFlags: 0,
+        };
+
+        let mut staging: Option<ID3D11Texture2D> = None;
+        unsafe {
+            device.CreateTexture2D(&staging_desc, None, Some(&mut staging as *mut _))?;
+        }
+        let staging = staging.ok_or_else(|| {
+            SharedTextureError::Windows(windows::core::Error::from_hresult(
+                windows::core::HRESULT(-1),
+            ))
+        })?;
+
+        // GPU-side copy on the same device
+        unsafe {
+            context.CopyResource(&staging, &self.texture);
+        }
+
+        // Map with D3D11_MAP_READ + flags=0 blocks until the GPU copy completes.
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+        }
+
+        let rgba = unsafe {
+            std::slice::from_raw_parts_mut(mapped.pData.cast(), (self.height * mapped.RowPitch) as usize)
+        };
+
+        unsafe {
+            context.Unmap(&staging, 0);
+        }
+
+        Ok(Vec::from(rgba))
     }
 }
 
@@ -217,7 +280,7 @@ fn create_shared_texture(
         Height: height,
         MipLevels: 1,
         ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
         SampleDesc: DXGI_SAMPLE_DESC {
             Count: 1,
             Quality: 0,

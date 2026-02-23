@@ -181,7 +181,7 @@ pub fn recording_subscription(
             SecondaryWindowSettings::Default,
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
-            ColorFormat::Bgra8,
+            ColorFormat::Rgba8,
             frame_tx,
         );
 
