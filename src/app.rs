@@ -505,6 +505,25 @@ impl Cocuyo {
                 self.config.save();
                 Task::none()
             }
+            settings::Event::RestartApp => {
+                self.spawn_new_instance();
+                iced::exit()
+            }
+        }
+    }
+
+    fn spawn_new_instance(&self) {
+        match std::env::current_exe() {
+            Ok(exe) => {
+                tracing::info!("Spawning new instance: {:?}", exe);
+                if let Err(e) = std::process::Command::new(&exe)
+                    .args(std::env::args_os().skip(1))
+                    .spawn()
+                {
+                    tracing::error!("Failed to spawn new instance: {}", e);
+                }
+            }
+            Err(e) => tracing::error!("Failed to get current executable path: {}", e),
         }
     }
 

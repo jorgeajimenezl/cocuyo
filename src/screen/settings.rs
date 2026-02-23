@@ -1,6 +1,6 @@
 #[cfg(target_os = "linux")]
 use iced::widget::rule;
-use iced::widget::{column, container, pick_list, row, text, tooltip};
+use iced::widget::{button, column, container, pick_list, row, text, tooltip};
 use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
@@ -16,6 +16,7 @@ pub enum Message {
     #[cfg(target_os = "linux")]
     BackendSelected(usize),
     AdapterSelected(GpuAdapterSelection),
+    RestartApp,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub enum Event {
     #[cfg(target_os = "linux")]
     BackendChanged(Option<String>),
     AdapterChanged(Option<GpuAdapter>),
+    RestartApp,
 }
 
 pub struct Settings {
@@ -94,6 +96,7 @@ impl Settings {
                 };
                 (Task::none(), Some(Event::AdapterChanged(preferred)))
             }
+            Message::RestartApp => (Task::none(), Some(Event::RestartApp)),
         }
     }
 
@@ -190,9 +193,17 @@ impl Settings {
 
         if pending_restart {
             adapter_col = adapter_col.push(
-                text("Restart required for this change to take effect.")
-                    .size(12)
-                    .color(theme::WARNING),
+                row![
+                    text("Restart required for this change to take effect.")
+                        .size(12)
+                        .color(theme::WARNING),
+                    button(text("Restart now").size(12))
+                        .on_press(Message::RestartApp)
+                        .style(theme::styled_button)
+                        .padding([4, 12]),
+                ]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
             );
         }
 
