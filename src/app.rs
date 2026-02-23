@@ -202,7 +202,10 @@ impl Cocuyo {
                     let parent = self
                         .find_window_id(WindowKind::Main)
                         .expect("Main window must exist to start recording");
-                    Task::done(Message::OpenCapturePicker(parent, PickerIntent::StartRecording))
+                    Task::done(Message::OpenCapturePicker(
+                        parent,
+                        PickerIntent::StartRecording,
+                    ))
                 }
             }
             Message::StopRecording => {
@@ -263,7 +266,10 @@ impl Cocuyo {
                     let parent = self
                         .find_window_id(WindowKind::Main)
                         .expect("Main window must exist to start ambient");
-                    Task::done(Message::OpenCapturePicker(parent, PickerIntent::StartAmbient))
+                    Task::done(Message::OpenCapturePicker(
+                        parent,
+                        PickerIntent::StartAmbient,
+                    ))
                 }
                 #[cfg(not(target_os = "windows"))]
                 {

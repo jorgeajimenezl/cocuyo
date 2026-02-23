@@ -30,7 +30,9 @@ impl fmt::Display for CaptureTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CaptureTarget::Monitor(m) => {
-                let name = m.device_string().unwrap_or_else(|_| "Unknown Monitor".into());
+                let name = m
+                    .device_string()
+                    .unwrap_or_else(|_| "Unknown Monitor".into());
                 match (m.width(), m.height()) {
                     (Ok(w), Ok(h)) => write!(f, "{} ({}x{})", name, w, h),
                     _ => write!(f, "{}", name),

@@ -275,11 +275,7 @@ struct Uniforms {
 }
 
 impl shader::Pipeline for VideoPipeline {
-    fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("video_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("video_shader.wgsl").into()),
@@ -411,8 +407,7 @@ impl VideoPipeline {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 }),
                 width,
@@ -439,13 +434,7 @@ impl VideoPipeline {
     ) {
         let result = unsafe {
             vulkan_dmabuf::import_dmabuf_texture(
-                device,
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
+                device, fd, width, height, drm_format, stride, offset,
             )
         };
 
@@ -456,11 +445,9 @@ impl VideoPipeline {
                 let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
 
                 // Copy imported DMA-BUF texture → local texture
-                let mut encoder = device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor {
-                        label: Some("dmabuf_copy"),
-                    },
-                );
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("dmabuf_copy"),
+                });
                 let copy_size = wgpu::Extent3d {
                     width,
                     height,
@@ -528,9 +515,7 @@ impl VideoPipeline {
         use windows::Win32::Foundation::HANDLE;
 
         let handle = HANDLE(shared_handle as *mut core::ffi::c_void);
-        let result = unsafe {
-            dx12_import::import_shared_texture(device, handle, width, height)
-        };
+        let result = unsafe { dx12_import::import_shared_texture(device, handle, width, height) };
 
         match result {
             Ok((imported_texture, wgpu_format)) => {
@@ -539,11 +524,9 @@ impl VideoPipeline {
                 let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
 
                 // Copy imported shared texture → local texture
-                let mut encoder = device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor {
-                        label: Some("d3d_shared_copy"),
-                    },
-                );
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("d3d_shared_copy"),
+                });
                 let copy_size = wgpu::Extent3d {
                     width,
                     height,

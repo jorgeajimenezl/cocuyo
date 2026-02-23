@@ -1,16 +1,18 @@
 use std::sync::Arc;
 
 use tracing::{debug, warn};
-use windows::core::Interface;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::{
-    ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_QUERY_DESC,
-    D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX, D3D11_RESOURCE_MISC_SHARED_NTHANDLE,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC};
-use windows::Win32::Graphics::Dxgi::{IDXGIKeyedMutex, IDXGIResource1, DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE};
+use windows::Win32::Graphics::Dxgi::{
+    DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE, IDXGIKeyedMutex, IDXGIResource1,
+};
+use windows::core::Interface;
 
 const POOL_SIZE: usize = 3;
 
@@ -68,9 +70,9 @@ impl SharedTextureSlot {
             device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
         }
         let staging = staging.ok_or_else(|| {
-            SharedTextureError::Windows(windows::core::Error::from_hresult(
-                windows::core::HRESULT(-1),
-            ))
+            SharedTextureError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(
+                -1,
+            )))
         })?;
 
         unsafe {
@@ -174,9 +176,9 @@ impl SharedTexturePool {
         let mut event_query: Option<ID3D11Query> = None;
         unsafe { device.CreateQuery(&query_desc, Some(&mut event_query as *mut _))? };
         let event_query = event_query.ok_or_else(|| {
-            SharedTextureError::Windows(windows::core::Error::from_hresult(
-                windows::core::HRESULT(-1),
-            ))
+            SharedTextureError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(
+                -1,
+            )))
         })?;
 
         Ok(Self {
@@ -283,7 +285,11 @@ impl Drop for SharedTexturePool {
         for (i, slot) in self.slots.iter().enumerate() {
             let count = Arc::strong_count(slot);
             if count > 1 {
-                warn!(slot = i, refcount = count, "Shared texture slot still in use during pool drop");
+                warn!(
+                    slot = i,
+                    refcount = count,
+                    "Shared texture slot still in use during pool drop"
+                );
             }
         }
     }
@@ -307,16 +313,16 @@ fn create_shared_texture(
         Usage: D3D11_USAGE_DEFAULT,
         BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
         CPUAccessFlags: 0,
-        MiscFlags: (D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0
-            | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX.0) as u32,
+        MiscFlags: (D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0 | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX.0)
+            as u32,
     };
 
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture as *mut _))? };
     let texture = texture.ok_or_else(|| {
-        SharedTextureError::Windows(windows::core::Error::from_hresult(
-            windows::core::HRESULT(-1),
-        ))
+        SharedTextureError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(
+            -1,
+        )))
     })?;
 
     // Get the keyed mutex interface for synchronization.
@@ -326,10 +332,19 @@ fn create_shared_texture(
     // Unlike legacy handles, NT handles must be explicitly closed via CloseHandle.
     let dxgi_resource1: IDXGIResource1 = texture.cast()?;
     let shared_handle = unsafe {
-        dxgi_resource1.CreateSharedHandle(None, DXGI_SHARED_RESOURCE_READ.0 | DXGI_SHARED_RESOURCE_WRITE.0, None)?
+        dxgi_resource1.CreateSharedHandle(
+            None,
+            DXGI_SHARED_RESOURCE_READ.0 | DXGI_SHARED_RESOURCE_WRITE.0,
+            None,
+        )?
     };
 
-    debug!(width, height, ?shared_handle, "Created shared D3D11 texture with NT handle");
+    debug!(
+        width,
+        height,
+        ?shared_handle,
+        "Created shared D3D11 texture with NT handle"
+    );
 
     Ok((texture, keyed_mutex, shared_handle))
 }

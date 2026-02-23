@@ -264,7 +264,9 @@ impl GstVideoConverter {
         let cudadownload = make_element("cudadownload")?;
 
         build_pipeline_with_elements(
-            pipeline, appsrc, appsink,
+            pipeline,
+            appsrc,
+            appsink,
             &[&cudaupload, &cudaconvert, &cudadownload],
             "CUDA",
         )?;
@@ -283,7 +285,9 @@ impl GstVideoConverter {
         let gldownload = make_element("gldownload")?;
 
         build_pipeline_with_elements(
-            pipeline, appsrc, appsink,
+            pipeline,
+            appsrc,
+            appsink,
             &[&glupload, &glcolorconvert, &gldownload],
             "OpenGL",
         )?;
@@ -299,11 +303,7 @@ impl GstVideoConverter {
     ) -> Result<(), GstError> {
         let videoconvert = make_element("videoconvert")?;
 
-        build_pipeline_with_elements(
-            pipeline, appsrc, appsink,
-            &[&videoconvert],
-            "CPU",
-        )?;
+        build_pipeline_with_elements(pipeline, appsrc, appsink, &[&videoconvert], "CPU")?;
 
         info!("CPU pipeline created");
         Ok(())
@@ -333,7 +333,9 @@ impl GstVideoConverter {
     }
 
     pub fn push_dmabuf(&mut self, fd: RawFd, size: usize) -> Result<(), GstError> {
-        let allocator = self.dmabuf_allocator.get_or_insert_with(DmaBufAllocator::new);
+        let allocator = self
+            .dmabuf_allocator
+            .get_or_insert_with(DmaBufAllocator::new);
 
         let memory = unsafe { allocator.alloc_with_flags(fd, size, FdMemoryFlags::DONT_CLOSE) }
             .map_err(|e| {
@@ -399,8 +401,9 @@ fn build_pipeline_with_elements(
         .add_many(all.iter().copied())
         .map_err(|e| GstError::PipelineError(format!("Failed to add {} elements: {}", label, e)))?;
 
-    gst::Element::link_many(all.iter().copied())
-        .map_err(|e| GstError::PipelineError(format!("Failed to link {} elements: {}", label, e)))?;
+    gst::Element::link_many(all.iter().copied()).map_err(|e| {
+        GstError::PipelineError(format!("Failed to link {} elements: {}", label, e))
+    })?;
 
     Ok(())
 }

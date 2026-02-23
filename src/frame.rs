@@ -24,9 +24,7 @@ impl std::fmt::Debug for FrameData {
                 .field("drm_format", drm_format)
                 .finish(),
             #[cfg(target_os = "windows")]
-            FrameData::D3DShared {
-                width, height, ..
-            } => f
+            FrameData::D3DShared { width, height, .. } => f
                 .debug_struct("D3DShared")
                 .field("width", width)
                 .field("height", height)

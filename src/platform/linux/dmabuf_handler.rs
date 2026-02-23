@@ -142,7 +142,7 @@ pub fn read_dmabuf_pixels(
     format: drm_fourcc::DrmFourcc,
 ) -> Result<Vec<u8>, DmaBufReadError> {
     use drm_fourcc::DrmFourcc;
-    use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
+    use nix::sys::mman::{MapFlags, ProtFlags, mmap, munmap};
 
     let needs_bgra_swap = matches!(format, DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888);
     let has_padding_alpha = matches!(format, DrmFourcc::Xrgb8888 | DrmFourcc::Xbgr8888);
@@ -160,8 +160,7 @@ pub fn read_dmabuf_pixels(
     }
     let map_size = offset as usize + (stride as usize) * (height as usize);
 
-    let map_len =
-        NonZeroUsize::new(map_size).ok_or(DmaBufReadError::InvalidBufferSize)?;
+    let map_len = NonZeroUsize::new(map_size).ok_or(DmaBufReadError::InvalidBufferSize)?;
 
     // SAFETY: fd is a valid DMA-BUF fd during the PipeWire on_process callback.
     let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };

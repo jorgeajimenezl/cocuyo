@@ -91,9 +91,7 @@ impl<'a> RegionOverlay<'a> {
     }
 
     pub fn view(self) -> Canvas<Self, Message, Theme> {
-        Canvas::new(self)
-            .width(iced::Fill)
-            .height(iced::Fill)
+        Canvas::new(self).width(iced::Fill).height(iced::Fill)
     }
 }
 
@@ -103,10 +101,7 @@ fn corner_handles(rect: Rectangle) -> [(Handle, Rectangle); 4] {
     [
         (
             Handle::TopLeft,
-            Rectangle::new(
-                Point::new(rect.x - half, rect.y - half),
-                Size::new(hs, hs),
-            ),
+            Rectangle::new(Point::new(rect.x - half, rect.y - half), Size::new(hs, hs)),
         ),
         (
             Handle::TopRight,
@@ -158,8 +153,7 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
             let interaction = std::mem::replace(&mut state.interaction, Interaction::None);
 
             return match interaction {
-                Interaction::Dragging { .. }
-                | Interaction::Resizing { .. } => {
+                Interaction::Dragging { .. } | Interaction::Resizing { .. } => {
                     state.cache.clear();
                     Some(Action::capture())
                 }
@@ -209,8 +203,10 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                         };
                         state.cache.clear();
                         return Some(
-                            Action::publish(Message::RegionUpdate(RegionMessage::Selected(Some(region.id))))
-                                .and_capture(),
+                            Action::publish(Message::RegionUpdate(RegionMessage::Selected(Some(
+                                region.id,
+                            ))))
+                            .and_capture(),
                         );
                     }
                 }
@@ -222,102 +218,121 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                 )
             }
 
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                match &state.interaction {
-                    Interaction::Dragging { region_id, offset } => {
-                        let region_id = *region_id;
-                        let offset = *offset;
-                        state.cache.clear();
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => match &state.interaction {
+                Interaction::Dragging { region_id, offset } => {
+                    let region_id = *region_id;
+                    let offset = *offset;
+                    state.cache.clear();
 
-                        let Some(region) = self.regions.iter().find(|r| r.id == region_id) else {
-                            return Some(Action::capture());
-                        };
+                    let Some(region) = self.regions.iter().find(|r| r.id == region_id) else {
+                        return Some(Action::capture());
+                    };
 
-                        let new_x = pos.x - offset.x;
-                        let new_y = pos.y - offset.y;
+                    let new_x = pos.x - offset.x;
+                    let new_y = pos.y - offset.y;
 
-                        let (fx, fy) = region::widget_to_frame_unclamped(
-                            new_x, new_y, bounds, self.frame_width, self.frame_height,
-                        );
+                    let (fx, fy) = region::widget_to_frame_unclamped(
+                        new_x,
+                        new_y,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    );
 
-                        let new_x = fx.max(0.0).min((self.frame_width as f32 - region.width).max(0.0));
-                        let new_y = fy.max(0.0).min((self.frame_height as f32 - region.height).max(0.0));
+                    let new_x = fx
+                        .max(0.0)
+                        .min((self.frame_width as f32 - region.width).max(0.0));
+                    let new_y = fy
+                        .max(0.0)
+                        .min((self.frame_height as f32 - region.height).max(0.0));
 
-                        Some(
-                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(
-                                region_id, new_x, new_y, region.width, region.height,
-                            )))
-                                .and_capture(),
-                        )
-                    }
-                    Interaction::Resizing { region_id, handle } => {
-                        let region_id = *region_id;
-                        let handle = *handle;
-                        state.cache.clear();
-
-                        let Some(region) = self.regions.iter().find(|r| r.id == region_id) else {
-                            return Some(Action::capture());
-                        };
-
-                        let wrect = region::frame_to_widget(
-                            region,
-                            bounds,
-                            self.frame_width,
-                            self.frame_height,
-                        );
-
-                        let (new_x, new_y, new_w, new_h) = match handle {
-                            Handle::TopLeft => {
-                                let nx = pos.x.min(wrect.x + wrect.width - MIN_REGION_SIZE);
-                                let ny = pos.y.min(wrect.y + wrect.height - MIN_REGION_SIZE);
-                                (nx, ny, wrect.x + wrect.width - nx, wrect.y + wrect.height - ny)
-                            }
-                            Handle::TopRight => {
-                                let nw = (pos.x - wrect.x).max(MIN_REGION_SIZE);
-                                let ny = pos.y.min(wrect.y + wrect.height - MIN_REGION_SIZE);
-                                (wrect.x, ny, nw, wrect.y + wrect.height - ny)
-                            }
-                            Handle::BottomLeft => {
-                                let nx = pos.x.min(wrect.x + wrect.width - MIN_REGION_SIZE);
-                                let nh = (pos.y - wrect.y).max(MIN_REGION_SIZE);
-                                (nx, wrect.y, wrect.x + wrect.width - nx, nh)
-                            }
-                            Handle::BottomRight => {
-                                let nw = (pos.x - wrect.x).max(MIN_REGION_SIZE);
-                                let nh = (pos.y - wrect.y).max(MIN_REGION_SIZE);
-                                (wrect.x, wrect.y, nw, nh)
-                            }
-                        };
-
-                        let Some((fx0, fy0)) = region::widget_to_frame(
-                            new_x, new_y, bounds, self.frame_width, self.frame_height,
-                        ) else {
-                            return Some(Action::capture());
-                        };
-                        let Some((fx1, fy1)) = region::widget_to_frame(
-                            new_x + new_w,
-                            new_y + new_h,
-                            bounds,
-                            self.frame_width,
-                            self.frame_height,
-                        ) else {
-                            return Some(Action::capture());
-                        };
-
-                        Some(
-                            Action::publish(Message::RegionUpdate(RegionMessage::Updated(
-                                region_id,
-                                fx0.max(0.0),
-                                fy0.max(0.0),
-                                (fx1 - fx0).max(1.0),
-                                (fy1 - fy0).max(1.0),
-                            )))
-                                .and_capture(),
-                        )
-                    }
-                    Interaction::None => None,
+                    Some(
+                        Action::publish(Message::RegionUpdate(RegionMessage::Updated(
+                            region_id,
+                            new_x,
+                            new_y,
+                            region.width,
+                            region.height,
+                        )))
+                        .and_capture(),
+                    )
                 }
-            }
+                Interaction::Resizing { region_id, handle } => {
+                    let region_id = *region_id;
+                    let handle = *handle;
+                    state.cache.clear();
+
+                    let Some(region) = self.regions.iter().find(|r| r.id == region_id) else {
+                        return Some(Action::capture());
+                    };
+
+                    let wrect = region::frame_to_widget(
+                        region,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    );
+
+                    let (new_x, new_y, new_w, new_h) = match handle {
+                        Handle::TopLeft => {
+                            let nx = pos.x.min(wrect.x + wrect.width - MIN_REGION_SIZE);
+                            let ny = pos.y.min(wrect.y + wrect.height - MIN_REGION_SIZE);
+                            (
+                                nx,
+                                ny,
+                                wrect.x + wrect.width - nx,
+                                wrect.y + wrect.height - ny,
+                            )
+                        }
+                        Handle::TopRight => {
+                            let nw = (pos.x - wrect.x).max(MIN_REGION_SIZE);
+                            let ny = pos.y.min(wrect.y + wrect.height - MIN_REGION_SIZE);
+                            (wrect.x, ny, nw, wrect.y + wrect.height - ny)
+                        }
+                        Handle::BottomLeft => {
+                            let nx = pos.x.min(wrect.x + wrect.width - MIN_REGION_SIZE);
+                            let nh = (pos.y - wrect.y).max(MIN_REGION_SIZE);
+                            (nx, wrect.y, wrect.x + wrect.width - nx, nh)
+                        }
+                        Handle::BottomRight => {
+                            let nw = (pos.x - wrect.x).max(MIN_REGION_SIZE);
+                            let nh = (pos.y - wrect.y).max(MIN_REGION_SIZE);
+                            (wrect.x, wrect.y, nw, nh)
+                        }
+                    };
+
+                    let Some((fx0, fy0)) = region::widget_to_frame(
+                        new_x,
+                        new_y,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    ) else {
+                        return Some(Action::capture());
+                    };
+                    let Some((fx1, fy1)) = region::widget_to_frame(
+                        new_x + new_w,
+                        new_y + new_h,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    ) else {
+                        return Some(Action::capture());
+                    };
+
+                    Some(
+                        Action::publish(Message::RegionUpdate(RegionMessage::Updated(
+                            region_id,
+                            fx0.max(0.0),
+                            fy0.max(0.0),
+                            (fx1 - fx0).max(1.0),
+                            (fy1 - fy0).max(1.0),
+                        )))
+                        .and_capture(),
+                    )
+                }
+                Interaction::None => None,
+            },
 
             _ => None,
         }
@@ -384,9 +399,12 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                 );
 
                 // Label: show bulb name or MAC suffix
-                let label = format!("R{} ({})", i + 1, 
-                    &region.bulb_mac[region.bulb_mac.len().saturating_sub(5)..]);
-                    
+                let label = format!(
+                    "R{} ({})",
+                    i + 1,
+                    &region.bulb_mac[region.bulb_mac.len().saturating_sub(5)..]
+                );
+
                 frame.fill_text(Text {
                     content: label,
                     position: Point::new(wrect.x + 4.0, wrect.y + 2.0),
@@ -408,9 +426,7 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                                 Point::new(hr.x, hr.y),
                                 Size::new(hr.width, hr.height),
                             ),
-                            Stroke::default()
-                                .with_color(border_color)
-                                .with_width(1.0),
+                            Stroke::default().with_color(border_color).with_width(1.0),
                         );
                     }
                 }
@@ -448,8 +464,12 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                         );
                         if let Some(handle) = hit_test_handle(wrect, pos) {
                             return match handle {
-                                Handle::TopLeft | Handle::BottomRight => mouse::Interaction::ResizingDiagonallyDown,
-                                Handle::TopRight | Handle::BottomLeft => mouse::Interaction::ResizingDiagonallyUp,
+                                Handle::TopLeft | Handle::BottomRight => {
+                                    mouse::Interaction::ResizingDiagonallyDown
+                                }
+                                Handle::TopRight | Handle::BottomLeft => {
+                                    mouse::Interaction::ResizingDiagonallyUp
+                                }
                             };
                         }
                     }

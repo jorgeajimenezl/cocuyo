@@ -74,10 +74,10 @@ pub unsafe fn import_dmabuf_texture(
     _stride: u32,
     offset: u32,
 ) -> Result<(wgpu::Texture, wgpu::TextureFormat), DmaBufImportError> {
-    let vk_format =
-        formats::drm_to_vk_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
-    let wgpu_format =
-        formats::drm_to_wgpu_format(drm_format).ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
+    let vk_format = formats::drm_to_vk_format(drm_format)
+        .ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
+    let wgpu_format = formats::drm_to_wgpu_format(drm_format)
+        .ok_or(DmaBufImportError::UnsupportedFormat(drm_format))?;
 
     // Dup the fd so Vulkan can take ownership of the copy without affecting the caller's fd.
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
@@ -123,8 +123,7 @@ pub unsafe fn import_dmabuf_texture(
         }
 
         // Load extension functions for get_memory_fd_properties
-        let ext_memory_fd_fn =
-            ash::khr::external_memory_fd::Device::new(ash_instance, ash_device);
+        let ext_memory_fd_fn = ash::khr::external_memory_fd::Device::new(ash_instance, ash_device);
 
         // Query memory properties for this DMA-BUF fd
         let mut fd_properties = vk::MemoryFdPropertiesKHR::default();
@@ -301,9 +300,8 @@ pub unsafe fn import_dmabuf_texture(
         view_formats: &[],
     };
 
-    let wgpu_texture = unsafe {
-        device.create_texture_from_hal::<wgpu_hal::api::Vulkan>(hal_texture, &wgpu_desc)
-    };
+    let wgpu_texture =
+        unsafe { device.create_texture_from_hal::<wgpu_hal::api::Vulkan>(hal_texture, &wgpu_desc) };
 
     debug!(
         width,

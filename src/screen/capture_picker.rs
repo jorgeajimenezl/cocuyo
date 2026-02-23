@@ -5,7 +5,7 @@ use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent, Pick
 use crate::theme;
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows::Win32::UI::WindowsAndMessaging::IsIconic;
 use windows_capture::monitor::Monitor;
 use windows_capture::window::Window;
@@ -123,24 +123,18 @@ impl CapturePicker {
             })
             .padding([4, 16]);
 
-        let tab_bar = container(
-            row![screens_tab, windows_tab].spacing(5).padding(8),
-        )
-        .width(Fill)
-        .style(theme::menu_bar_container);
+        let tab_bar = container(row![screens_tab, windows_tab].spacing(5).padding(8))
+            .width(Fill)
+            .style(theme::menu_bar_container);
 
         // List content based on active tab
         let list_area: Element<'_> = match self.active_tab {
             PickerTab::Screens => {
                 if self.monitors.is_empty() {
-                    center(
-                        text("No monitors found")
-                            .size(14)
-                            .color(theme::TEXT_DIM),
-                    )
-                    .width(Fill)
-                    .height(Fill)
-                    .into()
+                    center(text("No monitors found").size(14).color(theme::TEXT_DIM))
+                        .width(Fill)
+                        .height(Fill)
+                        .into()
                 } else {
                     let items = self.monitors.iter().fold(
                         column![].spacing(2).padding(8),
@@ -194,43 +188,40 @@ impl CapturePicker {
                     .height(Fill)
                     .into()
                 } else {
-                    let items = self.windows.iter().fold(
-                        column![].spacing(2).padding(8),
-                        |col, window| {
-                            let target = CaptureTarget::Window(*window);
-                            let is_selected = self.selected.as_ref() == Some(&target);
+                    let items =
+                        self.windows
+                            .iter()
+                            .fold(column![].spacing(2).padding(8), |col, window| {
+                                let target = CaptureTarget::Window(*window);
+                                let is_selected = self.selected.as_ref() == Some(&target);
 
-                            let title = window
-                                .title()
-                                .unwrap_or_else(|_| "Untitled".into());
-                            let process = window
-                                .process_name()
-                                .unwrap_or_else(|_| String::new());
+                                let title = window.title().unwrap_or_else(|_| "Untitled".into());
+                                let process =
+                                    window.process_name().unwrap_or_else(|_| String::new());
 
-                            let label_row = row![
-                                text(title)
-                                    .size(13)
-                                    .color(theme::TEXT)
-                                    .width(Fill)
-                                    .wrapping(text::Wrapping::WordOrGlyph),
-                                text(process).size(12).color(theme::TEXT_DIM),
-                            ]
-                            .spacing(8)
-                            .align_y(Center);
+                                let label_row = row![
+                                    text(title)
+                                        .size(13)
+                                        .color(theme::TEXT)
+                                        .width(Fill)
+                                        .wrapping(text::Wrapping::WordOrGlyph),
+                                    text(process).size(12).color(theme::TEXT_DIM),
+                                ]
+                                .spacing(8)
+                                .align_y(Center);
 
-                            col.push(
-                                button(label_row)
-                                    .on_press(Message::SelectTarget(target))
-                                    .style(if is_selected {
-                                        theme::picker_item_selected
-                                    } else {
-                                        theme::picker_item
-                                    })
-                                    .width(Fill)
-                                    .padding([8, 12]),
-                            )
-                        },
-                    );
+                                col.push(
+                                    button(label_row)
+                                        .on_press(Message::SelectTarget(target))
+                                        .style(if is_selected {
+                                            theme::picker_item_selected
+                                        } else {
+                                            theme::picker_item
+                                        })
+                                        .width(Fill)
+                                        .padding([8, 12]),
+                                )
+                            });
                     scrollable(items).width(Fill).height(Fill).into()
                 }
             }

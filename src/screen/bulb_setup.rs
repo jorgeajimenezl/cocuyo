@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use iced::widget::{
-    button, center, checkbox, column, container, row, rule, scrollable, text,
-};
+use iced::widget::{button, center, checkbox, column, container, row, rule, scrollable, text};
 use iced::{Center, Fill, Task};
 
 use crate::ambient::BulbInfo;
@@ -36,7 +34,7 @@ impl BulbSetupState {
     pub fn new(config: &AppConfig) -> Self {
         let saved_bulbs = config.saved_bulbs.clone();
         let selected_macs: Vec<String> = config.selected_bulb_macs.iter().cloned().collect();
-        
+
         // Only keep selections that correspond to known bulbs
         let valid_selections: HashSet<String> = selected_macs
             .into_iter()
@@ -49,18 +47,12 @@ impl BulbSetupState {
         }
     }
 
-    pub fn update(
-        &mut self,
-        msg: Message,
-    ) -> (Task<Message>, Option<BulbSetupEvent>) {
+    pub fn update(&mut self, msg: Message) -> (Task<Message>, Option<BulbSetupEvent>) {
         match msg {
             Message::Scan => {
                 self.is_scanning = true;
                 (
-                    Task::perform(
-                        crate::ambient::discover_bulbs(),
-                        Message::BulbsDiscovered,
-                    ),
+                    Task::perform(crate::ambient::discover_bulbs(), Message::BulbsDiscovered),
                     None,
                 )
             }
@@ -121,32 +113,26 @@ impl BulbSetupState {
             )
             .into()
         } else {
-            let items = self.discovered_bulbs.iter().fold(
-                column![].spacing(8).padding(10),
-                |col, bulb| {
-                    let is_selected = self.selected_bulbs.contains(&bulb.mac);
-                    let label = bulb
-                        .name
-                        .as_deref()
-                        .unwrap_or("WiZ Bulb")
-                        .to_string();
-                    let detail = format!("{} - {}", bulb.ip, bulb.mac);
-                    let mac = bulb.mac.clone();
+            let items =
+                self.discovered_bulbs
+                    .iter()
+                    .fold(column![].spacing(8).padding(10), |col, bulb| {
+                        let is_selected = self.selected_bulbs.contains(&bulb.mac);
+                        let label = bulb.name.as_deref().unwrap_or("WiZ Bulb").to_string();
+                        let detail = format!("{} - {}", bulb.ip, bulb.mac);
+                        let mac = bulb.mac.clone();
 
-                    col.push(
-                        row![
-                            checkbox(is_selected)
-                                .label(label)
-                                .on_toggle(move |_| {
-                                    Message::ToggleBulb(mac.clone())
-                                }),
-                            text(detail).size(12).color(theme::TEXT_DIM),
-                        ]
-                        .spacing(10)
-                        .align_y(Center),
-                    )
-                },
-            );
+                        col.push(
+                            row![
+                                checkbox(is_selected)
+                                    .label(label)
+                                    .on_toggle(move |_| { Message::ToggleBulb(mac.clone()) }),
+                                text(detail).size(12).color(theme::TEXT_DIM),
+                            ]
+                            .spacing(10)
+                            .align_y(Center),
+                        )
+                    });
             scrollable(items).width(Fill).height(Fill).into()
         };
 

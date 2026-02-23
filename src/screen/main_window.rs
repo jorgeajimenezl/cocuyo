@@ -1,4 +1,6 @@
-use iced::widget::{button, center, column, container, pick_list, row, rule, scrollable, shader, stack, text};
+use iced::widget::{
+    button, center, column, container, pick_list, row, rule, scrollable, shader, stack, text,
+};
 use iced::window;
 use iced::{Center, Color, Fill, Length};
 
@@ -6,10 +8,10 @@ use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
 use crate::region::Region;
 use crate::sampling::SamplingStrategy;
-use crate::widget::region_overlay::RegionOverlay;
-use crate::widget::video_shader::VideoScene;
 use crate::theme;
 use crate::widget::Element;
+use crate::widget::region_overlay::RegionOverlay;
+use crate::widget::video_shader::VideoScene;
 
 pub fn view<'a>(
     window_id: window::Id,
@@ -40,16 +42,11 @@ pub fn view<'a>(
     // Left panel: video preview + region overlay
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video = shader(VideoScene::new(Some(f)))
-                .width(Fill)
-                .height(Fill);
+            let video = shader(VideoScene::new(Some(f))).width(Fill).height(Fill);
 
             let overlay = RegionOverlay::new(regions, fw, fh, selected_region).view();
 
-            stack![video, overlay]
-                .width(Fill)
-                .height(Fill)
-                .into()
+            stack![video, overlay].width(Fill).height(Fill).into()
         }
         _ => center(
             column![
@@ -95,10 +92,7 @@ pub fn view<'a>(
                 .on_press(Message::StartRecording)
                 .style(theme::styled_button)
                 .into(),
-            RecordingState::Starting => text("Starting...")
-                .size(12)
-                .color(theme::WARNING)
-                .into(),
+            RecordingState::Starting => text("Starting...").size(12).color(theme::WARNING).into(),
             RecordingState::Recording => column![
                 text("Recording").size(12).color(theme::SUCCESS),
                 button("Stop Recording")
@@ -133,10 +127,15 @@ pub fn view<'a>(
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let label = format!("R{} ({})", i + 1, 
-                    &r.bulb_mac[r.bulb_mac.len().saturating_sub(8)..]);
+                let label = format!(
+                    "R{} ({})",
+                    i + 1,
+                    &r.bulb_mac[r.bulb_mac.len().saturating_sub(8)..]
+                );
 
-                let color_indicator: Element<'a, Message> = if let Some((cr, cg, cb)) = r.sampled_color {
+                let color_indicator: Element<'a, Message> = if let Some((cr, cg, cb)) =
+                    r.sampled_color
+                {
                     container(text(""))
                         .width(14)
                         .height(14)
@@ -167,21 +166,17 @@ pub fn view<'a>(
                 };
 
                 let region_id = r.id;
-                let strategy_picker = pick_list(
-                    SamplingStrategy::ALL,
-                    Some(r.strategy),
-                    move |s| Message::RegionStrategyChanged(region_id, s),
-                )
-                .text_size(11)
-                .style(theme::styled_pick_list);
+                let strategy_picker =
+                    pick_list(SamplingStrategy::ALL, Some(r.strategy), move |s| {
+                        Message::RegionStrategyChanged(region_id, s)
+                    })
+                    .text_size(11)
+                    .style(theme::styled_pick_list);
 
                 column![
-                    row![
-                        color_indicator,
-                        text(label).size(12).color(theme::TEXT),
-                    ]
-                    .spacing(5)
-                    .align_y(Center),
+                    row![color_indicator, text(label).size(12).color(theme::TEXT),]
+                        .spacing(5)
+                        .align_y(Center),
                     strategy_picker,
                 ]
                 .spacing(3)
@@ -189,11 +184,9 @@ pub fn view<'a>(
             })
             .collect();
 
-        scrollable(
-            column(items).spacing(4).width(Fill),
-        )
-        .height(Fill)
-        .into()
+        scrollable(column(items).spacing(4).width(Fill))
+            .height(Fill)
+            .into()
     };
 
     let controls_panel = column![

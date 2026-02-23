@@ -64,7 +64,10 @@ pub fn build_picker_options(adapters: &[GpuAdapter]) -> Vec<GpuAdapterSelection>
 
 /// Given a saved preference string, find the matching AdapterSelection.
 /// Uses case-insensitive substring match, consistent with WGPU_ADAPTER_NAME.
-pub fn resolve_selection(preferred: Option<&GpuAdapter>, adapters: &[GpuAdapter]) -> GpuAdapterSelection {
+pub fn resolve_selection(
+    preferred: Option<&GpuAdapter>,
+    adapters: &[GpuAdapter],
+) -> GpuAdapterSelection {
     let Some(pref) = preferred else {
         return GpuAdapterSelection::Auto;
     };

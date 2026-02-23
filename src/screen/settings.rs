@@ -1,6 +1,6 @@
-use iced::widget::{column, container, pick_list, row, text, tooltip};
 #[cfg(target_os = "linux")]
 use iced::widget::rule;
+use iced::widget::{column, container, pick_list, row, text, tooltip};
 use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
@@ -83,10 +83,7 @@ impl Settings {
             #[cfg(target_os = "linux")]
             Message::BackendSelected(idx) => {
                 self.selected_backend_index = idx;
-                let config_key = self
-                    .available_backends
-                    .get(idx)
-                    .map(|b| b.config_key());
+                let config_key = self.available_backends.get(idx).map(|b| b.config_key());
                 (Task::none(), Some(Event::BackendChanged(config_key)))
             }
             Message::AdapterSelected(selection) => {
@@ -143,14 +140,16 @@ impl Settings {
             Some(adapter) => format!("Currently active: {}", adapter),
         };
 
-        let pending_restart =
-            match (&self.selected_adapter, self.active_adapter_preference.as_ref()) {
-                (GpuAdapterSelection::Auto, None) => false,
-                (GpuAdapterSelection::Named(adapter), Some(active)) => {
-                    !adapter.name.eq_ignore_ascii_case(&active.name)
-                }
-                _ => true,
-            };
+        let pending_restart = match (
+            &self.selected_adapter,
+            self.active_adapter_preference.as_ref(),
+        ) {
+            (GpuAdapterSelection::Auto, None) => false,
+            (GpuAdapterSelection::Named(adapter), Some(active)) => {
+                !adapter.name.eq_ignore_ascii_case(&active.name)
+            }
+            _ => true,
+        };
 
         let adapter_options = adapters::build_picker_options(&self.available_adapters);
         let mut adapter_col = column![

@@ -73,11 +73,12 @@ pub unsafe fn import_shared_texture(
         // Open the NT shared handle as an ID3D12Resource.
         let resource = {
             let mut resource: Option<windows::Win32::Graphics::Direct3D12::ID3D12Resource> = None;
-            debug!(?shared_handle, width, height, "Opening shared handle via DX12");
-            unsafe {
-                dx12_device.OpenSharedHandle(shared_handle, &mut resource as *mut _)
-            }
-            .map_err(Dx12ImportError::OpenSharedHandleFailed)?;
+            debug!(
+                ?shared_handle,
+                width, height, "Opening shared handle via DX12"
+            );
+            unsafe { dx12_device.OpenSharedHandle(shared_handle, &mut resource as *mut _) }
+                .map_err(Dx12ImportError::OpenSharedHandleFailed)?;
             resource.ok_or(Dx12ImportError::OpenSharedHandleFailed(
                 windows::core::Error::from_hresult(windows::core::HRESULT(-1)),
             ))?
@@ -109,9 +110,8 @@ pub unsafe fn import_shared_texture(
         view_formats: &[],
     };
 
-    let wgpu_texture = unsafe {
-        device.create_texture_from_hal::<wgpu_hal::api::Dx12>(hal_texture, &wgpu_desc)
-    };
+    let wgpu_texture =
+        unsafe { device.create_texture_from_hal::<wgpu_hal::api::Dx12>(hal_texture, &wgpu_desc) };
 
     debug!(width, height, "D3D shared texture imported via DX12");
 

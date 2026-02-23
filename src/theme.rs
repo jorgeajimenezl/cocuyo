@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use iced::widget::{button, container, pick_list, rule, theme};
-use iced::{color, Background, Border, Color, Shadow, Theme, border::Radius};
+use iced::{Background, Border, Color, Shadow, Theme, border::Radius, color};
 
 use crate::app::Cocuyo;
 

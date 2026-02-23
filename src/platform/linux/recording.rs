@@ -6,11 +6,11 @@ use iced::futures::Stream;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+use super::gst_pipeline::GpuBackend;
+use super::stream;
 use crate::app::RecordingState;
 use crate::frame::FrameData;
 use crate::recording::{RecordingCommand, RecordingEvent};
-use super::gst_pipeline::GpuBackend;
-use super::stream;
 
 pub fn recording_subscription(
     input: &(u64, GpuBackend),
@@ -23,10 +23,7 @@ pub fn recording_subscription(
         // Create command channel so the app can signal stop
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecordingCommand>(1);
 
-        output
-            .send(RecordingEvent::Ready(cmd_tx))
-            .await
-            .ok();
+        output.send(RecordingEvent::Ready(cmd_tx)).await.ok();
 
         output
             .send(RecordingEvent::StateChanged(RecordingState::Starting))
@@ -69,9 +66,8 @@ pub fn recording_subscription(
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Arc<FrameData>>(2);
 
         // Spawn PipeWire thread
-        let pw_handle = std::thread::spawn(move || {
-            stream::start_streaming(node_id, fd, frame_tx, backend)
-        });
+        let pw_handle =
+            std::thread::spawn(move || stream::start_streaming(node_id, fd, frame_tx, backend));
 
         // Forward frames until PipeWire thread finishes or we receive a stop command.
         // On stop: drop frame_rx to close the channel, causing the PipeWire thread
