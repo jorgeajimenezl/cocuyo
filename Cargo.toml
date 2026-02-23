@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "316900763ee710f719c390aa0a25c39a38d1ce12", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
-wgpu = { version = "27", features = ["serde"] }
+wgpu = "27"
+wgpu-types = { version = "27", features = ["serde"] }
 tokio = { version = "1.41", features = [ "rt-multi-thread", "macros" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
