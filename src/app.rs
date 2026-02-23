@@ -24,7 +24,7 @@ use crate::widget::region_overlay::RegionMessage;
 use {
     crate::platform::windows::capture_target::{CaptureTarget, PickerIntent},
     crate::screen::capture_picker,
-    iced::window::settings::{platform::CornerPreference, PlatformSpecific},
+    iced::window::settings::{PlatformSpecific, platform::CornerPreference},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +50,7 @@ pub enum Message {
     // Main window controls
     OpenSettings(window::Id),
     OpenBulbSetup(window::Id),
+    OpenCapturePicker(window::Id, PickerIntent),
     StartRecording,
     StopRecording,
     StartAmbient,
@@ -179,19 +180,30 @@ impl Cocuyo {
                 Size::new(300.0, 200.0),
                 Some(parent),
             ),
+            Message::OpenCapturePicker(parent, intent) => {
+                self.capture_picker = Some(capture_picker::CapturePicker::new(intent));
+                self.open_window(
+                    WindowKind::CapturePicker,
+                    Size::new(500.0, 500.0),
+                    Size::new(350.0, 300.0),
+                    Some(parent),
+                )
+            }
             Message::StartRecording => {
                 #[cfg(target_os = "linux")]
                 {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
+                    Task::none()
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    return self.open_capture_picker(PickerIntent::StartRecording);
+                    let parent = self
+                        .find_window_id(WindowKind::Main)
+                        .expect("Main window must exist to start recording");
+                    Task::done(Message::OpenCapturePicker(parent, PickerIntent::StartRecording))
                 }
-                #[allow(unreachable_code)]
-                Task::none()
             }
             Message::StopRecording => {
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
@@ -248,9 +260,12 @@ impl Cocuyo {
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    return self.open_capture_picker(PickerIntent::StartAmbient);
+                    let parent = self
+                        .find_window_id(WindowKind::Main)
+                        .expect("Main window must exist to start ambient");
+                    Task::done(Message::OpenCapturePicker(parent, PickerIntent::StartAmbient))
                 }
-                #[allow(unreachable_code)]
+                #[cfg(not(target_os = "windows"))]
                 {
                     let bulbs = self.bulb_setup.selected_bulb_infos();
                     Task::perform(
@@ -626,20 +641,6 @@ impl Cocuyo {
             ..Default::default()
         });
         open.map(move |id| Message::WindowOpened(id, kind))
-    }
-
-    #[cfg(target_os = "windows")]
-    fn open_capture_picker(&mut self, intent: PickerIntent) -> Task<Message> {
-        self.capture_picker = Some(capture_picker::CapturePicker::new(intent));
-
-        let parent = self.find_window_id(WindowKind::Main);
-
-        self.open_window(
-            WindowKind::CapturePicker,
-            Size::new(500.0, 500.0),
-            Size::new(350.0, 300.0),
-            parent,
-        )
     }
 
     fn save_bulb_config(&mut self) {
