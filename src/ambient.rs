@@ -229,8 +229,9 @@ pub async fn restore_bulb_states(states: Vec<SavedBulbState>) {
             }
 
             // Brightness applies to all modes
-            if let Some(b) = state.brightness &&
-                let Some(br) = wiz_lights_rs::Brightness::create(b) {
+            if let Some(b) = state.brightness
+                && let Some(br) = wiz_lights_rs::Brightness::create(b)
+            {
                 payload.brightness(&br);
             }
 

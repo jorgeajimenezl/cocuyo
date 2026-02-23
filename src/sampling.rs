@@ -75,7 +75,10 @@ pub fn sample_region(
 fn sample_average(
     data: &[u8],
     width: u32,
-    x0: u32, y0: u32, x1: u32, y1: u32,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
     stride: u32,
 ) -> Option<(u8, u8, u8)> {
     let mut r_sum: u64 = 0;
@@ -117,7 +120,10 @@ fn sample_average(
 fn sample_extremum<const IS_MAX: bool>(
     data: &[u8],
     width: u32,
-    x0: u32, y0: u32, x1: u32, y1: u32,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
     stride: u32,
 ) -> Option<(u8, u8, u8)> {
     let mut best_rgb: (u8, u8, u8) = (0, 0, 0);
@@ -133,7 +139,11 @@ fn sample_extremum<const IS_MAX: bool>(
             if idx + 2 < data.len() {
                 let (r, g, b) = (data[idx], data[idx + 1], data[idx + 2]);
                 let lum = luminance_u32(r, g, b);
-                let better = if IS_MAX { lum > best_lum } else { lum < best_lum };
+                let better = if IS_MAX {
+                    lum > best_lum
+                } else {
+                    lum < best_lum
+                };
                 if better || !found {
                     best_lum = lum;
                     best_rgb = (r, g, b);
@@ -156,7 +166,11 @@ mod tests {
 
     /// Helper to create a CPU FrameData from raw RGBA bytes.
     fn cpu_frame(data: Vec<u8>, width: u32, height: u32) -> FrameData {
-        FrameData::Cpu { data: Arc::new(data), width, height }
+        FrameData::Cpu {
+            data: Arc::new(data),
+            width,
+            height,
+        }
     }
 
     /// 2×2 RGBA buffer:
@@ -203,16 +217,28 @@ mod tests {
     #[test]
     fn zero_sized_region_returns_none() {
         let frame = make_2x2();
-        assert_eq!(sample_region(&frame, 0.0, 0.0, 0.0, 0.0, SamplingStrategy::Average), None);
-        assert_eq!(sample_region(&frame, 0.0, 0.0, 0.0, 1.0, SamplingStrategy::Average), None);
-        assert_eq!(sample_region(&frame, 0.0, 0.0, 1.0, 0.0, SamplingStrategy::Average), None);
+        assert_eq!(
+            sample_region(&frame, 0.0, 0.0, 0.0, 0.0, SamplingStrategy::Average),
+            None
+        );
+        assert_eq!(
+            sample_region(&frame, 0.0, 0.0, 0.0, 1.0, SamplingStrategy::Average),
+            None
+        );
+        assert_eq!(
+            sample_region(&frame, 0.0, 0.0, 1.0, 0.0, SamplingStrategy::Average),
+            None
+        );
     }
 
     #[test]
     fn out_of_bounds_region_returns_none() {
         let frame = make_2x2();
         // Region entirely outside the frame
-        assert_eq!(sample_region(&frame, 5.0, 5.0, 1.0, 1.0, SamplingStrategy::Average), None);
+        assert_eq!(
+            sample_region(&frame, 5.0, 5.0, 1.0, 1.0, SamplingStrategy::Average),
+            None
+        );
     }
 
     #[test]

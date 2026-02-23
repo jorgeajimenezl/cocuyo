@@ -1,99 +1,111 @@
-use iced::widget::{column, container, pick_list, row, rule, text, tooltip};
-use iced::{Fill, padding};
-use iced::window;
+#[cfg(target_os = "linux")]
+use iced::widget::rule;
+use iced::widget::{button, column, container, pick_list, row, text, tooltip};
+use iced::{Fill, Task, padding};
 
-use crate::adapters::GpuAdapterSelection;
-use crate::app::Message;
+use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
+use crate::config::AppConfig;
+#[cfg(target_os = "linux")]
 use crate::platform::linux::gst_pipeline::GpuBackend;
-use crate::screen::title_bar;
 use crate::theme;
-use crate::widget::Element;
 
-pub fn view<'a>(
-    window_id: window::Id,
-    available_backends: &'a [GpuBackend],
-    selected_backend: Option<&'a GpuBackend>,
-    available_adapters: &'a [String],
-    selected_adapter: &'a GpuAdapterSelection,
-    active_adapter_preference: Option<&'a str>,
-) -> Element<'a, Message> {
-    // Adapter section
-    let active_label = match active_adapter_preference {
-        None => "Currently active: Auto (wgpu default)".to_string(),
-        Some(name) => format!("Currently active: {}", name),
-    };
+type Element<'a> = iced::Element<'a, Message, iced::Theme, iced::Renderer>;
 
-    let pending_restart = match (selected_adapter, active_adapter_preference) {
-        (GpuAdapterSelection::Auto, None) => false,
-        (GpuAdapterSelection::Named(name), Some(active)) => {
-            name.to_lowercase() != active.to_lowercase()
+#[derive(Debug, Clone)]
+pub enum Message {
+    #[cfg(target_os = "linux")]
+    BackendSelected(usize),
+    AdapterSelected(GpuAdapterSelection),
+    RestartApp,
+}
+
+#[derive(Debug, Clone)]
+pub enum Event {
+    #[cfg(target_os = "linux")]
+    BackendChanged(Option<String>),
+    AdapterChanged(Option<GpuAdapter>),
+    RestartApp,
+}
+
+pub struct Settings {
+    #[cfg(target_os = "linux")]
+    available_backends: Vec<GpuBackend>,
+    #[cfg(target_os = "linux")]
+    selected_backend_index: usize,
+    available_adapters: Vec<GpuAdapter>,
+    selected_adapter: GpuAdapterSelection,
+    active_adapter_preference: Option<GpuAdapter>,
+}
+
+impl Settings {
+    pub fn new(config: &AppConfig) -> Self {
+        #[cfg(target_os = "linux")]
+        let (available_backends, selected_backend_index) = {
+            use crate::platform::linux::gst_pipeline;
+            use tracing::info;
+
+            let detected_backends = gst_pipeline::detect_available_backends();
+            info!(backends = ?detected_backends, "Detected GPU backends");
+
+            let mut available_backends = Vec::with_capacity(detected_backends.len() + 1);
+            available_backends.push(GpuBackend::Auto);
+            available_backends.extend(detected_backends);
+
+            let selected_backend_index = config
+                .preferred_backend
+                .as_deref()
+                .and_then(|key| {
+                    available_backends
+                        .iter()
+                        .position(|b| b.config_key() == key)
+                })
+                .unwrap_or(0);
+
+            (available_backends, selected_backend_index)
+        };
+
+        let available_adapters = adapters::enumerate_adapters();
+        let selected_adapter =
+            adapters::resolve_selection(config.preferred_adapter.as_ref(), &available_adapters);
+        let active_adapter_preference = config.preferred_adapter.clone();
+
+        Self {
+            #[cfg(target_os = "linux")]
+            available_backends,
+            #[cfg(target_os = "linux")]
+            selected_backend_index,
+            available_adapters,
+            selected_adapter,
+            active_adapter_preference,
         }
-        _ => true,
-    };
-
-    let adapter_options = crate::adapters::build_picker_options(available_adapters);
-    let mut adapter_col = column![
-        row![
-            text("GPU Adapter").size(18).color(theme::TEXT), 
-            tooltip(
-                "🛈",
-                container(
-                    text(
-                        "On hybrid GPU systems, selecting the correct adapter can improve performance \
-                        and compatibility. If unsure, start with 'Auto' or match the adapter used by \
-                        your Wayland compositor.",
-                    ),
-                )
-                .padding(10)
-                .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            ).style(theme::styled_tooltip)
-        ].spacing(5),
-        pick_list(
-            adapter_options,
-            Some(selected_adapter),
-            Message::AdapterSelected,
-        )
-        .style(theme::styled_pick_list)
-        .width(Fill),
-        text(active_label).size(12).color(theme::TEXT_DIM),
-    ]
-    .spacing(10);
-
-    if pending_restart {
-        adapter_col = adapter_col.push(
-            text("Restart required for this change to take effect.")
-                .size(12)
-                .color(theme::WARNING),
-        );
     }
 
-    // Backend section (existing)
-    let backend_section = column![
-        text("Video Processing").size(18).color(theme::TEXT),
-        pick_list(
-            available_backends,
-            selected_backend,
-            |backend: GpuBackend| {
-                let idx = available_backends
-                    .iter()
-                    .position(|b| b == &backend)
-                    .unwrap_or(0);
-                Message::BackendSelected(idx)
-            },
-        )
-        .style(theme::styled_pick_list)
-        .width(Fill),
-        text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")
-            .size(12)
-            .color(theme::TEXT_DIM),
-    ]
-    .spacing(10);
+    pub fn update(&mut self, message: Message) -> (Task<Message>, Option<Event>) {
+        match message {
+            #[cfg(target_os = "linux")]
+            Message::BackendSelected(idx) => {
+                self.selected_backend_index = idx;
+                let config_key = self.available_backends.get(idx).map(|b| b.config_key());
+                (Task::none(), Some(Event::BackendChanged(config_key)))
+            }
+            Message::AdapterSelected(selection) => {
+                self.selected_adapter = selection.clone();
+                let preferred = match &selection {
+                    GpuAdapterSelection::Auto => None,
+                    GpuAdapterSelection::Named(adapter) => Some(adapter.clone()),
+                };
+                (Task::none(), Some(Event::AdapterChanged(preferred)))
+            }
+            Message::RestartApp => (Task::none(), Some(Event::RestartApp)),
+        }
+    }
 
-    column![
-        title_bar::view(window_id, "Settings"),
-        rule::horizontal(1).style(theme::styled_rule),
-        container(
+    pub fn view(&self) -> Element<'_> {
+        let adapter_col = self.build_adapter_section();
+
+        #[cfg(target_os = "linux")]
+        let content = {
+            let backend_section = self.build_backend_section();
             column![
                 adapter_col,
                 rule::horizontal(1).style(theme::styled_rule),
@@ -101,13 +113,126 @@ pub fn view<'a>(
             ]
             .spacing(20)
             .width(Fill)
-            .padding(padding::all(20)),
-        )
-        .width(Fill)
-        .height(Fill)
-        .style(theme::styled_container),
-    ]
-    .width(Fill)
-    .height(Fill)
-    .into()
+            .padding(padding::all(20))
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let content = column![adapter_col]
+            .spacing(20)
+            .width(Fill)
+            .padding(padding::all(20));
+
+        container(content)
+            .width(Fill)
+            .height(Fill)
+            .style(theme::styled_container)
+            .into()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn selected_backend(&self) -> GpuBackend {
+        self.available_backends
+            .get(self.selected_backend_index)
+            .cloned()
+            .unwrap_or(GpuBackend::Cpu)
+    }
+
+    fn build_adapter_section(&self) -> iced::widget::Column<'_, Message> {
+        let active_label = match &self.active_adapter_preference {
+            None => "Currently active: Auto (wgpu default)".to_string(),
+            Some(adapter) => format!("Currently active: {}", adapter),
+        };
+
+        let pending_restart = match (
+            &self.selected_adapter,
+            self.active_adapter_preference.as_ref(),
+        ) {
+            (GpuAdapterSelection::Auto, None) => false,
+            (GpuAdapterSelection::Named(adapter), Some(active)) => {
+                !adapter.name.eq_ignore_ascii_case(&active.name)
+            }
+            _ => true,
+        };
+
+        let adapter_options = adapters::build_picker_options(&self.available_adapters);
+        let mut adapter_col = column![
+            row![
+                text("GPU Adapter").size(18).color(theme::TEXT),
+                tooltip(
+                    "🛈",
+                    container(
+                        #[cfg(target_os = "linux")]
+                        text(
+                            "On hybrid GPU systems, selecting the correct adapter can improve performance \
+                            and compatibility. If unsure, start with 'Auto' or match the adapter used by \
+                            your Wayland compositor.",
+                        ),
+                        #[cfg(not(target_os = "linux"))]
+                        text(
+                            "Selecting the correct GPU adapter can improve performance and compatibility. \
+                            If unsure, 'Auto' is a good choice.",
+                        )
+                    )
+                    .padding(10)
+                    .style(container::rounded_box),
+                    tooltip::Position::Bottom,
+                )
+                .style(theme::styled_tooltip)
+            ]
+            .spacing(5),
+            pick_list(
+                adapter_options,
+                Some(&self.selected_adapter),
+                Message::AdapterSelected,
+            )
+            .style(theme::styled_pick_list)
+            .width(Fill),
+            text(active_label).size(12).color(theme::TEXT_DIM),
+        ]
+        .spacing(10);
+
+        if pending_restart {
+            adapter_col = adapter_col.push(
+                row![
+                    text("Restart required for this change to take effect.")
+                        .size(12)
+                        .color(theme::WARNING),
+                    button(text("Restart now").size(12))
+                        .on_press(Message::RestartApp)
+                        .style(theme::styled_button)
+                        .padding([4, 12]),
+                ]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+
+        adapter_col
+    }
+
+    #[cfg(target_os = "linux")]
+    fn build_backend_section(&self) -> iced::widget::Column<'_, Message> {
+        let available_backends = &self.available_backends;
+        let selected_backend = self.available_backends.get(self.selected_backend_index);
+        column![
+            text("Video Processing").size(18).color(theme::TEXT),
+            pick_list(
+                available_backends.as_slice(),
+                selected_backend,
+                |backend: GpuBackend| {
+                    let idx = available_backends
+                        .iter()
+                        .position(|b| b == &backend)
+                        .unwrap_or(0);
+                    Message::BackendSelected(idx)
+                },
+            )
+            .style(theme::styled_pick_list)
+            .width(Fill),
+            text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")
+                .size(12)
+                .color(theme::TEXT_DIM),
+        ]
+        .spacing(10)
+    }
 }

@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use iced::widget::{button, container, pick_list, rule, theme};
-use iced::{color, Background, Border, Color, Shadow, Theme, border::Radius};
+use iced::{Background, Border, Color, Shadow, Theme, border::Radius, color};
 
 use crate::app::Cocuyo;
 
@@ -226,5 +226,115 @@ pub fn styled_tooltip(_theme: &Theme) -> container::Style {
         border: rounded_border(BORDER, 6.0),
         shadow: Shadow::default(),
         snap: false,
+    }
+}
+
+// ── Picker ──────────────────────────────────────────────────
+
+pub fn picker_item(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Active => button::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            text_color: TEXT,
+            border: rounded_border(Color::TRANSPARENT, 4.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: TEXT,
+            border: rounded_border(BORDER, 4.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(ACCENT_DIM)),
+            text_color: BG,
+            border: rounded_border(ACCENT, 4.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            text_color: ACCENT_DIM,
+            border: rounded_border(Color::TRANSPARENT, 4.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+    }
+}
+
+pub fn picker_item_selected(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Active | button::Status::Hovered | button::Status::Pressed => {
+            button::Style {
+                background: Some(Background::Color(ACCENT_DIM)),
+                text_color: TEXT,
+                border: rounded_border(ACCENT, 4.0),
+                shadow: Shadow::default(),
+                snap: false,
+            }
+        }
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(ACCENT_DIM)),
+            text_color: TEXT,
+            border: rounded_border(ACCENT, 4.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+    }
+}
+
+pub fn picker_tab(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Active => button::Style {
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: TEXT_DIM,
+            border: rounded_border(BORDER, 6.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(ACCENT)),
+            text_color: BG,
+            border: rounded_border(ACCENT, 6.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(ACCENT_DIM)),
+            text_color: BG,
+            border: rounded_border(ACCENT, 6.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: ACCENT_DIM,
+            border: rounded_border(BORDER, 6.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
+    }
+}
+
+pub fn picker_tab_active(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Active | button::Status::Hovered | button::Status::Pressed => {
+            button::Style {
+                background: Some(Background::Color(ACCENT)),
+                text_color: BG,
+                border: rounded_border(ACCENT, 6.0),
+                shadow: Shadow::default(),
+                snap: false,
+            }
+        }
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(BG_SECONDARY)),
+            text_color: ACCENT_DIM,
+            border: rounded_border(BORDER, 6.0),
+            shadow: Shadow::default(),
+            snap: false,
+        },
     }
 }

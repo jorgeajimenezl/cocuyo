@@ -1,15 +1,13 @@
+use iced::Fill;
 use iced::widget::{button, container, mouse_area, row, text};
 use iced::window;
-use iced::Fill;
 
 use crate::app::Message;
 use crate::theme;
 use crate::widget::Element;
 
 pub fn view<'a>(window_id: window::Id, title: &str) -> Element<'a, Message> {
-    let title_text = text(title.to_string())
-        .size(14)
-        .color(theme::TEXT);
+    let title_text = text(title.to_string()).size(14).color(theme::TEXT);
 
     let minimize_btn = button(text("_").size(12))
         .on_press(Message::MinimizeWindow(window_id))
@@ -37,9 +35,7 @@ pub fn view<'a>(window_id: window::Id, title: &str) -> Element<'a, Message> {
     .align_y(iced::Center)
     .padding([6, 12]);
 
-    let bar_container = container(bar)
-        .width(Fill)
-        .style(theme::title_bar_container);
+    let bar_container = container(bar).width(Fill).style(theme::title_bar_container);
 
     mouse_area(bar_container)
         .on_press(Message::DragWindow(window_id))

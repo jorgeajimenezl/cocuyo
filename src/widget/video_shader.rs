@@ -1,13 +1,18 @@
+#[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
 use drm_fourcc::DrmFourcc;
 use iced::widget::shader;
 use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
 use crate::frame::FrameData;
+#[cfg(target_os = "linux")]
 use crate::platform::linux::vulkan_dmabuf;
+#[cfg(target_os = "windows")]
+use crate::platform::windows::dx12_import;
 
 /// Scene data passed to the shader widget each frame.
 pub struct VideoScene {
@@ -16,6 +21,7 @@ pub struct VideoScene {
 
 /// Extracted frame information for the shader primitive.
 enum FrameInfo {
+    #[cfg(target_os = "linux")]
     DmaBuf {
         fd: std::os::fd::RawFd,
         width: u32,
@@ -23,6 +29,12 @@ enum FrameInfo {
         drm_format: DrmFourcc,
         stride: u32,
         offset: u32,
+    },
+    #[cfg(target_os = "windows")]
+    D3DShared {
+        shared_handle: isize,
+        width: u32,
+        height: u32,
     },
     Cpu {
         data: Arc<Vec<u8>>,
@@ -34,6 +46,7 @@ enum FrameInfo {
 impl VideoScene {
     pub fn new(frame: Option<&FrameData>) -> Self {
         let frame = frame.map(|f| match f {
+            #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
                 fd,
                 width,
@@ -49,6 +62,16 @@ impl VideoScene {
                 drm_format: *drm_format,
                 stride: *stride,
                 offset: *offset,
+            },
+            #[cfg(target_os = "windows")]
+            FrameData::D3DShared {
+                slot,
+                width,
+                height,
+            } => FrameInfo::D3DShared {
+                shared_handle: slot.shared_handle.0 as isize,
+                width: *width,
+                height: *height,
             },
             FrameData::Cpu {
                 data,
@@ -76,6 +99,7 @@ impl<Message> shader::Program<Message> for VideoScene {
         bounds: Rectangle,
     ) -> Self::Primitive {
         match &self.frame {
+            #[cfg(target_os = "linux")]
             Some(FrameInfo::DmaBuf {
                 fd,
                 width,
@@ -90,6 +114,17 @@ impl<Message> shader::Program<Message> for VideoScene {
                 drm_format: *drm_format,
                 stride: *stride,
                 offset: *offset,
+                bounds,
+            },
+            #[cfg(target_os = "windows")]
+            Some(FrameInfo::D3DShared {
+                shared_handle,
+                width,
+                height,
+            }) => VideoPrimitive::D3DShared {
+                shared_handle: *shared_handle,
+                width: *width,
+                height: *height,
                 bounds,
             },
             Some(FrameInfo::Cpu {
@@ -110,6 +145,7 @@ impl<Message> shader::Program<Message> for VideoScene {
 /// Primitive that carries per-frame data to the GPU pipeline.
 #[derive(Debug)]
 pub enum VideoPrimitive {
+    #[cfg(target_os = "linux")]
     DmaBuf {
         fd: std::os::fd::RawFd,
         width: u32,
@@ -117,6 +153,13 @@ pub enum VideoPrimitive {
         drm_format: DrmFourcc,
         stride: u32,
         offset: u32,
+        bounds: Rectangle,
+    },
+    #[cfg(target_os = "windows")]
+    D3DShared {
+        shared_handle: isize,
+        width: u32,
+        height: u32,
         bounds: Rectangle,
     },
     Cpu {
@@ -140,6 +183,7 @@ impl shader::Primitive for VideoPrimitive {
         _viewport: &iced::advanced::graphics::Viewport,
     ) {
         match self {
+            #[cfg(target_os = "linux")]
             VideoPrimitive::DmaBuf {
                 fd,
                 width,
@@ -158,6 +202,22 @@ impl shader::Primitive for VideoPrimitive {
                     *drm_format,
                     *stride,
                     *offset,
+                    *bounds,
+                );
+            }
+            #[cfg(target_os = "windows")]
+            VideoPrimitive::D3DShared {
+                shared_handle,
+                width,
+                height,
+                bounds,
+            } => {
+                pipeline.prepare_d3d_shared(
+                    device,
+                    queue,
+                    *shared_handle,
+                    *width,
+                    *height,
                     *bounds,
                 );
             }
@@ -215,11 +275,7 @@ struct Uniforms {
 }
 
 impl shader::Pipeline for VideoPipeline {
-    fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("video_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("video_shader.wgsl").into()),
@@ -351,8 +407,7 @@ impl VideoPipeline {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 }),
                 width,
@@ -364,6 +419,7 @@ impl VideoPipeline {
         &self.cached_texture.as_ref().unwrap().texture
     }
 
+    #[cfg(target_os = "linux")]
     fn prepare_dmabuf(
         &mut self,
         device: &wgpu::Device,
@@ -378,13 +434,7 @@ impl VideoPipeline {
     ) {
         let result = unsafe {
             vulkan_dmabuf::import_dmabuf_texture(
-                device,
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
+                device, fd, width, height, drm_format, stride, offset,
             )
         };
 
@@ -395,11 +445,9 @@ impl VideoPipeline {
                 let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
 
                 // Copy imported DMA-BUF texture → local texture
-                let mut encoder = device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor {
-                        label: Some("dmabuf_copy"),
-                    },
-                );
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("dmabuf_copy"),
+                });
                 let copy_size = wgpu::Extent3d {
                     width,
                     height,
@@ -448,6 +496,81 @@ impl VideoPipeline {
                     "DMA-BUF Vulkan import failed, disabling for future frames"
                 );
                 vulkan_dmabuf::mark_dmabuf_import_failed();
+                self.current_bind_group = None;
+                self.cached_texture = None;
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn prepare_d3d_shared(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        shared_handle: isize,
+        width: u32,
+        height: u32,
+        bounds: Rectangle,
+    ) {
+        use windows::Win32::Foundation::HANDLE;
+
+        let handle = HANDLE(shared_handle as *mut core::ffi::c_void);
+        let result = unsafe { dx12_import::import_shared_texture(device, handle, width, height) };
+
+        match result {
+            Ok((imported_texture, wgpu_format)) => {
+                // Reuse the local GPU texture across frames when resolution is unchanged.
+                // The copy decouples rendering from the shared texture lifetime.
+                let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
+
+                // Copy imported shared texture → local texture
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("d3d_shared_copy"),
+                });
+                let copy_size = wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                };
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &imported_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: local_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    copy_size,
+                );
+
+                // Submit immediately so the GPU copy is in-flight before we
+                // drop the imported texture.
+                queue.submit(std::iter::once(encoder.finish()));
+
+                // Use the local texture for rendering. imported_texture is dropped
+                // here — wgpu defers the DX12 resource cleanup until the GPU
+                // finishes the copy command submitted above.
+                let view = self
+                    .cached_texture
+                    .as_ref()
+                    .unwrap()
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                self.update_bind_group(device, queue, &view, width, height, bounds);
+            }
+            Err(e) => {
+                error!(
+                    error = %e,
+                    width,
+                    height,
+                    "D3D shared texture import failed, disabling for future frames"
+                );
+                dx12_import::mark_d3d_shared_import_failed();
                 self.current_bind_group = None;
                 self.cached_texture = None;
             }
