@@ -31,7 +31,7 @@ fn main() -> iced::Result {
             std::env::set_var("WGPU_BACKEND", adapter.backend.to_string());
         };
 
-        info!(adapter = %adapter.name, "Set WGPU_ADAPTER_NAME and WGPU_BACKEND from config");        
+        info!(adapter = %adapter, "Set WGPU_ADAPTER_NAME and WGPU_BACKEND from config");        
     }
 
     #[cfg(target_os = "linux")]
