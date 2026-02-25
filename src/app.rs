@@ -13,7 +13,7 @@ use crate::config::AppConfig;
 use crate::frame::FrameData;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
-use crate::sampling::SamplingStrategy;
+use crate::sampling::BoxedStrategy;
 use crate::screen::WindowKind;
 use crate::screen::bulb_setup;
 use crate::screen::settings;
@@ -58,7 +58,7 @@ pub enum Message {
     BulbStatesSaved(Vec<SavedBulbState>),
     RecordingEvent(RecordingEvent),
     RegionUpdate(RegionMessage),
-    RegionStrategyChanged(usize, SamplingStrategy),
+    RegionStrategyChanged(usize, BoxedStrategy),
 
     // Delegated screens
     Settings(settings::Message),
@@ -353,7 +353,7 @@ impl Cocuyo {
                                             region.y,
                                             region.width,
                                             region.height,
-                                            region.strategy,
+                                            &region.strategy,
                                         );
                                     }
 
@@ -635,7 +635,7 @@ impl Cocuyo {
                 height: default_h,
                 bulb_mac: mac.clone(),
                 sampled_color: None,
-                strategy: SamplingStrategy::default(),
+                strategy: BoxedStrategy::default(),
             };
             self.next_region_id += 1;
             self.regions.push(region);

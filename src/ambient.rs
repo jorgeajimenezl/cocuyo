@@ -128,7 +128,7 @@ pub fn sample_frame_for_regions(
             region.y,
             region.width,
             region.height,
-            region.strategy,
+            &region.strategy,
         ) else {
             continue;
         };
