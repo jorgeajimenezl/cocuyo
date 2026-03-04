@@ -329,47 +329,41 @@ impl GpuSampler {
                     let x1 = ((region.x + region.width) as u32).min(width);
                     let y1 = ((region.y + region.height) as u32).min(height);
 
-                    let bind_group =
-                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("gpu_sampler_bg"),
-                            layout: &self.bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&imported.view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Buffer(
-                                        wgpu::BufferBinding {
-                                            buffer: &self.params_buffer,
-                                            offset: (slot * self.params_stride) as u64,
-                                            size: Some(params_elem_size),
-                                        },
-                                    ),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::Buffer(
-                                        wgpu::BufferBinding {
-                                            buffer: &self.result_buffer,
-                                            offset: (slot * self.result_stride) as u64,
-                                            size: Some(result_elem_size),
-                                        },
-                                    ),
-                                },
-                            ],
-                        });
+                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("gpu_sampler_bg"),
+                        layout: &self.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&imported.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &self.params_buffer,
+                                    offset: (slot * self.params_stride) as u64,
+                                    size: Some(params_elem_size),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &self.result_buffer,
+                                    offset: (slot * self.result_stride) as u64,
+                                    size: Some(result_elem_size),
+                                }),
+                            },
+                        ],
+                    });
 
                     let workgroups_x = (x1 - x0).div_ceil(16);
                     let workgroups_y = (y1 - y0).div_ceil(16);
 
                     {
-                        let mut pass =
-                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("gpu_average_pass"),
-                                timestamp_writes: None,
-                            });
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("gpu_average_pass"),
+                            timestamp_writes: None,
+                        });
                         pass.set_pipeline(&self.average_pipeline);
                         pass.set_bind_group(0, &bind_group, &[]);
                         pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
@@ -389,8 +383,7 @@ impl GpuSampler {
                 self.queue.submit(std::iter::once(encoder.finish()));
 
                 // Single map + poll
-                let readback_slice =
-                    self.readback_buffer.slice(..result_total);
+                let readback_slice = self.readback_buffer.slice(..result_total);
                 let (sender, mut receiver) = futures::channel::oneshot::channel();
                 readback_slice.map_async(wgpu::MapMode::Read, move |result| {
                     let _ = sender.send(result);
@@ -446,10 +439,7 @@ impl GpuSampler {
 
     /// Import a frame as a GPU texture, returning a view and optional pending
     /// texture copy to be recorded into the caller's command encoder.
-    fn import_frame(
-        &mut self,
-        frame: &Arc<FrameData>,
-    ) -> Result<ImportedFrame, GpuSamplerError> {
+    fn import_frame(&mut self, frame: &Arc<FrameData>) -> Result<ImportedFrame, GpuSamplerError> {
         match frame.as_ref() {
             #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
@@ -582,8 +572,7 @@ impl GpuSampler {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &view_formats,
                 }),
                 width,

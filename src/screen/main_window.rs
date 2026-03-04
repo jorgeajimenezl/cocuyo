@@ -166,12 +166,13 @@ pub fn view<'a>(
                 };
 
                 let region_id = r.id;
-                let strategy_picker =
-                    pick_list(sampling::all_strategies(), Some(r.strategy.clone()), move |s| {
-                        Message::RegionStrategyChanged(region_id, s)
-                    })
-                    .text_size(11)
-                    .style(theme::styled_pick_list);
+                let strategy_picker = pick_list(
+                    sampling::all_strategies(),
+                    Some(r.strategy.clone()),
+                    move |s| Message::RegionStrategyChanged(region_id, s),
+                )
+                .text_size(11)
+                .style(theme::styled_pick_list);
 
                 column![
                     row![color_indicator, text(label).size(12).color(theme::TEXT),]

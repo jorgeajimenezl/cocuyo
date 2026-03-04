@@ -1,4 +1,4 @@
-use super::{luminance_u32, SamplingStrategy};
+use super::{SamplingStrategy, luminance_u32};
 
 /// Finds the darkest pixel by luminance.
 #[derive(Debug)]

@@ -234,28 +234,16 @@ mod tests {
     #[test]
     fn zero_sized_region_returns_none() {
         let frame = make_2x2();
-        assert_eq!(
-            sample_region(&frame, 0.0, 0.0, 0.0, 0.0, &average()),
-            None
-        );
-        assert_eq!(
-            sample_region(&frame, 0.0, 0.0, 0.0, 1.0, &average()),
-            None
-        );
-        assert_eq!(
-            sample_region(&frame, 0.0, 0.0, 1.0, 0.0, &average()),
-            None
-        );
+        assert_eq!(sample_region(&frame, 0.0, 0.0, 0.0, 0.0, &average()), None);
+        assert_eq!(sample_region(&frame, 0.0, 0.0, 0.0, 1.0, &average()), None);
+        assert_eq!(sample_region(&frame, 0.0, 0.0, 1.0, 0.0, &average()), None);
     }
 
     #[test]
     fn out_of_bounds_region_returns_none() {
         let frame = make_2x2();
         // Region entirely outside the frame
-        assert_eq!(
-            sample_region(&frame, 5.0, 5.0, 1.0, 1.0, &average()),
-            None
-        );
+        assert_eq!(sample_region(&frame, 5.0, 5.0, 1.0, 1.0, &average()), None);
     }
 
     #[test]

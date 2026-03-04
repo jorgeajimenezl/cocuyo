@@ -295,8 +295,10 @@ impl Cocuyo {
                 // Lazily create GPU sampler when ambient starts
                 if self.gpu_sampler.is_none() {
                     if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
-                        self.gpu_sampler =
-                            Some(crate::sampling::gpu::GpuSampler::new(device.clone(), queue.clone()));
+                        self.gpu_sampler = Some(crate::sampling::gpu::GpuSampler::new(
+                            device.clone(),
+                            queue.clone(),
+                        ));
                     }
                 }
                 if !self.is_recording {
@@ -356,11 +358,8 @@ impl Cocuyo {
 
                                 // Try GPU sampling first, fall back to CPU
                                 let gpu_ok = if let Some(ref mut gpu_sampler) = self.gpu_sampler {
-                                    let region_data: Vec<_> = self
-                                        .regions
-                                        .iter()
-                                        .map(|r| (r, &r.strategy))
-                                        .collect();
+                                    let region_data: Vec<_> =
+                                        self.regions.iter().map(|r| (r, &r.strategy)).collect();
 
                                     match gpu_sampler.sample_regions(frame, &region_data) {
                                         Ok(results) => {
@@ -388,15 +387,14 @@ impl Cocuyo {
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
                                         for region in &mut self.regions {
-                                            region.sampled_color =
-                                                crate::sampling::sample_region(
-                                                    sf,
-                                                    region.x,
-                                                    region.y,
-                                                    region.width,
-                                                    region.height,
-                                                    &region.strategy,
-                                                );
+                                            region.sampled_color = crate::sampling::sample_region(
+                                                sf,
+                                                region.x,
+                                                region.y,
+                                                region.width,
+                                                region.height,
+                                                &region.strategy,
+                                            );
                                         }
                                     }
                                 }
