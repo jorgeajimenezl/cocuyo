@@ -229,7 +229,7 @@ impl GpuSampler {
     pub fn sample_regions(
         &mut self,
         frame: &Arc<FrameData>,
-        regions: &[(&crate::region::Region, &super::BoxedStrategy)],
+        regions: &[&crate::region::Region],
     ) -> Result<Vec<Option<(u8, u8, u8)>>, GpuSamplerError> {
         let width = frame.width();
         let height = frame.height();
@@ -238,8 +238,8 @@ impl GpuSampler {
         let mut gpu_indices: Vec<usize> = Vec::new();
         let mut cpu_indices: Vec<usize> = Vec::new();
 
-        for (i, (_region, strategy)) in regions.iter().enumerate() {
-            if strategy.supports_gpu() {
+        for (i, region) in regions.iter().enumerate() {
+            if region.strategy.supports_gpu() {
                 gpu_indices.push(i);
             } else {
                 cpu_indices.push(i);
@@ -258,7 +258,7 @@ impl GpuSampler {
             let mut padded_params = vec![0u8; self.params_stride * gpu_count];
 
             for (slot, &region_idx) in gpu_indices.iter().enumerate() {
-                let (region, _) = &regions[region_idx];
+                let region = &regions[region_idx];
                 let x0 = (region.x as u32).min(width);
                 let y0 = (region.y as u32).min(height);
                 let x1 = ((region.x + region.width) as u32).min(width);
@@ -323,7 +323,7 @@ impl GpuSampler {
                     NonZeroU64::new(std::mem::size_of::<GpuResult>() as u64).unwrap();
 
                 for &(slot, region_idx) in &valid_slots {
-                    let (region, _) = &regions[region_idx];
+                    let region = &regions[region_idx];
                     let x0 = (region.x as u32).min(width);
                     let y0 = (region.y as u32).min(height);
                     let x1 = ((region.x + region.width) as u32).min(width);
@@ -421,14 +421,14 @@ impl GpuSampler {
         if !cpu_indices.is_empty() {
             if let Some(cpu_frame) = frame.convert_to_cpu() {
                 for &i in &cpu_indices {
-                    let (region, strategy) = &regions[i];
+                    let region = &regions[i];
                     results[i] = super::sample_region(
                         &cpu_frame,
                         region.x,
                         region.y,
                         region.width,
                         region.height,
-                        strategy,
+                        &region.strategy,
                     );
                 }
             }

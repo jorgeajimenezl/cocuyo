@@ -358,10 +358,10 @@ impl Cocuyo {
 
                                 // Try GPU sampling first, fall back to CPU
                                 let gpu_ok = if let Some(ref mut gpu_sampler) = self.gpu_sampler {
-                                    let region_data: Vec<_> =
-                                        self.regions.iter().map(|r| (r, &r.strategy)).collect();
+                                    let region_refs: Vec<_> =
+                                        self.regions.iter().collect();
 
-                                    match gpu_sampler.sample_regions(frame, &region_data) {
+                                    match gpu_sampler.sample_regions(frame, &region_refs) {
                                         Ok(results) => {
                                             for (region, color) in
                                                 self.regions.iter_mut().zip(results.into_iter())
