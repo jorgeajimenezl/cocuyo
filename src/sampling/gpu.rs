@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use tracing::info;
@@ -31,6 +32,19 @@ struct CachedTexture {
     format: wgpu::TextureFormat,
 }
 
+/// Result of importing a frame: a texture view plus an optional pending copy
+/// that must be recorded into the command encoder before compute dispatches.
+struct ImportedFrame {
+    view: wgpu::TextureView,
+    pending_copy: Option<PendingCopy>,
+}
+
+struct PendingCopy {
+    src: wgpu::Texture,
+    width: u32,
+    height: u32,
+}
+
 pub struct GpuSampler {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -39,6 +53,9 @@ pub struct GpuSampler {
     params_buffer: wgpu::Buffer,
     result_buffer: wgpu::Buffer,
     readback_buffer: wgpu::Buffer,
+    params_stride: usize,
+    result_stride: usize,
+    buffer_capacity: usize,
     cached_texture: Option<CachedTexture>,
 }
 
@@ -55,6 +72,12 @@ impl std::fmt::Display for GpuSamplerError {
             Self::MapFailed => write!(f, "buffer mapping failed"),
         }
     }
+}
+
+/// Round `size` up to the next multiple of `alignment`.
+fn aligned_stride(size: usize, alignment: u32) -> usize {
+    let align = alignment as usize;
+    (size + align - 1) / align * align
 }
 
 impl GpuSampler {
@@ -115,25 +138,36 @@ impl GpuSampler {
             cache: None,
         });
 
+        let limits = device.limits();
+        let params_stride = aligned_stride(
+            std::mem::size_of::<Params>(),
+            limits.min_uniform_buffer_offset_alignment,
+        );
+        let result_stride = aligned_stride(
+            std::mem::size_of::<GpuResult>(),
+            limits.min_storage_buffer_offset_alignment,
+        );
+        let buffer_capacity = 1;
+
         let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_sampler_params"),
-            size: std::mem::size_of::<Params>() as u64,
+            size: (params_stride * buffer_capacity) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let result_size = std::mem::size_of::<GpuResult>() as u64;
-
         let result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_sampler_result"),
-            size: result_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            size: (result_stride * buffer_capacity) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_sampler_readback"),
-            size: result_size,
+            size: (result_stride * buffer_capacity) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -148,14 +182,50 @@ impl GpuSampler {
             params_buffer,
             result_buffer,
             readback_buffer,
+            params_stride,
+            result_stride,
+            buffer_capacity,
             cached_texture: None,
         }
     }
 
+    /// Ensure buffers are large enough for `count` regions.
+    fn ensure_buffers(&mut self, count: usize) {
+        if count <= self.buffer_capacity {
+            return;
+        }
+
+        self.params_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpu_sampler_params"),
+            size: (self.params_stride * count) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.result_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpu_sampler_result"),
+            size: (self.result_stride * count) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpu_sampler_readback"),
+            size: (self.result_stride * count) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.buffer_capacity = count;
+    }
+
     /// Sample multiple regions from a frame. Returns one result per region.
     ///
-    /// Regions with GPU-capable strategies (Average) run on the GPU compute path.
-    /// Regions with CPU-only strategies fall back to `convert_to_cpu()` + CPU sampling.
+    /// Regions with GPU-capable strategies (Average) are batched into a single
+    /// GPU submission. Regions with CPU-only strategies fall back to
+    /// `convert_to_cpu()` + CPU sampling.
     pub fn sample_regions(
         &mut self,
         frame: &Arc<FrameData>,
@@ -176,12 +246,19 @@ impl GpuSampler {
             }
         }
 
-        // GPU path for supported strategies
+        // GPU path: batch all GPU-capable regions into a single submission
         if !gpu_indices.is_empty() {
-            let texture_view = self.import_frame(frame)?;
+            let gpu_count = gpu_indices.len();
+            self.ensure_buffers(gpu_count);
 
-            for &i in &gpu_indices {
-                let (region, _strategy) = &regions[i];
+            let imported = self.import_frame(frame)?;
+
+            // Build region params and collect valid regions
+            let mut valid_slots: Vec<(usize, usize)> = Vec::new(); // (slot, region_idx)
+            let mut padded_params = vec![0u8; self.params_stride * gpu_count];
+
+            for (slot, &region_idx) in gpu_indices.iter().enumerate() {
+                let (region, _) = &regions[region_idx];
                 let x0 = (region.x as u32).min(width);
                 let y0 = (region.y as u32).min(height);
                 let x1 = ((region.x + region.width) as u32).min(width);
@@ -191,7 +268,159 @@ impl GpuSampler {
                     continue;
                 }
 
-                results[i] = self.dispatch_average(&texture_view, x0, y0, x1, y1)?;
+                let params = Params { x0, y0, x1, y1 };
+                let offset = slot * self.params_stride;
+                padded_params[offset..offset + std::mem::size_of::<Params>()]
+                    .copy_from_slice(bytemuck::bytes_of(&params));
+                valid_slots.push((slot, region_idx));
+            }
+
+            if !valid_slots.is_empty() {
+                self.queue.write_buffer(
+                    &self.params_buffer,
+                    0,
+                    &padded_params[..self.params_stride * gpu_count],
+                );
+
+                let mut encoder =
+                    self.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("gpu_sampler_batch"),
+                        });
+
+                // Record pending texture copy into this encoder
+                if let Some(copy) = &imported.pending_copy {
+                    let ct = self.cached_texture.as_ref().unwrap();
+                    encoder.copy_texture_to_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &copy.src,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::TexelCopyTextureInfo {
+                            texture: &ct.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::Extent3d {
+                            width: copy.width,
+                            height: copy.height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
+
+                // Clear all result slots
+                let result_total = (self.result_stride * gpu_count) as u64;
+                encoder.clear_buffer(&self.result_buffer, 0, Some(result_total));
+
+                // Record one compute pass per region (all in the same encoder)
+                let params_elem_size =
+                    NonZeroU64::new(std::mem::size_of::<Params>() as u64).unwrap();
+                let result_elem_size =
+                    NonZeroU64::new(std::mem::size_of::<GpuResult>() as u64).unwrap();
+
+                for &(slot, region_idx) in &valid_slots {
+                    let (region, _) = &regions[region_idx];
+                    let x0 = (region.x as u32).min(width);
+                    let y0 = (region.y as u32).min(height);
+                    let x1 = ((region.x + region.width) as u32).min(width);
+                    let y1 = ((region.y + region.height) as u32).min(height);
+
+                    let bind_group =
+                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("gpu_sampler_bg"),
+                            layout: &self.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&imported.view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Buffer(
+                                        wgpu::BufferBinding {
+                                            buffer: &self.params_buffer,
+                                            offset: (slot * self.params_stride) as u64,
+                                            size: Some(params_elem_size),
+                                        },
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Buffer(
+                                        wgpu::BufferBinding {
+                                            buffer: &self.result_buffer,
+                                            offset: (slot * self.result_stride) as u64,
+                                            size: Some(result_elem_size),
+                                        },
+                                    ),
+                                },
+                            ],
+                        });
+
+                    let workgroups_x = (x1 - x0).div_ceil(16);
+                    let workgroups_y = (y1 - y0).div_ceil(16);
+
+                    {
+                        let mut pass =
+                            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("gpu_average_pass"),
+                                timestamp_writes: None,
+                            });
+                        pass.set_pipeline(&self.average_pipeline);
+                        pass.set_bind_group(0, &bind_group, &[]);
+                        pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+                    }
+                }
+
+                // Single copy from result to readback
+                encoder.copy_buffer_to_buffer(
+                    &self.result_buffer,
+                    0,
+                    &self.readback_buffer,
+                    0,
+                    result_total,
+                );
+
+                // Single submit
+                self.queue.submit(std::iter::once(encoder.finish()));
+
+                // Single map + poll
+                let readback_slice =
+                    self.readback_buffer.slice(..result_total);
+                let (sender, mut receiver) = futures::channel::oneshot::channel();
+                readback_slice.map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = sender.send(result);
+                });
+                let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+
+                receiver
+                    .try_recv()
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r.ok())
+                    .ok_or(GpuSamplerError::MapFailed)?;
+
+                // Read all results at stride offsets
+                let mapped = readback_slice.get_mapped_range();
+                for &(slot, region_idx) in &valid_slots {
+                    let offset = slot * self.result_stride;
+                    let result: GpuResult = *bytemuck::from_bytes(
+                        &mapped[offset..offset + std::mem::size_of::<GpuResult>()],
+                    );
+                    if result.count > 0 {
+                        results[region_idx] = Some((
+                            (result.r_sum / result.count) as u8,
+                            (result.g_sum / result.count) as u8,
+                            (result.b_sum / result.count) as u8,
+                        ));
+                    }
+                }
+                drop(mapped);
+                self.readback_buffer.unmap();
             }
         }
 
@@ -215,11 +444,12 @@ impl GpuSampler {
         Ok(results)
     }
 
-    /// Import a frame as a GPU texture, returning a non-sRGB texture view.
+    /// Import a frame as a GPU texture, returning a view and optional pending
+    /// texture copy to be recorded into the caller's command encoder.
     fn import_frame(
         &mut self,
         frame: &Arc<FrameData>,
-    ) -> Result<wgpu::TextureView, GpuSamplerError> {
+    ) -> Result<ImportedFrame, GpuSamplerError> {
         match frame.as_ref() {
             #[cfg(target_os = "linux")]
             FrameData::DmaBuf {
@@ -246,9 +476,18 @@ impl GpuSampler {
                 .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
 
                 self.ensure_texture(*width, *height, wgpu_format);
-                let ct = self.cached_texture.as_ref().unwrap();
-                copy_texture(&self.device, &self.queue, &imported, &ct.texture, *width, *height);
-                Ok(create_non_srgb_view(&ct.texture, wgpu_format))
+                let view = create_non_srgb_view(
+                    &self.cached_texture.as_ref().unwrap().texture,
+                    wgpu_format,
+                );
+                Ok(ImportedFrame {
+                    view,
+                    pending_copy: Some(PendingCopy {
+                        src: imported,
+                        width: *width,
+                        height: *height,
+                    }),
+                })
             }
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
@@ -269,9 +508,18 @@ impl GpuSampler {
                 .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
 
                 self.ensure_texture(*width, *height, wgpu_format);
-                let ct = self.cached_texture.as_ref().unwrap();
-                copy_texture(&self.device, &self.queue, &imported, &ct.texture, *width, *height);
-                Ok(create_non_srgb_view(&ct.texture, wgpu_format))
+                let view = create_non_srgb_view(
+                    &self.cached_texture.as_ref().unwrap().texture,
+                    wgpu_format,
+                );
+                Ok(ImportedFrame {
+                    view,
+                    pending_copy: Some(PendingCopy {
+                        src: imported,
+                        width: *width,
+                        height: *height,
+                    }),
+                })
             }
             FrameData::Cpu {
                 data,
@@ -300,7 +548,10 @@ impl GpuSampler {
                         depth_or_array_layers: 1,
                     },
                 );
-                Ok(create_non_srgb_view(&ct.texture, format))
+                Ok(ImportedFrame {
+                    view: create_non_srgb_view(&ct.texture, format),
+                    pending_copy: None,
+                })
             }
         }
     }
@@ -331,7 +582,8 @@ impl GpuSampler {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
                     view_formats: &view_formats,
                 }),
                 width,
@@ -340,139 +592,13 @@ impl GpuSampler {
             });
         }
     }
-
-    /// Dispatch the average compute shader for a single region and read back the result.
-    fn dispatch_average(
-        &self,
-        texture_view: &wgpu::TextureView,
-        x0: u32,
-        y0: u32,
-        x1: u32,
-        y1: u32,
-    ) -> Result<Option<(u8, u8, u8)>, GpuSamplerError> {
-        let params = Params { x0, y0, x1, y1 };
-
-        self.queue
-            .write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("gpu_sampler_dispatch"),
-            });
-        encoder.clear_buffer(&self.result_buffer, 0, None);
-
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gpu_sampler_bg"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.result_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        let workgroups_x = (x1 - x0).div_ceil(16);
-        let workgroups_y = (y1 - y0).div_ceil(16);
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("gpu_average_pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.average_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
-        }
-
-        encoder.copy_buffer_to_buffer(
-            &self.result_buffer,
-            0,
-            &self.readback_buffer,
-            0,
-            std::mem::size_of::<GpuResult>() as u64,
-        );
-
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        // Map readback buffer and poll until ready
-        let buffer_slice = self.readback_buffer.slice(..);
-        let (sender, mut receiver) = futures::channel::oneshot::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-
-        receiver
-            .try_recv()
-            .ok()
-            .flatten()
-            .and_then(|r| r.ok())
-            .ok_or(GpuSamplerError::MapFailed)?;
-
-        let data = buffer_slice.get_mapped_range();
-        let result: GpuResult = *bytemuck::from_bytes(&data);
-        drop(data);
-        self.readback_buffer.unmap();
-
-        if result.count == 0 {
-            return Ok(None);
-        }
-
-        Ok(Some((
-            (result.r_sum / result.count) as u8,
-            (result.g_sum / result.count) as u8,
-            (result.b_sum / result.count) as u8,
-        )))
-    }
-}
-
-/// Copy from an imported texture to the local cached texture and submit immediately.
-fn copy_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    src: &wgpu::Texture,
-    dst: &wgpu::Texture,
-    width: u32,
-    height: u32,
-) {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("gpu_sampler_copy"),
-    });
-    let size = wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    };
-    encoder.copy_texture_to_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: src,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyTextureInfo {
-            texture: dst,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        size,
-    );
-    queue.submit(std::iter::once(encoder.finish()));
 }
 
 /// Create a non-sRGB texture view so `textureLoad` returns raw byte values.
-fn create_non_srgb_view(texture: &wgpu::Texture, original_format: wgpu::TextureFormat) -> wgpu::TextureView {
+fn create_non_srgb_view(
+    texture: &wgpu::Texture,
+    original_format: wgpu::TextureFormat,
+) -> wgpu::TextureView {
     let view_format = non_srgb_equivalent(original_format);
     texture.create_view(&wgpu::TextureViewDescriptor {
         format: Some(view_format),
