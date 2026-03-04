@@ -1,4 +1,5 @@
 mod average;
+pub mod gpu;
 mod max;
 mod min;
 
@@ -39,6 +40,11 @@ pub trait SamplingStrategy: Send + Sync + fmt::Debug {
         y1: u32,
         stride: u32,
     ) -> Option<(u8, u8, u8)>;
+
+    /// Whether this strategy supports GPU-accelerated sampling via compute shaders.
+    fn supports_gpu(&self) -> bool {
+        false
+    }
 }
 
 /// Integer luminance: 299*R + 587*G + 114*B (scaled by 1000 vs the float
@@ -73,6 +79,10 @@ impl BoxedStrategy {
         stride: u32,
     ) -> Option<(u8, u8, u8)> {
         self.0.sample(data, width, x0, y0, x1, y1, stride)
+    }
+
+    pub fn supports_gpu(&self) -> bool {
+        self.0.supports_gpu()
     }
 }
 

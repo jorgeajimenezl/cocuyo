@@ -13,6 +13,10 @@ impl SamplingStrategy for Average {
         "Average"
     }
 
+    fn supports_gpu(&self) -> bool {
+        true
+    }
+
     fn sample(
         &self,
         data: &[u8],

@@ -86,6 +86,8 @@ pub struct Cocuyo {
     selected_region: Option<usize>,
     config: AppConfig,
 
+    gpu_sampler: Option<crate::sampling::gpu::GpuSampler>,
+
     // Screen state
     settings: settings::Settings,
     #[cfg(target_os = "windows")]
@@ -110,6 +112,7 @@ impl Cocuyo {
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
+            gpu_sampler: None,
             settings: settings::Settings::new(&config),
             config,
             #[cfg(target_os = "windows")]
@@ -288,6 +291,14 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
+
+                // Lazily create GPU sampler when ambient starts
+                if self.gpu_sampler.is_none() {
+                    if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
+                        self.gpu_sampler =
+                            Some(crate::sampling::gpu::GpuSampler::new(device.clone(), queue.clone()));
+                    }
+                }
                 if !self.is_recording {
                     #[cfg(target_os = "linux")]
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
@@ -343,30 +354,61 @@ impl Cocuyo {
                                     return Task::none();
                                 }
 
-                                let sampling_frame = frame.convert_to_cpu();
+                                // Try GPU sampling first, fall back to CPU
+                                let gpu_ok = if let Some(ref mut gpu_sampler) = self.gpu_sampler {
+                                    let region_data: Vec<_> = self
+                                        .regions
+                                        .iter()
+                                        .map(|r| (r, &r.strategy))
+                                        .collect();
 
-                                if let Some(ref sf) = sampling_frame {
-                                    for region in &mut self.regions {
-                                        region.sampled_color = crate::sampling::sample_region(
-                                            sf,
-                                            region.x,
-                                            region.y,
-                                            region.width,
-                                            region.height,
-                                            &region.strategy,
-                                        );
+                                    match gpu_sampler.sample_regions(frame, &region_data) {
+                                        Ok(results) => {
+                                            for (region, color) in
+                                                self.regions.iter_mut().zip(results.into_iter())
+                                            {
+                                                region.sampled_color = color;
+                                            }
+                                            true
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "GPU sampling failed, falling back to CPU"
+                                            );
+                                            self.gpu_sampler = None;
+                                            false
+                                        }
                                     }
+                                } else {
+                                    false
+                                };
 
-                                    if let Some(targets) = crate::ambient::sample_frame_for_regions(
-                                        sf,
-                                        &self.regions,
-                                        self.bulb_setup.discovered_bulbs(),
-                                    ) {
-                                        return Task::perform(
-                                            crate::ambient::dispatch_bulb_colors(targets),
-                                            |()| Message::Noop,
-                                        );
+                                if !gpu_ok {
+                                    let sampling_frame = frame.convert_to_cpu();
+                                    if let Some(ref sf) = sampling_frame {
+                                        for region in &mut self.regions {
+                                            region.sampled_color =
+                                                crate::sampling::sample_region(
+                                                    sf,
+                                                    region.x,
+                                                    region.y,
+                                                    region.width,
+                                                    region.height,
+                                                    &region.strategy,
+                                                );
+                                        }
                                     }
+                                }
+
+                                if let Some(targets) = crate::ambient::build_bulb_targets(
+                                    &self.regions,
+                                    self.bulb_setup.discovered_bulbs(),
+                                ) {
+                                    return Task::perform(
+                                        crate::ambient::dispatch_bulb_colors(targets),
+                                        |()| Message::Noop,
+                                    );
                                 }
                             }
                         }

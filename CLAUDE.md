@@ -31,6 +31,14 @@ cargo update
 cargo clean
 ```
 
+## GPU / wgpu
+
+This is a Rust project using wgpu for GPU compute. When writing wgpu code, verify API names against the actual source/docs before using them - e.g., `PollType` vs `Maintain` changed across versions. Use `Grep` to check existing usage patterns in the codebase first.
+
+## Workflow
+
+Always run `cargo build` and `cargo test` after making changes. Do not consider a task complete until compilation succeeds and tests pass.
+
 ## System Requirements
 
 ### Linux
@@ -156,3 +164,7 @@ For GPU-GPU frame delivery without CPU readback:
 3. Frame sent as `FrameData::D3DShared` with `Arc<SharedTextureSlot>`
 4. The shader widget imports the shared texture into wgpu via DX12 HAL (`dx12_import.rs`)
 5. Keyed mutex ensures GPU synchronization between D3D11 capture and D3D12/wgpu rendering
+
+#### Note:
+
+When dealing with Windows GPU resources (D3D11, DXGI shared textures), pay careful attention to: 1) mutex acquisition before GPU operations, 2) access flags (READ + WRITE), 3) resource lifetime and use-after-free. These have been recurring bug sources.

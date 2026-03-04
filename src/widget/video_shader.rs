@@ -276,6 +276,8 @@ struct Uniforms {
 
 impl shader::Pipeline for VideoPipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        crate::gpu_context::set_gpu_context(device.clone(), _queue.clone());
+
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("video_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("video_shader.wgsl").into()),

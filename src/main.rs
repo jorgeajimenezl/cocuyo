@@ -5,6 +5,7 @@ mod ambient;
 mod app;
 mod config;
 mod frame;
+mod gpu_context;
 mod platform;
 mod recording;
 mod region;
