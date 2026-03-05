@@ -50,6 +50,7 @@ pub enum Message {
     // Main window controls
     OpenSettings(window::Id),
     OpenBulbSetup(window::Id),
+    #[cfg(target_os = "windows")]
     OpenCapturePicker(window::Id, PickerIntent),
     StartRecording,
     StopRecording,
@@ -185,6 +186,7 @@ impl Cocuyo {
                 Size::new(300.0, 200.0),
                 Some(parent),
             ),
+            #[cfg(target_os = "windows")]
             Message::OpenCapturePicker(parent, intent) => {
                 self.capture_picker = Some(capture_picker::CapturePicker::new(intent));
                 self.open_window(

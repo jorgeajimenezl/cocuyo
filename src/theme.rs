@@ -231,6 +231,7 @@ pub fn styled_tooltip(_theme: &Theme) -> container::Style {
 
 // ── Picker ──────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 pub fn picker_item(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
@@ -264,6 +265,7 @@ pub fn picker_item(_theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+#[cfg(target_os = "windows")]
 pub fn picker_item_selected(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active | button::Status::Hovered | button::Status::Pressed => {
@@ -285,6 +287,7 @@ pub fn picker_item_selected(_theme: &Theme, status: button::Status) -> button::S
     }
 }
 
+#[cfg(target_os = "windows")]
 pub fn picker_tab(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
@@ -318,6 +321,7 @@ pub fn picker_tab(_theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+#[cfg(target_os = "windows")]
 pub fn picker_tab_active(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active | button::Status::Hovered | button::Status::Pressed => {
