@@ -44,14 +44,17 @@ pub fn view<'a>(
         (Some(f), Some((fw, fh))) => {
             let video = shader(VideoScene::new(Some(f))).width(Fill).height(Fill);
 
-            let overlay = RegionOverlay::new(regions, fw, fh, selected_region).view();
-
-            stack![video, overlay].width(Fill).height(Fill).into()
+            if is_ambient_active {
+                let overlay = RegionOverlay::new(regions, fw, fh, selected_region).view();
+                stack![video, overlay].width(Fill).height(Fill).into()
+            } else {
+                video.into()
+            }
         }
         _ => center(
             column![
                 text("No capture active").size(20).color(theme::TEXT),
-                text("Start recording or ambient mode to see the preview")
+                text("Start preview or ambient mode to see the capture")
                     .size(14)
                     .color(theme::TEXT_DIM),
             ]
@@ -82,20 +85,20 @@ pub fn view<'a>(
     };
 
     let recording_controls: Element<'_, Message> = if is_ambient_active {
-        text("Recording controlled by ambient")
+        text("Preview controlled by ambient")
             .size(12)
             .color(theme::WARNING)
             .into()
     } else {
         match recording_state {
-            RecordingState::Idle => button("Start Recording")
+            RecordingState::Idle => button("Start Preview")
                 .on_press(Message::StartRecording)
                 .style(theme::styled_button)
                 .into(),
             RecordingState::Starting => text("Starting...").size(12).color(theme::WARNING).into(),
             RecordingState::Recording => column![
-                text("Recording").size(12).color(theme::SUCCESS),
-                button("Stop Recording")
+                text("Previewing").size(12).color(theme::SUCCESS),
+                button("Stop Preview")
                     .on_press(Message::StopRecording)
                     .style(theme::styled_button),
             ]
@@ -190,16 +193,22 @@ pub fn view<'a>(
             .into()
     };
 
-    let controls_panel = column![
+    let mut controls_panel = column![
         text("Controls").size(16).color(theme::TEXT),
         rule::horizontal(1).style(theme::styled_rule),
         ambient_controls,
         rule::horizontal(1).style(theme::styled_rule),
         recording_controls,
         rule::horizontal(1).style(theme::styled_rule),
-        text("Regions").size(14).color(theme::TEXT),
-        region_list,
-    ]
+    ];
+
+    if is_ambient_active {
+        controls_panel = controls_panel
+            .push(text("Regions").size(14).color(theme::TEXT))
+            .push(region_list);
+    }
+
+    let controls_panel = controls_panel
     .spacing(8)
     .padding(10)
     .width(Length::Fixed(250.0))
@@ -229,8 +238,8 @@ pub fn view<'a>(
                     .color(theme::TEXT)
                 }
             }
-            RecordingState::Starting => text("Starting capture...").color(theme::WARNING),
-            RecordingState::Recording => text("Recording").color(theme::SUCCESS),
+            RecordingState::Starting => text("Starting preview...").color(theme::WARNING),
+            RecordingState::Recording => text("Previewing").color(theme::SUCCESS),
             RecordingState::Error(_) => text("Error").color(theme::DANGER),
         }
     };
