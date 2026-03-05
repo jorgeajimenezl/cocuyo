@@ -35,21 +35,27 @@ pub enum BulbColor {
 /// WiZ bulbs expect "pure" colors where the dominant channel is 0xFF.
 /// The original intensity is extracted as brightness (10–100%).
 /// Pure white (all channels equal) is converted to a 6500K temperature command.
-pub fn map_to_bulb_color(r: u8, g: u8, b: u8) -> (BulbColor, u8) {
+pub fn map_to_bulb_color(
+    r: u8,
+    g: u8,
+    b: u8,
+    min_brightness: u8,
+    white_temp: u16,
+) -> (BulbColor, u8) {
     let max = r.max(g).max(b);
     if max == 0 {
         // Screen pixel is black — send dimmest white
-        return (BulbColor::White(6500), 10);
+        return (BulbColor::White(white_temp), min_brightness);
     }
 
-    let brightness = ((max as u16 * 100) / 255).clamp(10, 100) as u8;
+    let brightness = ((max as u16 * 100) / 255).clamp(min_brightness as u16, 100) as u8;
     let scale = 255.0 / max as f64;
     let nr = (r as f64 * scale).round().min(255.0) as u8;
     let ng = (g as f64 * scale).round().min(255.0) as u8;
     let nb = (b as f64 * scale).round().min(255.0) as u8;
 
     if nr == 255 && ng == 255 && nb == 255 {
-        (BulbColor::White(6500), brightness)
+        (BulbColor::White(white_temp), brightness)
     } else {
         (BulbColor::Rgb(nr, ng, nb), brightness)
     }
@@ -114,6 +120,8 @@ pub async fn discover_bulbs() -> Vec<BulbInfo> {
 pub fn build_bulb_targets(
     regions: &[crate::region::Region],
     bulbs: &[BulbInfo],
+    min_brightness: u8,
+    white_temp: u16,
 ) -> Option<Vec<(IpAddr, BulbColor, u8)>> {
     let mut targets = Vec::new();
 
@@ -125,7 +133,7 @@ pub fn build_bulb_targets(
         let Some(bulb) = bulbs.iter().find(|b| &b.mac == mac) else {
             continue;
         };
-        let (color, brightness) = map_to_bulb_color(r, g, b);
+        let (color, brightness) = map_to_bulb_color(r, g, b, min_brightness, white_temp);
         targets.push((bulb.ip, color, brightness));
     }
 

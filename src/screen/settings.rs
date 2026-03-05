@@ -1,6 +1,5 @@
-#[cfg(target_os = "linux")]
 use iced::widget::rule;
-use iced::widget::{button, column, container, pick_list, row, text, tooltip};
+use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, tooltip};
 use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
@@ -17,6 +16,10 @@ pub enum Message {
     BackendSelected(usize),
     AdapterSelected(GpuAdapterSelection),
     RestartApp,
+    ForceCpuSamplingToggled(bool),
+    BulbUpdateIntervalChanged(f32),
+    MinBrightnessChanged(f32),
+    WhiteColorTempChanged(f32),
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +28,10 @@ pub enum Event {
     BackendChanged(Option<String>),
     AdapterChanged(Option<GpuAdapter>),
     RestartApp,
+    ForceCpuSamplingChanged(bool),
+    BulbUpdateIntervalChanged(u64),
+    MinBrightnessChanged(u8),
+    WhiteColorTempChanged(u16),
 }
 
 pub struct Settings {
@@ -35,6 +42,10 @@ pub struct Settings {
     available_adapters: Vec<GpuAdapter>,
     selected_adapter: GpuAdapterSelection,
     active_adapter_preference: Option<GpuAdapter>,
+    force_cpu_sampling: bool,
+    bulb_update_interval_ms: u64,
+    min_brightness_percent: u8,
+    white_color_temp: u16,
 }
 
 impl Settings {
@@ -77,6 +88,10 @@ impl Settings {
             available_adapters,
             selected_adapter,
             active_adapter_preference,
+            force_cpu_sampling: config.force_cpu_sampling,
+            bulb_update_interval_ms: config.bulb_update_interval_ms,
+            min_brightness_percent: config.min_brightness_percent,
+            white_color_temp: config.white_color_temp,
         }
     }
 
@@ -97,11 +112,38 @@ impl Settings {
                 (Task::none(), Some(Event::AdapterChanged(preferred)))
             }
             Message::RestartApp => (Task::none(), Some(Event::RestartApp)),
+            Message::ForceCpuSamplingToggled(val) => {
+                self.force_cpu_sampling = val;
+                (Task::none(), Some(Event::ForceCpuSamplingChanged(val)))
+            }
+            Message::BulbUpdateIntervalChanged(val) => {
+                self.bulb_update_interval_ms = val as u64;
+                (
+                    Task::none(),
+                    Some(Event::BulbUpdateIntervalChanged(val as u64)),
+                )
+            }
+            Message::MinBrightnessChanged(val) => {
+                self.min_brightness_percent = val as u8;
+                (
+                    Task::none(),
+                    Some(Event::MinBrightnessChanged(val as u8)),
+                )
+            }
+            Message::WhiteColorTempChanged(val) => {
+                self.white_color_temp = val as u16;
+                (
+                    Task::none(),
+                    Some(Event::WhiteColorTempChanged(val as u16)),
+                )
+            }
         }
     }
 
     pub fn view(&self) -> Element<'_> {
         let adapter_col = self.build_adapter_section();
+        let sampling_section = self.build_sampling_section();
+        let ambient_section = self.build_ambient_section();
 
         #[cfg(target_os = "linux")]
         let content = {
@@ -110,6 +152,10 @@ impl Settings {
                 adapter_col,
                 rule::horizontal(1).style(theme::styled_rule),
                 backend_section,
+                rule::horizontal(1).style(theme::styled_rule),
+                sampling_section,
+                rule::horizontal(1).style(theme::styled_rule),
+                ambient_section,
             ]
             .spacing(20)
             .width(Fill)
@@ -117,10 +163,16 @@ impl Settings {
         };
 
         #[cfg(not(target_os = "linux"))]
-        let content = column![adapter_col]
-            .spacing(20)
-            .width(Fill)
-            .padding(padding::all(20));
+        let content = column![
+            adapter_col,
+            rule::horizontal(1).style(theme::styled_rule),
+            sampling_section,
+            rule::horizontal(1).style(theme::styled_rule),
+            ambient_section,
+        ]
+        .spacing(20)
+        .width(Fill)
+        .padding(padding::all(20));
 
         container(content)
             .width(Fill)
@@ -234,5 +286,76 @@ impl Settings {
                 .color(theme::TEXT_DIM),
         ]
         .spacing(10)
+    }
+
+    fn build_sampling_section(&self) -> iced::widget::Column<'_, Message> {
+        column![
+            text("Sampling").size(18).color(theme::TEXT),
+            toggler(self.force_cpu_sampling)
+                .label("Force CPU Sampling")
+                .on_toggle(Message::ForceCpuSamplingToggled),
+            text("Disable GPU compute shaders for color sampling. Use if you experience GPU issues.")
+                .size(12)
+                .color(theme::TEXT_DIM),
+        ]
+        .spacing(10)
+    }
+
+    fn build_ambient_section(&self) -> iced::widget::Column<'_, Message> {
+        column![
+            text("Ambient Lighting").size(18).color(theme::TEXT),
+            column![
+                text(format!(
+                    "Bulb Update Interval: {}ms",
+                    self.bulb_update_interval_ms
+                ))
+                .size(14)
+                .color(theme::TEXT),
+                slider(
+                    50.0..=500.0,
+                    self.bulb_update_interval_ms as f32,
+                    Message::BulbUpdateIntervalChanged,
+                )
+                .step(10.0),
+                text("How often colors are sent to bulbs. Lower = more responsive, higher = less network traffic.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            ]
+            .spacing(5),
+            column![
+                text(format!(
+                    "Minimum Brightness: {}%",
+                    self.min_brightness_percent
+                ))
+                .size(14)
+                .color(theme::TEXT),
+                slider(
+                    0.0..=100.0,
+                    self.min_brightness_percent as f32,
+                    Message::MinBrightnessChanged,
+                )
+                .step(1.0),
+                text("Minimum bulb brightness. Set to 0% to allow bulbs to turn fully off.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            ]
+            .spacing(5),
+            column![
+                text(format!("White Color Temperature: {}K", self.white_color_temp))
+                    .size(14)
+                    .color(theme::TEXT),
+                slider(
+                    2700.0..=6500.0,
+                    self.white_color_temp as f32,
+                    Message::WhiteColorTempChanged,
+                )
+                .step(100.0),
+                text("Color temperature used when the sampled color is white or black.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            ]
+            .spacing(5),
+        ]
+        .spacing(15)
     }
 }

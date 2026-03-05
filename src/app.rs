@@ -182,7 +182,7 @@ impl Cocuyo {
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings(parent) => self.open_window(
                 WindowKind::Settings,
-                Size::new(500.0, 500.0),
+                Size::new(500.0, 700.0),
                 Size::new(300.0, 200.0),
                 Some(parent),
             ),
@@ -297,7 +297,7 @@ impl Cocuyo {
                 self.last_bulb_update = None;
 
                 // Lazily spawn GPU sampling worker when ambient starts
-                if self.sampling_worker.is_none() {
+                if self.sampling_worker.is_none() && !self.config.force_cpu_sampling {
                     if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
                         self.sampling_worker =
                             Some(crate::sampling::gpu::SamplingWorker::spawn(
@@ -352,7 +352,7 @@ impl Cocuyo {
                         if self.is_ambient_active {
                             let should_update = self
                                 .last_bulb_update
-                                .map(|t| t.elapsed() >= Duration::from_millis(150))
+                                .map(|t| t.elapsed() >= Duration::from_millis(self.config.bulb_update_interval_ms))
                                 .unwrap_or(true);
 
                             if should_update {
@@ -415,6 +415,8 @@ impl Cocuyo {
                                     if let Some(targets) = crate::ambient::build_bulb_targets(
                                         &self.regions,
                                         self.bulb_setup.discovered_bulbs(),
+                                        self.config.min_brightness_percent,
+                                        self.config.white_color_temp,
                                     ) {
                                         return Task::perform(
                                             crate::ambient::dispatch_bulb_colors(targets),
@@ -442,6 +444,8 @@ impl Cocuyo {
                 if let Some(targets) = crate::ambient::build_bulb_targets(
                     &self.regions,
                     self.bulb_setup.discovered_bulbs(),
+                    self.config.min_brightness_percent,
+                    self.config.white_color_temp,
                 ) {
                     Task::perform(
                         crate::ambient::dispatch_bulb_colors(targets),
@@ -585,6 +589,29 @@ impl Cocuyo {
             settings::Event::RestartApp => {
                 self.spawn_new_instance();
                 iced::exit()
+            }
+            settings::Event::ForceCpuSamplingChanged(val) => {
+                self.config.force_cpu_sampling = val;
+                self.config.save();
+                if val {
+                    self.sampling_worker = None;
+                }
+                Task::none()
+            }
+            settings::Event::BulbUpdateIntervalChanged(ms) => {
+                self.config.bulb_update_interval_ms = ms;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::MinBrightnessChanged(pct) => {
+                self.config.min_brightness_percent = pct;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::WhiteColorTempChanged(temp) => {
+                self.config.white_color_temp = temp;
+                self.config.save();
+                Task::none()
             }
         }
     }

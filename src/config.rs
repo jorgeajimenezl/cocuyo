@@ -12,6 +12,26 @@ pub struct AppConfig {
     pub saved_bulbs: Vec<BulbInfo>,
     #[serde(default)]
     pub selected_bulb_macs: Vec<String>,
+    #[serde(default)]
+    pub force_cpu_sampling: bool,
+    #[serde(default = "default_bulb_update_ms")]
+    pub bulb_update_interval_ms: u64,
+    #[serde(default = "default_min_brightness")]
+    pub min_brightness_percent: u8,
+    #[serde(default = "default_white_temp")]
+    pub white_color_temp: u16,
+}
+
+fn default_bulb_update_ms() -> u64 {
+    150
+}
+
+fn default_min_brightness() -> u8 {
+    10
+}
+
+fn default_white_temp() -> u16 {
+    6500
 }
 
 impl AppConfig {
