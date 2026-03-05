@@ -15,7 +15,6 @@ pub struct RegionParams {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub supports_gpu: bool,
     pub strategy: BoxedStrategy,
 }
 
@@ -432,7 +431,7 @@ impl GpuSampler {
         let mut gpu_slot: usize = 0;
 
         for (i, region) in regions.iter().enumerate() {
-            if !region.supports_gpu {
+            if !region.strategy.supports_gpu() {
                 cpu_indices.push(i);
             } else {
                 let ps = gpu_slot;

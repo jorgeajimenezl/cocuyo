@@ -372,7 +372,6 @@ impl Cocuyo {
                                             y: r.y,
                                             width: r.width,
                                             height: r.height,
-                                            supports_gpu: r.strategy.supports_gpu(),
                                             strategy: r.strategy.clone(),
                                         })
                                         .collect();

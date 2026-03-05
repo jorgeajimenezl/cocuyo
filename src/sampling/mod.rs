@@ -56,6 +56,50 @@ pub(crate) fn luminance_u32(r: u8, g: u8, b: u8) -> u32 {
     299 * r as u32 + 587 * g as u32 + 114 * b as u32
 }
 
+/// Unified Max/Min sampling using a const generic bool.
+/// `IS_MAX = true` → brightest pixel, `IS_MAX = false` → darkest pixel.
+/// The const generic lets the compiler monomorphize two branchless versions.
+pub(crate) fn sample_extremum<const IS_MAX: bool>(
+    data: &[u8],
+    width: u32,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+    stride: u32,
+) -> Option<(u8, u8, u8)> {
+    let mut best_rgb: (u8, u8, u8) = (0, 0, 0);
+    let mut best_lum: u32 = if IS_MAX { 0 } else { u32::MAX };
+    let mut found = false;
+
+    let mut py = y0;
+    while py < y1 {
+        let row_base = (py * width) as usize * 4;
+        let mut px = x0;
+        while px < x1 {
+            let idx = row_base + (px as usize) * 4;
+            if idx + 2 < data.len() {
+                let (r, g, b) = (data[idx], data[idx + 1], data[idx + 2]);
+                let lum = luminance_u32(r, g, b);
+                let better = if IS_MAX {
+                    lum > best_lum
+                } else {
+                    lum < best_lum
+                };
+                if better || !found {
+                    best_lum = lum;
+                    best_rgb = (r, g, b);
+                    found = true;
+                }
+            }
+            px += stride;
+        }
+        py += stride;
+    }
+
+    if found { Some(best_rgb) } else { None }
+}
+
 // ---------------------------------------------------------------------------
 // BoxedStrategy – type-erased wrapper for iced pick_list compatibility
 // ---------------------------------------------------------------------------
@@ -118,17 +162,21 @@ impl Default for BoxedStrategy {
     }
 }
 
-/// Returns all available sampling strategies.
+/// Returns all available sampling strategies (cached after first call).
 ///
 /// To add a new strategy, create a type implementing [`SamplingStrategy`] and
 /// append it here.
 pub fn all_strategies() -> Vec<BoxedStrategy> {
-    vec![
-        BoxedStrategy::new(Average),
-        BoxedStrategy::new(Max),
-        BoxedStrategy::new(Min),
-        BoxedStrategy::new(Palette),
-    ]
+    use std::sync::LazyLock;
+    static ALL: LazyLock<Vec<BoxedStrategy>> = LazyLock::new(|| {
+        vec![
+            BoxedStrategy::new(Average),
+            BoxedStrategy::new(Max),
+            BoxedStrategy::new(Min),
+            BoxedStrategy::new(Palette),
+        ]
+    });
+    ALL.clone()
 }
 
 // ---------------------------------------------------------------------------
