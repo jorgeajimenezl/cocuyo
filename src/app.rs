@@ -354,13 +354,13 @@ impl Cocuyo {
                                 .unwrap_or(true);
 
                             if should_update {
-                                self.last_bulb_update = Some(Instant::now());
-
                                 if self.regions.is_empty() {
                                     return Task::none();
                                 }
 
                                 // Try GPU sampling (async, off main thread)
+                                // Note: last_bulb_update is set in GpuSamplingComplete,
+                                // not here, to avoid throttle drift when GPU is slow.
                                 if let Some(ref worker) = self.sampling_worker {
                                     use crate::sampling::gpu::{RegionParams, SendResult};
                                     let params: Vec<RegionParams> = self
@@ -395,6 +395,7 @@ impl Cocuyo {
 
                                 // CPU fallback (fast, stays on main thread)
                                 if self.sampling_worker.is_none() {
+                                    self.last_bulb_update = Some(Instant::now());
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
                                         for region in &mut self.regions {
@@ -427,6 +428,7 @@ impl Cocuyo {
                 Task::none()
             }
             Message::GpuSamplingComplete(results) => {
+                self.last_bulb_update = Some(Instant::now());
                 for (region_id, color) in &results {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
                         region.sampled_color = *color;
