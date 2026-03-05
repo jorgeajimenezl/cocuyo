@@ -137,6 +137,68 @@ pub(super) struct HistogramBin {
 pub(super) const PALETTE_BINS: usize = 512;
 const PALETTE_RESULT_SIZE: usize = PALETTE_BINS * std::mem::size_of::<HistogramBin>();
 
+/// A paired result + readback buffer for a single strategy type.
+struct ResultBufferPair {
+    result: wgpu::Buffer,
+    readback: wgpu::Buffer,
+    stride: usize,
+    capacity: usize,
+}
+
+impl ResultBufferPair {
+    fn new(device: &wgpu::Device, elem_size: usize, alignment: u32, label: &str) -> Self {
+        let stride = aligned_stride(elem_size, alignment);
+        let initial_capacity = 1;
+        let result = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: (stride * initial_capacity) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let readback_label = format!("{label}_readback");
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&readback_label),
+            size: (stride * initial_capacity) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {
+            result,
+            readback,
+            stride,
+            capacity: initial_capacity,
+        }
+    }
+
+    fn ensure_capacity(&mut self, device: &wgpu::Device, count: usize, label: &str) {
+        if count == 0 || count <= self.capacity {
+            return;
+        }
+        self.result = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: (self.stride * count) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let readback_label = format!("{label}_readback");
+        self.readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&readback_label),
+            size: (self.stride * count) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.capacity = count;
+    }
+
+    fn total_bytes(&self, slot_count: usize) -> u64 {
+        (self.stride * slot_count) as u64
+    }
+}
+
 struct CachedTexture {
     texture: wgpu::Texture,
     width: u32,
@@ -166,16 +228,8 @@ struct GpuSampler {
     params_buffer: wgpu::Buffer,
     params_stride: usize,
     params_capacity: usize,
-    // Average strategy buffers
-    avg_result_buffer: wgpu::Buffer,
-    avg_readback_buffer: wgpu::Buffer,
-    avg_result_stride: usize,
-    avg_buffer_capacity: usize,
-    // Palette strategy buffers
-    palette_result_buffer: wgpu::Buffer,
-    palette_readback_buffer: wgpu::Buffer,
-    palette_result_stride: usize,
-    palette_buffer_capacity: usize,
+    avg_buffers: ResultBufferPair,
+    palette_buffers: ResultBufferPair,
     cached_texture: Option<CachedTexture>,
 }
 
@@ -198,6 +252,171 @@ impl std::fmt::Display for GpuSamplerError {
 fn aligned_stride(size: usize, alignment: u32) -> usize {
     let align = alignment as usize;
     (size + align - 1) / align * align
+}
+
+/// Slot assignment tuple: (params_slot, result_slot, region_index).
+type SlotAssignment = (usize, usize, usize);
+
+/// Validated slot with clamped region bounds.
+type ValidSlot = (usize, usize, usize, Params);
+
+/// Classification of regions into GPU strategy groups and CPU fallback.
+struct ClassifiedRegions {
+    avg_slots: Vec<SlotAssignment>,
+    palette_slots: Vec<SlotAssignment>,
+    cpu_indices: Vec<usize>,
+    gpu_count: usize,
+}
+
+fn classify_regions(regions: &[RegionParams]) -> ClassifiedRegions {
+    let mut avg_slots = Vec::new();
+    let mut palette_slots = Vec::new();
+    let mut cpu_indices = Vec::new();
+    let mut gpu_slot: usize = 0;
+
+    for (i, region) in regions.iter().enumerate() {
+        if !region.strategy.supports_gpu() {
+            cpu_indices.push(i);
+        } else {
+            let ps = gpu_slot;
+            gpu_slot += 1;
+            if region.strategy.id() == "palette" {
+                palette_slots.push((ps, palette_slots.len(), i));
+            } else {
+                avg_slots.push((ps, avg_slots.len(), i));
+            }
+        }
+    }
+
+    ClassifiedRegions {
+        avg_slots,
+        palette_slots,
+        cpu_indices,
+        gpu_count: gpu_slot,
+    }
+}
+
+fn clamp_region(rp: &RegionParams, width: u32, height: u32) -> Option<Params> {
+    let x0 = (rp.x as u32).min(width);
+    let y0 = (rp.y as u32).min(height);
+    let x1 = ((rp.x + rp.width) as u32).min(width);
+    let y1 = ((rp.y + rp.height) as u32).min(height);
+    if x0 >= x1 || y0 >= y1 {
+        None
+    } else {
+        Some(Params { x0, y0, x1, y1 })
+    }
+}
+
+/// Build padded params and collect valid slots for a set of slot assignments.
+fn build_valid_slots(
+    slots: &[SlotAssignment],
+    regions: &[RegionParams],
+    width: u32,
+    height: u32,
+    params_stride: usize,
+    padded_params: &mut [u8],
+) -> Vec<ValidSlot> {
+    let mut valid = Vec::new();
+    for &(ps, rs, ri) in slots {
+        if let Some(params) = clamp_region(&regions[ri], width, height) {
+            let offset = ps * params_stride;
+            padded_params[offset..offset + std::mem::size_of::<Params>()]
+                .copy_from_slice(bytemuck::bytes_of(&params));
+            valid.push((ps, rs, ri, params));
+        }
+    }
+    valid
+}
+
+/// Dispatch compute passes for a set of validated slots using a given pipeline.
+fn dispatch_passes(
+    encoder: &mut wgpu::CommandEncoder,
+    device: &wgpu::Device,
+    pipeline: &wgpu::ComputePipeline,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    params_buffer: &wgpu::Buffer,
+    params_stride: usize,
+    buffers: &ResultBufferPair,
+    valid_slots: &[ValidSlot],
+    params_elem_size: NonZeroU64,
+    result_elem_size: NonZeroU64,
+    label: &str,
+) {
+    for &(ps, rs, _, ref p) in valid_slots {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: params_buffer,
+                        offset: (ps * params_stride) as u64,
+                        size: Some(params_elem_size),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffers.result,
+                        offset: (rs * buffers.stride) as u64,
+                        size: Some(result_elem_size),
+                    }),
+                },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(label),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(
+            (p.x1 - p.x0).div_ceil(16),
+            (p.y1 - p.y0).div_ceil(16),
+            1,
+        );
+    }
+}
+
+/// Map a readback buffer and invoke a callback with the mapped data.
+/// Handles map_async, poll, error checking, and unmapping.
+fn with_readback<F>(
+    device: &wgpu::Device,
+    buffers: &ResultBufferPair,
+    slot_count: usize,
+    f: F,
+) -> Result<(), GpuSamplerError>
+where
+    F: FnOnce(&[u8]),
+{
+    let total = buffers.total_bytes(slot_count);
+    let slice = buffers.readback.slice(..total);
+    let (sender, mut receiver) = futures::channel::oneshot::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = sender.send(r);
+    });
+
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+    receiver
+        .try_recv()
+        .ok()
+        .flatten()
+        .and_then(|r| r.ok())
+        .ok_or(GpuSamplerError::MapFailed)?;
+
+    let mapped = slice.get_mapped_range();
+    f(&mapped);
+    drop(mapped);
+    buffers.readback.unmap();
+    Ok(())
 }
 
 impl GpuSampler {
@@ -277,54 +496,26 @@ impl GpuSampler {
             std::mem::size_of::<Params>(),
             limits.min_uniform_buffer_offset_alignment,
         );
-        let avg_result_stride = aligned_stride(
-            std::mem::size_of::<GpuResult>(),
-            limits.min_storage_buffer_offset_alignment,
-        );
-        let palette_result_stride = aligned_stride(
-            PALETTE_RESULT_SIZE,
-            limits.min_storage_buffer_offset_alignment,
-        );
-        let initial_capacity = 1;
 
         let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_sampler_params"),
-            size: (params_stride * initial_capacity) as u64,
+            size: params_stride as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let avg_result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_avg_result"),
-            size: (avg_result_stride * initial_capacity) as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let avg_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_avg_readback"),
-            size: (avg_result_stride * initial_capacity) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let palette_result_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_palette_result"),
-            size: (palette_result_stride * initial_capacity) as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let palette_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_palette_readback"),
-            size: (palette_result_stride * initial_capacity) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let avg_buffers = ResultBufferPair::new(
+            &device,
+            std::mem::size_of::<GpuResult>(),
+            limits.min_storage_buffer_offset_alignment,
+            "gpu_avg_result",
+        );
+        let palette_buffers = ResultBufferPair::new(
+            &device,
+            PALETTE_RESULT_SIZE,
+            limits.min_storage_buffer_offset_alignment,
+            "gpu_palette_result",
+        );
 
         info!("GPU sampler created");
 
@@ -336,15 +527,9 @@ impl GpuSampler {
             bind_group_layout,
             params_buffer,
             params_stride,
-            params_capacity: initial_capacity,
-            avg_result_buffer,
-            avg_readback_buffer,
-            avg_result_stride,
-            avg_buffer_capacity: initial_capacity,
-            palette_result_buffer,
-            palette_readback_buffer,
-            palette_result_stride,
-            palette_buffer_capacity: initial_capacity,
+            params_capacity: 1,
+            avg_buffers,
+            palette_buffers,
             cached_texture: None,
         }
     }
@@ -363,50 +548,6 @@ impl GpuSampler {
         self.params_capacity = count;
     }
 
-    /// Ensure average result/readback buffers are large enough for `count` regions.
-    fn ensure_avg_buffers(&mut self, count: usize) {
-        if count == 0 || count <= self.avg_buffer_capacity {
-            return;
-        }
-        self.avg_result_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_avg_result"),
-            size: (self.avg_result_stride * count) as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.avg_readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_avg_readback"),
-            size: (self.avg_result_stride * count) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.avg_buffer_capacity = count;
-    }
-
-    /// Ensure palette result/readback buffers are large enough for `count` regions.
-    fn ensure_palette_buffers(&mut self, count: usize) {
-        if count == 0 || count <= self.palette_buffer_capacity {
-            return;
-        }
-        self.palette_result_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_palette_result"),
-            size: (self.palette_result_stride * count) as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.palette_readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu_palette_readback"),
-            size: (self.palette_result_stride * count) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.palette_buffer_capacity = count;
-    }
-
     /// Sample multiple regions from a frame. Returns `(region_id, color)` pairs.
     ///
     /// GPU-capable regions are batched into a single GPU submission using
@@ -421,73 +562,38 @@ impl GpuSampler {
         let height = frame.height();
 
         let mut results: Vec<Option<(u8, u8, u8)>> = vec![None; regions.len()];
-        let mut cpu_indices: Vec<usize> = Vec::new();
 
-        // Classify GPU regions by strategy, assigning slots in their respective
-        // result buffers. All GPU regions share contiguous params buffer slots.
-        // (params_slot, result_slot, region_idx)
-        let mut avg_slots: Vec<(usize, usize, usize)> = Vec::new();
-        let mut palette_slots: Vec<(usize, usize, usize)> = Vec::new();
-        let mut gpu_slot: usize = 0;
+        let classified = classify_regions(regions);
 
-        for (i, region) in regions.iter().enumerate() {
-            if !region.strategy.supports_gpu() {
-                cpu_indices.push(i);
-            } else {
-                let ps = gpu_slot;
-                gpu_slot += 1;
-                if region.strategy.id() == "palette" {
-                    palette_slots.push((ps, palette_slots.len(), i));
-                } else {
-                    avg_slots.push((ps, avg_slots.len(), i));
-                }
-            }
-        }
-
-        let gpu_count = gpu_slot;
-
-        // GPU path: batch all GPU-capable regions into a single submission
-        if gpu_count > 0 {
-            self.ensure_params_buffer(gpu_count);
-            self.ensure_avg_buffers(avg_slots.len());
-            self.ensure_palette_buffers(palette_slots.len());
+        if classified.gpu_count > 0 {
+            self.ensure_params_buffer(classified.gpu_count);
+            self.avg_buffers
+                .ensure_capacity(&self.device, classified.avg_slots.len(), "gpu_avg_result");
+            self.palette_buffers.ensure_capacity(
+                &self.device,
+                classified.palette_slots.len(),
+                "gpu_palette_result",
+            );
 
             let imported = self.import_frame(frame)?;
 
-            // Build params for ALL gpu regions (shared buffer, contiguous slots)
-            let mut padded_params = vec![0u8; self.params_stride * gpu_count];
-            // Track which slots are valid (non-empty region bounds)
-            let mut valid_avg: Vec<(usize, usize, usize, Params)> = Vec::new();
-            let mut valid_palette: Vec<(usize, usize, usize, Params)> = Vec::new();
-
-            let clamp_region = |rp: &RegionParams| -> Option<Params> {
-                let x0 = (rp.x as u32).min(width);
-                let y0 = (rp.y as u32).min(height);
-                let x1 = ((rp.x + rp.width) as u32).min(width);
-                let y1 = ((rp.y + rp.height) as u32).min(height);
-                if x0 >= x1 || y0 >= y1 {
-                    None
-                } else {
-                    Some(Params { x0, y0, x1, y1 })
-                }
-            };
-
-            for &(ps, rs, ri) in &avg_slots {
-                if let Some(params) = clamp_region(&regions[ri]) {
-                    let offset = ps * self.params_stride;
-                    padded_params[offset..offset + std::mem::size_of::<Params>()]
-                        .copy_from_slice(bytemuck::bytes_of(&params));
-                    valid_avg.push((ps, rs, ri, params));
-                }
-            }
-            for &(ps, rs, ri) in &palette_slots {
-                if let Some(params) = clamp_region(&regions[ri]) {
-                    let offset = ps * self.params_stride;
-                    padded_params[offset..offset + std::mem::size_of::<Params>()]
-                        .copy_from_slice(bytemuck::bytes_of(&params));
-                    valid_palette.push((ps, rs, ri, params));
-                }
-            }
+            let mut padded_params = vec![0u8; self.params_stride * classified.gpu_count];
+            let valid_avg = build_valid_slots(
+                &classified.avg_slots,
+                regions,
+                width,
+                height,
+                self.params_stride,
+                &mut padded_params,
+            );
+            let valid_palette = build_valid_slots(
+                &classified.palette_slots,
+                regions,
+                width,
+                height,
+                self.params_stride,
+                &mut padded_params,
+            );
 
             let has_avg = !valid_avg.is_empty();
             let has_palette = !valid_palette.is_empty();
@@ -496,7 +602,7 @@ impl GpuSampler {
                 self.queue.write_buffer(
                     &self.params_buffer,
                     0,
-                    &padded_params[..self.params_stride * gpu_count],
+                    &padded_params[..self.params_stride * classified.gpu_count],
                 );
 
                 let mut encoder =
@@ -505,7 +611,6 @@ impl GpuSampler {
                             label: Some("gpu_sampler_batch"),
                         });
 
-                // Record pending texture copy
                 if let Some(copy) = &imported.pending_copy {
                     let ct = self.cached_texture.as_ref().unwrap();
                     encoder.copy_texture_to_texture(
@@ -529,208 +634,125 @@ impl GpuSampler {
                     );
                 }
 
-                // Clear result buffers
                 if has_avg {
-                    let total = (self.avg_result_stride * avg_slots.len()) as u64;
-                    encoder.clear_buffer(&self.avg_result_buffer, 0, Some(total));
+                    let total = self.avg_buffers.total_bytes(classified.avg_slots.len());
+                    encoder.clear_buffer(&self.avg_buffers.result, 0, Some(total));
                 }
                 if has_palette {
-                    let total = (self.palette_result_stride * palette_slots.len()) as u64;
-                    encoder.clear_buffer(&self.palette_result_buffer, 0, Some(total));
+                    let total = self
+                        .palette_buffers
+                        .total_bytes(classified.palette_slots.len());
+                    encoder.clear_buffer(&self.palette_buffers.result, 0, Some(total));
                 }
 
                 let params_elem_size =
                     NonZeroU64::new(std::mem::size_of::<Params>() as u64).unwrap();
                 let avg_elem_size =
                     NonZeroU64::new(std::mem::size_of::<GpuResult>() as u64).unwrap();
-                let palette_elem_size =
-                    NonZeroU64::new(PALETTE_RESULT_SIZE as u64).unwrap();
+                let palette_elem_size = NonZeroU64::new(PALETTE_RESULT_SIZE as u64).unwrap();
 
-                // Dispatch average compute passes
-                for &(ps, rs, _, ref p) in &valid_avg {
-                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("gpu_avg_bg"),
-                        layout: &self.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&imported.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &self.params_buffer,
-                                    offset: (ps * self.params_stride) as u64,
-                                    size: Some(params_elem_size),
-                                }),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &self.avg_result_buffer,
-                                    offset: (rs * self.avg_result_stride) as u64,
-                                    size: Some(avg_elem_size),
-                                }),
-                            },
-                        ],
-                    });
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("gpu_average_pass"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(&self.average_pipeline);
-                    pass.set_bind_group(0, &bind_group, &[]);
-                    pass.dispatch_workgroups(
-                        (p.x1 - p.x0).div_ceil(16),
-                        (p.y1 - p.y0).div_ceil(16),
-                        1,
-                    );
-                }
+                dispatch_passes(
+                    &mut encoder,
+                    &self.device,
+                    &self.average_pipeline,
+                    &self.bind_group_layout,
+                    &imported.view,
+                    &self.params_buffer,
+                    self.params_stride,
+                    &self.avg_buffers,
+                    &valid_avg,
+                    params_elem_size,
+                    avg_elem_size,
+                    "gpu_average_pass",
+                );
 
-                // Dispatch palette compute passes
-                for &(ps, rs, _, ref p) in &valid_palette {
-                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("gpu_palette_bg"),
-                        layout: &self.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&imported.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &self.params_buffer,
-                                    offset: (ps * self.params_stride) as u64,
-                                    size: Some(params_elem_size),
-                                }),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &self.palette_result_buffer,
-                                    offset: (rs * self.palette_result_stride) as u64,
-                                    size: Some(palette_elem_size),
-                                }),
-                            },
-                        ],
-                    });
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("gpu_palette_pass"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(&self.palette_pipeline);
-                    pass.set_bind_group(0, &bind_group, &[]);
-                    pass.dispatch_workgroups(
-                        (p.x1 - p.x0).div_ceil(16),
-                        (p.y1 - p.y0).div_ceil(16),
-                        1,
-                    );
-                }
+                dispatch_passes(
+                    &mut encoder,
+                    &self.device,
+                    &self.palette_pipeline,
+                    &self.bind_group_layout,
+                    &imported.view,
+                    &self.params_buffer,
+                    self.params_stride,
+                    &self.palette_buffers,
+                    &valid_palette,
+                    params_elem_size,
+                    palette_elem_size,
+                    "gpu_palette_pass",
+                );
 
-                // Copy result buffers to readback buffers
                 if has_avg {
-                    let total = (self.avg_result_stride * avg_slots.len()) as u64;
+                    let total = self.avg_buffers.total_bytes(classified.avg_slots.len());
                     encoder.copy_buffer_to_buffer(
-                        &self.avg_result_buffer,
+                        &self.avg_buffers.result,
                         0,
-                        &self.avg_readback_buffer,
+                        &self.avg_buffers.readback,
                         0,
                         total,
                     );
                 }
                 if has_palette {
-                    let total = (self.palette_result_stride * palette_slots.len()) as u64;
+                    let total = self
+                        .palette_buffers
+                        .total_bytes(classified.palette_slots.len());
                     encoder.copy_buffer_to_buffer(
-                        &self.palette_result_buffer,
+                        &self.palette_buffers.result,
                         0,
-                        &self.palette_readback_buffer,
+                        &self.palette_buffers.readback,
                         0,
                         total,
                     );
                 }
 
-                // Single submit
                 self.queue.submit(std::iter::once(encoder.finish()));
 
-                // Map readback buffers and poll
-                let avg_mapped = if has_avg {
-                    let total = (self.avg_result_stride * avg_slots.len()) as u64;
-                    let slice = self.avg_readback_buffer.slice(..total);
-                    let (sender, receiver) = futures::channel::oneshot::channel();
-                    slice.map_async(wgpu::MapMode::Read, move |r| { let _ = sender.send(r); });
-                    Some((slice, receiver))
-                } else {
-                    None
-                };
-
-                let palette_mapped = if has_palette {
-                    let total = (self.palette_result_stride * palette_slots.len()) as u64;
-                    let slice = self.palette_readback_buffer.slice(..total);
-                    let (sender, receiver) = futures::channel::oneshot::channel();
-                    slice.map_async(wgpu::MapMode::Read, move |r| { let _ = sender.send(r); });
-                    Some((slice, receiver))
-                } else {
-                    None
-                };
-
-                let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-
-                // Read average results
-                if let Some((slice, mut receiver)) = avg_mapped {
-                    receiver
-                        .try_recv()
-                        .ok()
-                        .flatten()
-                        .and_then(|r| r.ok())
-                        .ok_or(GpuSamplerError::MapFailed)?;
-
-                    let mapped = slice.get_mapped_range();
-                    for &(_, rs, ri, _) in &valid_avg {
-                        let offset = rs * self.avg_result_stride;
-                        let result: GpuResult = *bytemuck::from_bytes(
-                            &mapped[offset..offset + std::mem::size_of::<GpuResult>()],
-                        );
-                        if result.count > 0 {
-                            results[ri] = Some((
-                                (result.r_sum / result.count) as u8,
-                                (result.g_sum / result.count) as u8,
-                                (result.b_sum / result.count) as u8,
-                            ));
-                        }
-                    }
-                    drop(mapped);
-                    self.avg_readback_buffer.unmap();
+                if has_avg {
+                    with_readback(
+                        &self.device,
+                        &self.avg_buffers,
+                        classified.avg_slots.len(),
+                        |mapped| {
+                            for &(_, rs, ri, _) in &valid_avg {
+                                let offset = rs * self.avg_buffers.stride;
+                                let result: GpuResult = *bytemuck::from_bytes(
+                                    &mapped[offset..offset + std::mem::size_of::<GpuResult>()],
+                                );
+                                if result.count > 0 {
+                                    results[ri] = Some((
+                                        (result.r_sum / result.count) as u8,
+                                        (result.g_sum / result.count) as u8,
+                                        (result.b_sum / result.count) as u8,
+                                    ));
+                                }
+                            }
+                        },
+                    )?;
                 }
 
-                // Read palette results
-                if let Some((slice, mut receiver)) = palette_mapped {
-                    receiver
-                        .try_recv()
-                        .ok()
-                        .flatten()
-                        .and_then(|r| r.ok())
-                        .ok_or(GpuSamplerError::MapFailed)?;
-
-                    let mapped = slice.get_mapped_range();
-                    for &(_, rs, ri, _) in &valid_palette {
-                        let offset = rs * self.palette_result_stride;
-                        let bins: &[HistogramBin] = bytemuck::cast_slice(
-                            &mapped[offset..offset + PALETTE_RESULT_SIZE],
-                        );
-                        results[ri] =
-                            super::palette::extract_dominant_from_histogram(bins);
-                    }
-                    drop(mapped);
-                    self.palette_readback_buffer.unmap();
+                if has_palette {
+                    with_readback(
+                        &self.device,
+                        &self.palette_buffers,
+                        classified.palette_slots.len(),
+                        |mapped| {
+                            for &(_, rs, ri, _) in &valid_palette {
+                                let offset = rs * self.palette_buffers.stride;
+                                let bins: &[HistogramBin] = bytemuck::cast_slice(
+                                    &mapped[offset..offset + PALETTE_RESULT_SIZE],
+                                );
+                                results[ri] =
+                                    super::palette::extract_dominant_from_histogram(bins);
+                            }
+                        },
+                    )?;
                 }
             }
         }
 
         // CPU fallback for unsupported strategies
-        if !cpu_indices.is_empty() {
+        if !classified.cpu_indices.is_empty() {
             if let Some(cpu_frame) = frame.convert_to_cpu() {
-                for &i in &cpu_indices {
+                for &i in &classified.cpu_indices {
                     let rp = &regions[i];
                     results[i] = super::sample_region(
                         &cpu_frame,
