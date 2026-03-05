@@ -5,6 +5,106 @@ use tracing::info;
 
 use crate::frame::FrameData;
 
+use super::BoxedStrategy;
+
+/// Lightweight region parameters for sending to the background sampling thread.
+#[derive(Clone)]
+pub struct RegionParams {
+    pub region_id: usize,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub supports_gpu: bool,
+    pub strategy: BoxedStrategy,
+}
+
+/// Result of try_send on SamplingWorker.
+pub enum SendResult<M> {
+    /// Request accepted; returns a Task that resolves to the sampling result.
+    Sent(iced::Task<M>),
+    /// Worker is still processing the previous frame.
+    Busy,
+    /// Worker thread has died (channel disconnected).
+    Dead,
+}
+
+struct SamplingRequest {
+    frame: Arc<FrameData>,
+    regions: Vec<RegionParams>,
+    result_tx: tokio::sync::oneshot::Sender<Vec<(usize, Option<(u8, u8, u8)>)>>,
+}
+
+/// Handle to a background GPU sampling thread.
+///
+/// Dropping this struct drops the request channel sender, which causes the
+/// background thread's `recv()` to return `Err` and exit cleanly.
+pub struct SamplingWorker {
+    request_tx: std::sync::mpsc::SyncSender<SamplingRequest>,
+    _thread: std::thread::JoinHandle<()>,
+}
+
+impl SamplingWorker {
+    pub fn spawn(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let (request_tx, request_rx) = std::sync::mpsc::sync_channel::<SamplingRequest>(1);
+
+        let thread = std::thread::Builder::new()
+            .name("gpu-sampler".to_string())
+            .spawn(move || {
+                let mut sampler = GpuSampler::new(device, queue);
+                while let Ok(request) = request_rx.recv() {
+                    let results = sampler.sample_regions(&request.frame, &request.regions);
+                    let colors = match results {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "GPU sampling failed");
+                            request
+                                .regions
+                                .iter()
+                                .map(|r| (r.region_id, None))
+                                .collect()
+                        }
+                    };
+                    let _ = request.result_tx.send(colors);
+                }
+                info!("GPU sampler worker thread exiting");
+            })
+            .expect("failed to spawn gpu-sampler thread");
+
+        Self {
+            request_tx,
+            _thread: thread,
+        }
+    }
+
+    /// Try to submit a sampling request.
+    ///
+    /// Returns `Sent(task)` with an iced `Task` that resolves to the result
+    /// message, `Busy` if the worker is still processing, or `Dead` if the
+    /// worker thread has exited.
+    pub fn try_send<M: Send + 'static>(
+        &self,
+        frame: Arc<FrameData>,
+        regions: Vec<RegionParams>,
+        map_fn: fn(Vec<(usize, Option<(u8, u8, u8)>)>) -> M,
+    ) -> SendResult<M> {
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let request = SamplingRequest {
+            frame,
+            regions,
+            result_tx,
+        };
+        match self.request_tx.try_send(request) {
+            Ok(()) => SendResult::Sent(iced::Task::perform(
+                async move { result_rx.await.unwrap_or_default() },
+                map_fn,
+            )),
+            Err(std::sync::mpsc::TrySendError::Full(_)) => SendResult::Busy,
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => SendResult::Dead,
+        }
+    }
+}
+
 /// Uniform buffer layout matching the WGSL `Params` struct.
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -45,7 +145,7 @@ struct PendingCopy {
     height: u32,
 }
 
-pub struct GpuSampler {
+struct GpuSampler {
     device: wgpu::Device,
     queue: wgpu::Queue,
     average_pipeline: wgpu::ComputePipeline,
@@ -81,7 +181,7 @@ fn aligned_stride(size: usize, alignment: u32) -> usize {
 }
 
 impl GpuSampler {
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gpu_average_compute"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gpu_average.wgsl").into()),
@@ -221,16 +321,16 @@ impl GpuSampler {
         self.buffer_capacity = count;
     }
 
-    /// Sample multiple regions from a frame. Returns one result per region.
+    /// Sample multiple regions from a frame. Returns `(region_id, color)` pairs.
     ///
     /// Regions with GPU-capable strategies (Average) are batched into a single
     /// GPU submission. Regions with CPU-only strategies fall back to
     /// `convert_to_cpu()` + CPU sampling.
-    pub fn sample_regions(
+    fn sample_regions(
         &mut self,
         frame: &Arc<FrameData>,
-        regions: &[&crate::region::Region],
-    ) -> Result<Vec<Option<(u8, u8, u8)>>, GpuSamplerError> {
+        regions: &[RegionParams],
+    ) -> Result<Vec<(usize, Option<(u8, u8, u8)>)>, GpuSamplerError> {
         let width = frame.width();
         let height = frame.height();
 
@@ -239,7 +339,7 @@ impl GpuSampler {
         let mut cpu_indices: Vec<usize> = Vec::new();
 
         for (i, region) in regions.iter().enumerate() {
-            if region.strategy.supports_gpu() {
+            if region.supports_gpu {
                 gpu_indices.push(i);
             } else {
                 cpu_indices.push(i);
@@ -258,11 +358,11 @@ impl GpuSampler {
             let mut padded_params = vec![0u8; self.params_stride * gpu_count];
 
             for (slot, &region_idx) in gpu_indices.iter().enumerate() {
-                let region = &regions[region_idx];
-                let x0 = (region.x as u32).min(width);
-                let y0 = (region.y as u32).min(height);
-                let x1 = ((region.x + region.width) as u32).min(width);
-                let y1 = ((region.y + region.height) as u32).min(height);
+                let rp = &regions[region_idx];
+                let x0 = (rp.x as u32).min(width);
+                let y0 = (rp.y as u32).min(height);
+                let x1 = ((rp.x + rp.width) as u32).min(width);
+                let y1 = ((rp.y + rp.height) as u32).min(height);
 
                 if x0 >= x1 || y0 >= y1 {
                     continue;
@@ -323,11 +423,11 @@ impl GpuSampler {
                     NonZeroU64::new(std::mem::size_of::<GpuResult>() as u64).unwrap();
 
                 for &(slot, region_idx) in &valid_slots {
-                    let region = &regions[region_idx];
-                    let x0 = (region.x as u32).min(width);
-                    let y0 = (region.y as u32).min(height);
-                    let x1 = ((region.x + region.width) as u32).min(width);
-                    let y1 = ((region.y + region.height) as u32).min(height);
+                    let rp = &regions[region_idx];
+                    let x0 = (rp.x as u32).min(width);
+                    let y0 = (rp.y as u32).min(height);
+                    let x1 = ((rp.x + rp.width) as u32).min(width);
+                    let y1 = ((rp.y + rp.height) as u32).min(height);
 
                     let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("gpu_sampler_bg"),
@@ -421,20 +521,24 @@ impl GpuSampler {
         if !cpu_indices.is_empty() {
             if let Some(cpu_frame) = frame.convert_to_cpu() {
                 for &i in &cpu_indices {
-                    let region = &regions[i];
+                    let rp = &regions[i];
                     results[i] = super::sample_region(
                         &cpu_frame,
-                        region.x,
-                        region.y,
-                        region.width,
-                        region.height,
-                        &region.strategy,
+                        rp.x,
+                        rp.y,
+                        rp.width,
+                        rp.height,
+                        &rp.strategy,
                     );
                 }
             }
         }
 
-        Ok(results)
+        Ok(regions
+            .iter()
+            .zip(results)
+            .map(|(rp, color)| (rp.region_id, color))
+            .collect())
     }
 
     /// Import a frame as a GPU texture, returning a view and optional pending
