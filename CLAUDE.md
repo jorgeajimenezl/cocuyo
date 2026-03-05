@@ -79,9 +79,9 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 #### Ambient Lighting
 1. User selects WiZ smart bulbs via `BulbSetup` screen
 2. Regions are auto-created per selected bulb, editable on the video preview via `widget/region_overlay.rs`
-3. Each region has a configurable sampling strategy (Average, Max, Min)
-4. On "Start Ambient", original bulb states are saved, recording starts
-5. Each frame: `frame.convert_to_cpu()` → per-region `sampling::sample_region()` → `ambient::dispatch_bulb_colors()` to WiZ bulbs (throttled to every 150ms)
+3. Each region has a configurable sampling strategy (Average, Max, Min, Palette)
+4. On "Start Ambient", original bulb states are saved, recording starts, `SamplingWorker` spawns a background GPU sampling thread
+5. Each frame: `SamplingWorker::try_send()` submits frame + regions to the GPU sampler thread → compute shaders sample all GPU-capable regions in one submission → CPU fallback for unsupported strategies → `ambient::dispatch_bulb_colors()` to WiZ bulbs (throttled to every 150ms)
 6. On "Stop Ambient", original bulb states are restored
 
 ### Key Components
@@ -95,12 +95,17 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 - **`ambient.rs`** - WiZ smart bulb discovery, color mapping, state save/restore, frame sampling dispatch
 - **`region.rs`** - Screen capture region definitions and coordinate transformations
 - **`theme.rs`** - Custom iced theme and styling
+- **`gpu_context.rs`** - Global `OnceLock` storing the wgpu `Device`/`Queue` for use outside the shader widget (set once from `VideoPipeline::new()`)
 
 #### Sampling Module (`sampling/`)
-- **`mod.rs`** - `SamplingStrategy` trait, `BoxedStrategy` type-erased wrapper (for iced pick_list), `sample_region()` function, strategy registry
-- **`average.rs`** - `Average` strategy: computes mean RGB across sampled pixels
-- **`max.rs`** - `Max` strategy: finds brightest pixel by luminance
-- **`min.rs`** - `Min` strategy: finds darkest pixel by luminance
+- **`mod.rs`** - `SamplingStrategy` trait (with `supports_gpu()` opt-in), `BoxedStrategy` type-erased wrapper (for iced pick_list), `sample_region()` function, `sample_extremum()` unified max/min helper, strategy registry
+- **`average.rs`** - `Average` strategy: computes mean RGB across sampled pixels (GPU-capable)
+- **`max.rs`** - `Max` strategy: finds brightest pixel by luminance (CPU-only, delegates to `sample_extremum`)
+- **`min.rs`** - `Min` strategy: finds darkest pixel by luminance (CPU-only, delegates to `sample_extremum`)
+- **`palette.rs`** - `Palette` strategy: dominant color via fixed histogram quantization (8×8×8 bins, GPU-capable). `extract_dominant_from_histogram()` shared between GPU readback and CPU path
+- **`gpu.rs`** - `GpuSampler` compute pipeline engine and `SamplingWorker` background thread. Imports frames as wgpu textures (DMA-BUF/D3DShared/CPU), dispatches per-region compute passes (average + palette pipelines), reads back results via mapped buffers. `SamplingWorker` wraps the sampler in a dedicated thread with `try_send()` returning `iced::Task`
+- **`gpu_average.wgsl`** - WGSL compute shader for average color sampling (atomic sum + count)
+- **`gpu_palette.wgsl`** - WGSL compute shader for histogram-based palette extraction (512-bin atomic histogram)
 
 #### Widget Module (`widget/`)
 - **`mod.rs`** - Module exports, `Element<'a, Message>` type alias
@@ -140,6 +145,7 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 - Recording state updated via `Message::RecordingEvent(StateChanged(...))` — owned by UI, no mutexes
 - Bidirectional control: subscription sends `RecordingEvent::Ready(cmd_tx)` at startup; app stores the `cmd_tx` sender for issuing `RecordingCommand::Stop`
 - Graceful stop: app sends `RecordingCommand::Stop` via command channel → subscription cleans up capture resources → emits `StateChanged(Idle)` → app sets `is_recording = false`
+- **GPU sampling thread**: `SamplingWorker` spawns a dedicated `gpu-sampler` thread that owns a `GpuSampler` (wgpu Device/Queue). Requests sent via `std::sync::mpsc::sync_channel(1)` (backpressure: `try_send` returns `Busy` if worker is occupied). Results returned via `tokio::sync::oneshot` channel, wrapped in `iced::Task`
 - **Windows GPU sync**: `SharedTexturePool` uses `Arc::strong_count` for slot availability (backpressure), `IDXGIKeyedMutex` for GPU synchronization, event query + `Flush()` + spin-wait for GPU completion
 - **Linux DMA-BUF lifetime**: `HeldBuffer` deque (3 entries) manages PipeWire buffer lifetimes
 
