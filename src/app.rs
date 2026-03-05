@@ -427,6 +427,10 @@ impl Cocuyo {
                 Task::none()
             }
             Message::GpuSamplingComplete(results) => {
+                if !self.is_ambient_active {
+                    return Task::none();
+                }
+                
                 self.last_bulb_update = Some(Instant::now());
                 for (region_id, color) in &results {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
