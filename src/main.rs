@@ -5,6 +5,7 @@ mod ambient;
 mod app;
 mod config;
 mod frame;
+mod gpu_context;
 mod platform;
 mod recording;
 mod region;
@@ -19,7 +20,9 @@ fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+                .add_directive(tracing::Level::INFO.into())
+                .add_directive("wgpu_hal=warn".parse().unwrap())
+                .add_directive("iced_winit=warn".parse().unwrap())
         )
         .init();
 

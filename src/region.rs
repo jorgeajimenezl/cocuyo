@@ -1,6 +1,6 @@
 use iced::Rectangle;
 
-use crate::sampling::SamplingStrategy;
+use crate::sampling::BoxedStrategy;
 
 #[derive(Debug, Clone)]
 pub struct Region {
@@ -12,7 +12,7 @@ pub struct Region {
     pub height: f32,
     pub bulb_mac: String,
     pub sampled_color: Option<(u8, u8, u8)>,
-    pub strategy: SamplingStrategy,
+    pub strategy: BoxedStrategy,
 }
 
 /// Convert widget-space point to frame-space coordinates.

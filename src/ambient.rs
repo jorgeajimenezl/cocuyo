@@ -1,10 +1,7 @@
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-
-use crate::frame::FrameData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BulbInfo {
@@ -111,10 +108,10 @@ pub async fn discover_bulbs() -> Vec<BulbInfo> {
     }
 }
 
-/// Sample frame colors using region-based sampling.
-/// Each region with a `bulb_mac` is sampled and mapped to the corresponding bulb.
-pub fn sample_frame_for_regions(
-    frame: &Arc<FrameData>,
+/// Build bulb color targets from pre-computed `sampled_color` on each region.
+/// This avoids re-sampling the frame when colors have already been computed
+/// (e.g. via GPU sampling).
+pub fn build_bulb_targets(
     regions: &[crate::region::Region],
     bulbs: &[BulbInfo],
 ) -> Option<Vec<(IpAddr, BulbColor, u8)>> {
@@ -122,14 +119,7 @@ pub fn sample_frame_for_regions(
 
     for region in regions {
         let mac = &region.bulb_mac;
-        let Some((r, g, b)) = crate::sampling::sample_region(
-            frame,
-            region.x,
-            region.y,
-            region.width,
-            region.height,
-            region.strategy,
-        ) else {
+        let Some((r, g, b)) = region.sampled_color else {
             continue;
         };
         let Some(bulb) = bulbs.iter().find(|b| &b.mac == mac) else {

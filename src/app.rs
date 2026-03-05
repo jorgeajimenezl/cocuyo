@@ -13,7 +13,7 @@ use crate::config::AppConfig;
 use crate::frame::FrameData;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
-use crate::sampling::SamplingStrategy;
+use crate::sampling::BoxedStrategy;
 use crate::screen::WindowKind;
 use crate::screen::bulb_setup;
 use crate::screen::settings;
@@ -58,13 +58,15 @@ pub enum Message {
     BulbStatesSaved(Vec<SavedBulbState>),
     RecordingEvent(RecordingEvent),
     RegionUpdate(RegionMessage),
-    RegionStrategyChanged(usize, SamplingStrategy),
+    RegionStrategyChanged(usize, BoxedStrategy),
 
     // Delegated screens
     Settings(settings::Message),
     BulbSetup(bulb_setup::Message),
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
+
+    GpuSamplingComplete(Vec<(usize, Option<(u8, u8, u8)>)>),
 
     ExitApp,
     Noop,
@@ -85,6 +87,8 @@ pub struct Cocuyo {
     next_region_id: usize,
     selected_region: Option<usize>,
     config: AppConfig,
+
+    sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
 
     // Screen state
     settings: settings::Settings,
@@ -110,6 +114,7 @@ impl Cocuyo {
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
+            sampling_worker: None,
             settings: settings::Settings::new(&config),
             config,
             #[cfg(target_os = "windows")]
@@ -288,6 +293,17 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
+
+                // Lazily spawn GPU sampling worker when ambient starts
+                if self.sampling_worker.is_none() {
+                    if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
+                        self.sampling_worker =
+                            Some(crate::sampling::gpu::SamplingWorker::spawn(
+                                device.clone(),
+                                queue.clone(),
+                            ));
+                    }
+                }
                 if !self.is_recording {
                     #[cfg(target_os = "linux")]
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
@@ -301,6 +317,7 @@ impl Cocuyo {
             Message::StopAmbient => {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
+                self.sampling_worker = None;
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -337,28 +354,63 @@ impl Cocuyo {
                                 .unwrap_or(true);
 
                             if should_update {
-                                self.last_bulb_update = Some(Instant::now());
-
                                 if self.regions.is_empty() {
                                     return Task::none();
                                 }
 
-                                let sampling_frame = frame.convert_to_cpu();
+                                // Try GPU sampling (async, off main thread)
+                                // Note: last_bulb_update is set in GpuSamplingComplete,
+                                // not here, to avoid throttle drift when GPU is slow.
+                                if let Some(ref worker) = self.sampling_worker {
+                                    use crate::sampling::gpu::{RegionParams, SendResult};
+                                    let params: Vec<RegionParams> = self
+                                        .regions
+                                        .iter()
+                                        .map(|r| RegionParams {
+                                            region_id: r.id,
+                                            x: r.x,
+                                            y: r.y,
+                                            width: r.width,
+                                            height: r.height,
+                                            strategy: r.strategy.clone(),
+                                        })
+                                        .collect();
 
-                                if let Some(ref sf) = sampling_frame {
-                                    for region in &mut self.regions {
-                                        region.sampled_color = crate::sampling::sample_region(
-                                            sf,
-                                            region.x,
-                                            region.y,
-                                            region.width,
-                                            region.height,
-                                            region.strategy,
-                                        );
+                                    match worker.try_send(
+                                        frame.clone(),
+                                        params,
+                                        Message::GpuSamplingComplete,
+                                    ) {
+                                        SendResult::Sent(task) => return task,
+                                        SendResult::Busy => {} // worker busy, skip
+                                        SendResult::Dead => {
+                                            tracing::warn!(
+                                                "GPU sampling worker died, falling back to CPU"
+                                            );
+                                            self.sampling_worker = None;
+                                        }
+                                    }
+                                }
+
+                                // CPU fallback (fast, stays on main thread)
+                                if self.sampling_worker.is_none() {
+                                    self.last_bulb_update = Some(Instant::now());
+                                    let sampling_frame = frame.convert_to_cpu();
+                                    if let Some(ref sf) = sampling_frame {
+                                        for region in &mut self.regions {
+                                            region.sampled_color =
+                                                crate::sampling::sample_region(
+                                                    sf,
+                                                    region.x,
+                                                    region.y,
+                                                    region.width,
+                                                    region.height,
+                                                    &region.strategy,
+                                                );
+                                        }
                                     }
 
-                                    if let Some(targets) = crate::ambient::sample_frame_for_regions(
-                                        sf,
+                                    if let Some(targets) = crate::ambient::build_bulb_targets(
                                         &self.regions,
                                         self.bulb_setup.discovered_bulbs(),
                                     ) {
@@ -373,6 +425,29 @@ impl Cocuyo {
                     }
                 }
                 Task::none()
+            }
+            Message::GpuSamplingComplete(results) => {
+                if !self.is_ambient_active {
+                    return Task::none();
+                }
+                
+                self.last_bulb_update = Some(Instant::now());
+                for (region_id, color) in &results {
+                    if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
+                        region.sampled_color = *color;
+                    }
+                }
+                if let Some(targets) = crate::ambient::build_bulb_targets(
+                    &self.regions,
+                    self.bulb_setup.discovered_bulbs(),
+                ) {
+                    Task::perform(
+                        crate::ambient::dispatch_bulb_colors(targets),
+                        |()| Message::Noop,
+                    )
+                } else {
+                    Task::none()
+                }
             }
             Message::RegionStrategyChanged(id, strategy) => {
                 if let Some(region) = self.regions.iter_mut().find(|r| r.id == id) {
@@ -635,7 +710,7 @@ impl Cocuyo {
                 height: default_h,
                 bulb_mac: mac.clone(),
                 sampled_color: None,
-                strategy: SamplingStrategy::default(),
+                strategy: BoxedStrategy::default(),
             };
             self.next_region_id += 1;
             self.regions.push(region);
