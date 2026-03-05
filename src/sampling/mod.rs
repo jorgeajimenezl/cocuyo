@@ -2,10 +2,12 @@ mod average;
 pub mod gpu;
 mod max;
 mod min;
+mod palette;
 
 pub use average::Average;
 pub use max::Max;
 pub use min::Min;
+pub use palette::Palette;
 
 use std::fmt;
 use std::sync::Arc;
@@ -84,6 +86,10 @@ impl BoxedStrategy {
     pub fn supports_gpu(&self) -> bool {
         self.0.supports_gpu()
     }
+
+    pub fn id(&self) -> &'static str {
+        self.0.id()
+    }
 }
 
 impl fmt::Debug for BoxedStrategy {
@@ -121,6 +127,7 @@ pub fn all_strategies() -> Vec<BoxedStrategy> {
         BoxedStrategy::new(Average),
         BoxedStrategy::new(Max),
         BoxedStrategy::new(Min),
+        BoxedStrategy::new(Palette),
     ]
 }
 
@@ -269,6 +276,37 @@ mod tests {
         let frame = make_2x2();
         // Sample only the first pixel (0,0) = red
         let result = sample_region(&frame, 0.0, 0.0, 1.0, 1.0, &average());
+        assert_eq!(result, Some((255, 0, 0)));
+    }
+
+    fn palette() -> BoxedStrategy {
+        BoxedStrategy::new(Palette)
+    }
+
+    #[test]
+    fn palette_dominant_color() {
+        // 4x4 frame: 12 red pixels + 4 blue pixels → palette returns red
+        #[rustfmt::skip]
+        let data = vec![
+            // Row 0: red, red, red, blue
+            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            // Row 1: red, red, red, blue
+            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            // Row 2: red, red, red, blue
+            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            // Row 3: red, red, red, blue
+            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+        ];
+        let frame = cpu_frame(data, 4, 4);
+        let result = sample_region(&frame, 0.0, 0.0, 4.0, 4.0, &palette());
+        assert_eq!(result, Some((255, 0, 0)));
+    }
+
+    #[test]
+    fn palette_single_color() {
+        // All pixels same color → returns that color
+        let frame = make_2x2();
+        let result = sample_region(&frame, 0.0, 0.0, 1.0, 1.0, &palette());
         assert_eq!(result, Some((255, 0, 0)));
     }
 }

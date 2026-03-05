@@ -1,0 +1,94 @@
+use super::SamplingStrategy;
+use super::gpu::HistogramBin;
+
+const NUM_BINS: usize = 512;
+
+/// Computes the dominant color using Fixed Histogram Quantization (8×8×8 bins).
+#[derive(Debug)]
+pub struct Palette;
+
+#[derive(Clone, Copy, Default)]
+struct Bin {
+    r_sum: u64,
+    g_sum: u64,
+    b_sum: u64,
+    count: u64,
+}
+
+#[inline(always)]
+fn bin_index(r: u8, g: u8, b: u8) -> usize {
+    ((r as usize >> 5) << 6) | ((g as usize >> 5) << 3) | (b as usize >> 5)
+}
+
+/// Extract the dominant color from a histogram of `HistogramBin` (u32 fields).
+/// Shared between CPU readback of GPU results and could be reused elsewhere.
+pub(super) fn extract_dominant_from_histogram(bins: &[HistogramBin]) -> Option<(u8, u8, u8)> {
+    let best = bins.iter().max_by_key(|b| b.count)?;
+    if best.count == 0 {
+        return None;
+    }
+    Some((
+        (best.r_sum / best.count) as u8,
+        (best.g_sum / best.count) as u8,
+        (best.b_sum / best.count) as u8,
+    ))
+}
+
+impl SamplingStrategy for Palette {
+    fn id(&self) -> &'static str {
+        "palette"
+    }
+
+    fn name(&self) -> &'static str {
+        "Palette (dominant)"
+    }
+
+    fn supports_gpu(&self) -> bool {
+        true
+    }
+
+    fn sample(
+        &self,
+        data: &[u8],
+        width: u32,
+        x0: u32,
+        y0: u32,
+        x1: u32,
+        y1: u32,
+        stride: u32,
+    ) -> Option<(u8, u8, u8)> {
+        let mut bins = [Bin::default(); NUM_BINS];
+
+        let mut py = y0;
+        while py < y1 {
+            let row_base = (py * width) as usize * 4;
+            let mut px = x0;
+            while px < x1 {
+                let idx = row_base + (px as usize) * 4;
+                if idx + 2 < data.len() {
+                    let r = data[idx];
+                    let g = data[idx + 1];
+                    let b = data[idx + 2];
+                    let bin = &mut bins[bin_index(r, g, b)];
+                    bin.r_sum += r as u64;
+                    bin.g_sum += g as u64;
+                    bin.b_sum += b as u64;
+                    bin.count += 1;
+                }
+                px += stride;
+            }
+            py += stride;
+        }
+
+        let best = bins.iter().max_by_key(|b| b.count)?;
+        if best.count == 0 {
+            return None;
+        }
+
+        Some((
+            (best.r_sum / best.count) as u8,
+            (best.g_sum / best.count) as u8,
+            (best.b_sum / best.count) as u8,
+        ))
+    }
+}
