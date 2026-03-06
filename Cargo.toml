@@ -3,6 +3,13 @@ name = "cocuyo"
 version = "0.2.0"
 edition = "2024"
 
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 [dependencies]
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "316900763ee710f719c390aa0a25c39a38d1ce12", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
 wgpu = "27"
