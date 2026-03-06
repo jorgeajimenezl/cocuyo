@@ -14,6 +14,7 @@ mod region;
 mod sampling;
 mod screen;
 mod theme;
+mod tray;
 mod widget;
 
 use app::Cocuyo;
@@ -24,7 +25,7 @@ fn main() -> iced::Result {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(tracing::Level::INFO.into())
                 .add_directive("wgpu_hal=warn".parse().unwrap())
-                .add_directive("iced_winit=warn".parse().unwrap())
+                .add_directive("iced_winit=warn".parse().unwrap()),
         )
         .init();
 
@@ -47,8 +48,11 @@ fn main() -> iced::Result {
         pipewire::init();
     }
 
+    // Create tray on main thread before iced daemon (required by tray-icon on Windows)
+    let tray_state = tray::create_tray();
+
     iced::daemon(
-        move || Cocuyo::new(app_config.clone()),
+        move || Cocuyo::new(app_config.clone(), tray_state),
         Cocuyo::update,
         Cocuyo::view,
     )

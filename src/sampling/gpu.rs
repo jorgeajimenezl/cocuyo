@@ -377,11 +377,7 @@ fn dispatch_passes(
         });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        pass.dispatch_workgroups(
-            (p.x1 - p.x0).div_ceil(16),
-            (p.y1 - p.y0).div_ceil(16),
-            1,
-        );
+        pass.dispatch_workgroups((p.x1 - p.x0).div_ceil(16), (p.y1 - p.y0).div_ceil(16), 1);
     }
 }
 
@@ -567,8 +563,11 @@ impl GpuSampler {
 
         if classified.gpu_count > 0 {
             self.ensure_params_buffer(classified.gpu_count);
-            self.avg_buffers
-                .ensure_capacity(&self.device, classified.avg_slots.len(), "gpu_avg_result");
+            self.avg_buffers.ensure_capacity(
+                &self.device,
+                classified.avg_slots.len(),
+                "gpu_avg_result",
+            );
             self.palette_buffers.ensure_capacity(
                 &self.device,
                 classified.palette_slots.len(),
@@ -740,8 +739,7 @@ impl GpuSampler {
                                 let bins: &[HistogramBin] = bytemuck::cast_slice(
                                     &mapped[offset..offset + PALETTE_RESULT_SIZE],
                                 );
-                                results[ri] =
-                                    super::palette::extract_dominant_from_histogram(bins);
+                                results[ri] = super::palette::extract_dominant_from_histogram(bins);
                             }
                         },
                     )?;

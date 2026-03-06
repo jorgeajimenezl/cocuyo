@@ -20,6 +20,7 @@ pub enum Message {
     BulbUpdateIntervalChanged(f32),
     MinBrightnessChanged(f32),
     WhiteColorTempChanged(f32),
+    MinimizeToTrayToggled(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,7 @@ pub enum Event {
     BulbUpdateIntervalChanged(u64),
     MinBrightnessChanged(u8),
     WhiteColorTempChanged(u16),
+    MinimizeToTrayChanged(bool),
 }
 
 pub struct Settings {
@@ -46,6 +48,7 @@ pub struct Settings {
     bulb_update_interval_ms: u64,
     min_brightness_percent: u8,
     white_color_temp: u16,
+    minimize_to_tray: bool,
 }
 
 impl Settings {
@@ -92,6 +95,7 @@ impl Settings {
             bulb_update_interval_ms: config.bulb_update_interval_ms,
             min_brightness_percent: config.min_brightness_percent,
             white_color_temp: config.white_color_temp,
+            minimize_to_tray: config.minimize_to_tray,
         }
     }
 
@@ -125,22 +129,21 @@ impl Settings {
             }
             Message::MinBrightnessChanged(val) => {
                 self.min_brightness_percent = val as u8;
-                (
-                    Task::none(),
-                    Some(Event::MinBrightnessChanged(val as u8)),
-                )
+                (Task::none(), Some(Event::MinBrightnessChanged(val as u8)))
             }
             Message::WhiteColorTempChanged(val) => {
                 self.white_color_temp = val as u16;
-                (
-                    Task::none(),
-                    Some(Event::WhiteColorTempChanged(val as u16)),
-                )
+                (Task::none(), Some(Event::WhiteColorTempChanged(val as u16)))
+            }
+            Message::MinimizeToTrayToggled(val) => {
+                self.minimize_to_tray = val;
+                (Task::none(), Some(Event::MinimizeToTrayChanged(val)))
             }
         }
     }
 
     pub fn view(&self) -> Element<'_> {
+        let general_section = self.build_general_section();
         let adapter_col = self.build_adapter_section();
         let sampling_section = self.build_sampling_section();
         let ambient_section = self.build_ambient_section();
@@ -149,6 +152,8 @@ impl Settings {
         let content = {
             let backend_section = self.build_backend_section();
             column![
+                general_section,
+                rule::horizontal(1).style(theme::styled_rule),
                 adapter_col,
                 rule::horizontal(1).style(theme::styled_rule),
                 backend_section,
@@ -164,6 +169,8 @@ impl Settings {
 
         #[cfg(not(target_os = "linux"))]
         let content = column![
+            general_section,
+            rule::horizontal(1).style(theme::styled_rule),
             adapter_col,
             rule::horizontal(1).style(theme::styled_rule),
             sampling_section,
@@ -187,6 +194,19 @@ impl Settings {
             .get(self.selected_backend_index)
             .cloned()
             .unwrap_or(GpuBackend::Cpu)
+    }
+
+    fn build_general_section(&self) -> iced::widget::Column<'_, Message> {
+        column![
+            text("General").size(18).color(theme::TEXT),
+            toggler(self.minimize_to_tray)
+                .label("Minimize to Tray")
+                .on_toggle(Message::MinimizeToTrayToggled),
+            text("Keep the app running in the system tray when the main window is closed.")
+                .size(12)
+                .color(theme::TEXT_DIM),
+        ]
+        .spacing(10)
     }
 
     fn build_adapter_section(&self) -> iced::widget::Column<'_, Message> {
@@ -294,9 +314,11 @@ impl Settings {
             toggler(self.force_cpu_sampling)
                 .label("Force CPU Sampling")
                 .on_toggle(Message::ForceCpuSamplingToggled),
-            text("Disable GPU compute shaders for color sampling. Use if you experience GPU issues.")
-                .size(12)
-                .color(theme::TEXT_DIM),
+            text(
+                "Disable GPU compute shaders for color sampling. Use if you experience GPU issues."
+            )
+            .size(12)
+            .color(theme::TEXT_DIM),
         ]
         .spacing(10)
     }
