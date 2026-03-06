@@ -20,6 +20,12 @@ pub struct AppConfig {
     pub min_brightness_percent: u8,
     #[serde(default = "default_white_temp")]
     pub white_color_temp: u16,
+    #[serde(default = "default_minimize_to_tray")]
+    pub minimize_to_tray: bool,
+}
+
+fn default_minimize_to_tray() -> bool {
+    true
 }
 
 fn default_bulb_update_ms() -> u64 {

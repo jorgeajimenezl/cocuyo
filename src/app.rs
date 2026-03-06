@@ -51,7 +51,7 @@ pub enum Message {
     OpenSettings(window::Id),
     OpenBulbSetup(window::Id),
     #[cfg(target_os = "windows")]
-    OpenCapturePicker(window::Id, PickerIntent),
+    OpenCapturePicker(Option<window::Id>, PickerIntent),
     StartRecording,
     StopRecording,
     StartAmbient,
@@ -68,6 +68,8 @@ pub enum Message {
     CapturePicker(capture_picker::Message),
 
     GpuSamplingComplete(Vec<(usize, Option<(u8, u8, u8)>)>),
+
+    TrayEvent(crate::tray::TrayAction),
 
     ExitApp,
     Noop,
@@ -91,6 +93,8 @@ pub struct Cocuyo {
 
     sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
 
+    tray: &'static crate::tray::TrayState,
+
     // Screen state
     settings: settings::Settings,
     #[cfg(target_os = "windows")]
@@ -100,7 +104,7 @@ pub struct Cocuyo {
 }
 
 impl Cocuyo {
-    pub fn new(config: AppConfig) -> (Self, Task<Message>) {
+    pub fn new(config: AppConfig, tray: &'static crate::tray::TrayState) -> (Self, Task<Message>) {
         let mut app = Self {
             windows: BTreeMap::new(),
             current_frame: None,
@@ -116,6 +120,7 @@ impl Cocuyo {
             next_region_id: 1,
             selected_region: None,
             sampling_worker: None,
+            tray,
             settings: settings::Settings::new(&config),
             config,
             #[cfg(target_os = "windows")]
@@ -159,22 +164,29 @@ impl Cocuyo {
                     self.capture_picker = None;
                     return Task::none();
                 }
-                if kind == Some(WindowKind::Main) || self.windows.is_empty() {
-                    if self.is_ambient_active || self.is_recording {
-                        if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                            let _ = cmd_tx.try_send(RecordingCommand::Stop);
-                        }
-                    }
-                    if let Some(states) = self.saved_bulb_states.take() {
-                        Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                            Message::ExitApp
-                        })
+                if kind == Some(WindowKind::Main) {
+                    if self.config.minimize_to_tray {
+                        // Hide to tray — don't stop recording/ambient, don't exit
+                        self.tray.update_menu_text(false, self.is_ambient_active);
+                        return Task::none();
                     } else {
-                        iced::exit()
+                        // Exit normally: stop recording, restore bulbs
+                        if self.is_ambient_active || self.is_recording {
+                            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                                let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                            }
+                        }
+                        return if let Some(states) = self.saved_bulb_states.take() {
+                            Task::perform(
+                                crate::ambient::restore_bulb_states(states),
+                                |()| Message::ExitApp,
+                            )
+                        } else {
+                            iced::exit()
+                        };
                     }
-                } else {
-                    Task::none()
                 }
+                Task::none()
             }
             Message::DragWindow(id) => window::drag(id),
             Message::CloseWindow(id) => window::close(id),
@@ -193,7 +205,7 @@ impl Cocuyo {
                     WindowKind::CapturePicker,
                     Size::new(500.0, 500.0),
                     Size::new(350.0, 300.0),
-                    Some(parent),
+                    parent,
                 )
             }
             Message::StartRecording => {
@@ -206,9 +218,7 @@ impl Cocuyo {
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    let parent = self
-                        .find_window_id(WindowKind::Main)
-                        .expect("Main window must exist to start recording");
+                    let parent = self.find_window_id(WindowKind::Main);
                     Task::done(Message::OpenCapturePicker(
                         parent,
                         PickerIntent::StartRecording,
@@ -262,6 +272,48 @@ impl Cocuyo {
                     task
                 }
             }
+            Message::TrayEvent(action) => {
+                use crate::tray::TrayAction;
+                match action {
+                    TrayAction::ToggleWindow => {
+                        if let Some(id) = self.find_window_id(WindowKind::Main) {
+                            self.tray.update_menu_text(false, self.is_ambient_active);
+                            window::close(id)
+                        } else {
+                            self.tray.update_menu_text(true, self.is_ambient_active);
+                            self.open_window(
+                                WindowKind::Main,
+                                Size::new(1200.0, 750.0),
+                                Size::new(800.0, 500.0),
+                                None,
+                            )
+                        }
+                    }
+                    TrayAction::ToggleAmbient => {
+                        if self.is_ambient_active {
+                            Task::done(Message::StopAmbient)
+                        } else {
+                            Task::done(Message::StartAmbient)
+                        }
+                    }
+                    TrayAction::Exit => {
+                        // Graceful shutdown: stop recording, restore bulbs, then exit
+                        if self.is_ambient_active || self.is_recording {
+                            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                                let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                            }
+                        }
+                        if let Some(states) = self.saved_bulb_states.take() {
+                            Task::perform(
+                                crate::ambient::restore_bulb_states(states),
+                                |()| Message::ExitApp,
+                            )
+                        } else {
+                            iced::exit()
+                        }
+                    }
+                }
+            }
             Message::Noop => Task::none(),
             Message::ExitApp => iced::exit(),
             Message::StartAmbient => {
@@ -270,9 +322,7 @@ impl Cocuyo {
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    let parent = self
-                        .find_window_id(WindowKind::Main)
-                        .expect("Main window must exist to start ambient");
+                    let parent = self.find_window_id(WindowKind::Main);
                     Task::done(Message::OpenCapturePicker(
                         parent,
                         PickerIntent::StartAmbient,
@@ -295,6 +345,10 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
+                self.tray.update_menu_text(
+                    self.find_window_id(WindowKind::Main).is_some(),
+                    true,
+                );
 
                 // Lazily spawn GPU sampling worker when ambient starts
                 if self.sampling_worker.is_none() && !self.config.force_cpu_sampling {
@@ -320,6 +374,10 @@ impl Cocuyo {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
                 self.sampling_worker = None;
+                self.tray.update_menu_text(
+                    self.find_window_id(WindowKind::Main).is_some(),
+                    false,
+                );
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -342,6 +400,10 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
+                            self.tray.update_menu_text(
+                                self.find_window_id(WindowKind::Main).is_some(),
+                                false,
+                            );
                         }
                         self.recording_state = state;
                     }
@@ -548,6 +610,11 @@ impl Cocuyo {
             subs.push(self.build_recording_subscription());
         }
 
+        subs.push(
+            Subscription::run_with((), crate::tray::tray_subscription)
+                .map(Message::TrayEvent),
+        );
+
         Subscription::batch(subs)
     }
 
@@ -610,6 +677,11 @@ impl Cocuyo {
             }
             settings::Event::WhiteColorTempChanged(temp) => {
                 self.config.white_color_temp = temp;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::MinimizeToTrayChanged(val) => {
+                self.config.minimize_to_tray = val;
                 self.config.save();
                 Task::none()
             }
