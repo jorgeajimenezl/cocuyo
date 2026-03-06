@@ -4,7 +4,7 @@ use tracing::warn;
 
 use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub preferred_adapter: Option<GpuAdapter>,
     pub preferred_backend: Option<String>,
@@ -38,6 +38,22 @@ fn default_min_brightness() -> u8 {
 
 fn default_white_temp() -> u16 {
     6500
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            preferred_adapter: None,
+            preferred_backend: None,
+            saved_bulbs: Vec::new(),
+            selected_bulb_macs: Vec::new(),
+            force_cpu_sampling: false,
+            bulb_update_interval_ms: default_bulb_update_ms(),
+            min_brightness_percent: default_min_brightness(),
+            white_color_temp: default_white_temp(),
+            minimize_to_tray: default_minimize_to_tray(),
+        }
+    }
 }
 
 impl AppConfig {

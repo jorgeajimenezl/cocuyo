@@ -94,6 +94,7 @@ pub struct Cocuyo {
     sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
 
     tray: &'static crate::tray::TrayState,
+    tray_hide_requested: bool,
 
     // Screen state
     settings: settings::Settings,
@@ -121,6 +122,7 @@ impl Cocuyo {
             selected_region: None,
             sampling_worker: None,
             tray,
+            tray_hide_requested: false,
             settings: settings::Settings::new(&config),
             config,
             #[cfg(target_os = "windows")]
@@ -165,7 +167,8 @@ impl Cocuyo {
                     return Task::none();
                 }
                 if kind == Some(WindowKind::Main) {
-                    if self.config.minimize_to_tray {
+                    if self.config.minimize_to_tray || self.tray_hide_requested {
+                        self.tray_hide_requested = false;
                         // Hide to tray — don't stop recording/ambient, don't exit
                         self.tray.update_menu_text(false, self.is_ambient_active);
                         return Task::none();
@@ -277,6 +280,7 @@ impl Cocuyo {
                 match action {
                     TrayAction::ToggleWindow => {
                         if let Some(id) = self.find_window_id(WindowKind::Main) {
+                            self.tray_hide_requested = true;
                             self.tray.update_menu_text(false, self.is_ambient_active);
                             window::close(id)
                         } else {
