@@ -390,6 +390,9 @@ impl Cocuyo {
             Message::RecordingEvent(event) => {
                 match event {
                     RecordingEvent::Ready(cmd_tx) => {
+                        let _ = cmd_tx.try_send(RecordingCommand::SetFrameRateLimit(
+                            self.config.capture_fps_limit,
+                        ));
                         self.recording_cmd_tx = Some(cmd_tx);
                     }
                     RecordingEvent::StateChanged(state) => {
@@ -682,6 +685,14 @@ impl Cocuyo {
             settings::Event::MinimizeToTrayChanged(val) => {
                 self.config.minimize_to_tray = val;
                 self.config.save();
+                Task::none()
+            }
+            settings::Event::CaptureFpsLimitChanged(fps) => {
+                self.config.capture_fps_limit = fps;
+                self.config.save();
+                if let Some(ref cmd_tx) = self.recording_cmd_tx {
+                    let _ = cmd_tx.try_send(RecordingCommand::SetFrameRateLimit(fps));
+                }
                 Task::none()
             }
         }

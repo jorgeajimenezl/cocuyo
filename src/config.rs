@@ -22,10 +22,16 @@ pub struct AppConfig {
     pub white_color_temp: u16,
     #[serde(default = "default_minimize_to_tray")]
     pub minimize_to_tray: bool,
+    #[serde(default = "default_capture_fps_limit")]
+    pub capture_fps_limit: u32,
 }
 
 fn default_minimize_to_tray() -> bool {
     true
+}
+
+fn default_capture_fps_limit() -> u32 {
+    0
 }
 
 fn default_bulb_update_ms() -> u64 {
@@ -52,6 +58,7 @@ impl Default for AppConfig {
             min_brightness_percent: default_min_brightness(),
             white_color_temp: default_white_temp(),
             minimize_to_tray: default_minimize_to_tray(),
+            capture_fps_limit: default_capture_fps_limit(),
         }
     }
 }

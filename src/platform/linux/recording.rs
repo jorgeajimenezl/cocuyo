@@ -1,6 +1,7 @@
 use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use iced::futures::Stream;
 use tokio::sync::mpsc;
@@ -69,6 +70,10 @@ pub fn recording_subscription(
         let pw_handle =
             std::thread::spawn(move || stream::start_streaming(node_id, fd, frame_tx, backend));
 
+        // Frame rate gating state
+        let mut last_forwarded: Option<Instant> = None;
+        let mut frame_interval: Option<Duration> = None;
+
         // Forward frames until PipeWire thread finishes or we receive a stop command.
         // On stop: drop frame_rx to close the channel, causing the PipeWire thread
         // to detect Closed on its next try_send and call mainloop.quit().
@@ -77,6 +82,14 @@ pub fn recording_subscription(
                 frame = frame_rx.recv() => {
                     match frame {
                         Some(frame) => {
+                            if let Some(interval) = frame_interval {
+                                if let Some(last) = last_forwarded {
+                                    if last.elapsed() < interval {
+                                        continue;
+                                    }
+                                }
+                            }
+                            last_forwarded = Some(Instant::now());
                             if output.send(RecordingEvent::Frame(frame)).await.is_err() {
                                 break;
                             }
@@ -94,6 +107,14 @@ pub fn recording_subscription(
                             // Drop receiver to signal PipeWire thread via channel close
                             drop(frame_rx);
                             break;
+                        }
+                        Some(RecordingCommand::SetFrameRateLimit(fps)) => {
+                            frame_interval = if fps == 0 {
+                                None
+                            } else {
+                                Some(Duration::from_secs_f64(1.0 / fps as f64))
+                            };
+                            info!(fps = fps, "Frame rate limit updated");
                         }
                     }
                 }

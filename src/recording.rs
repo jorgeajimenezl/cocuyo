@@ -9,6 +9,7 @@ use crate::frame::FrameData;
 #[derive(Debug)]
 pub enum RecordingCommand {
     Stop,
+    SetFrameRateLimit(u32),
 }
 
 /// Events sent from the recording subscription to the app.

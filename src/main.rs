@@ -20,6 +20,17 @@ mod widget;
 use app::Cocuyo;
 
 fn main() -> iced::Result {
+    // Re-attach to the parent console (if launched from a terminal) so that
+    // log output is visible, while still suppressing the console window when
+    // the .exe is double-clicked (thanks to windows_subsystem = "windows").
+    #[cfg(target_os = "windows")]
+    unsafe {
+        windows::Win32::System::Console::AttachConsole(
+            windows::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        )
+        .ok();
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
