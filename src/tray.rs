@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::OnceLock;
 
 use futures::Stream;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId, PredefinedMenuItem};
+use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 #[derive(Debug, Clone)]
@@ -114,12 +114,11 @@ impl TrayState {
     pub fn update_menu_text(&self, main_visible: bool, ambient_active: bool) {
         self.toggle_window_item
             .set_text(if main_visible { "Hide" } else { "Show" });
-        self.toggle_ambient_item
-            .set_text(if ambient_active {
-                "Stop Ambient"
-            } else {
-                "Start Ambient"
-            });
+        self.toggle_ambient_item.set_text(if ambient_active {
+            "Stop Ambient"
+        } else {
+            "Start Ambient"
+        });
     }
 }
 

@@ -209,10 +209,10 @@ pub fn view<'a>(
     }
 
     let controls_panel = controls_panel
-    .spacing(8)
-    .padding(10)
-    .width(Length::Fixed(250.0))
-    .height(Fill);
+        .spacing(8)
+        .padding(10)
+        .width(Length::Fixed(250.0))
+        .height(Fill);
 
     // Status bar
     let status_text = if is_ambient_active {

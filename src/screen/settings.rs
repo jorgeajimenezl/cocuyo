@@ -129,17 +129,11 @@ impl Settings {
             }
             Message::MinBrightnessChanged(val) => {
                 self.min_brightness_percent = val as u8;
-                (
-                    Task::none(),
-                    Some(Event::MinBrightnessChanged(val as u8)),
-                )
+                (Task::none(), Some(Event::MinBrightnessChanged(val as u8)))
             }
             Message::WhiteColorTempChanged(val) => {
                 self.white_color_temp = val as u16;
-                (
-                    Task::none(),
-                    Some(Event::WhiteColorTempChanged(val as u16)),
-                )
+                (Task::none(), Some(Event::WhiteColorTempChanged(val as u16)))
             }
             Message::MinimizeToTrayToggled(val) => {
                 self.minimize_to_tray = val;
@@ -320,9 +314,11 @@ impl Settings {
             toggler(self.force_cpu_sampling)
                 .label("Force CPU Sampling")
                 .on_toggle(Message::ForceCpuSamplingToggled),
-            text("Disable GPU compute shaders for color sampling. Use if you experience GPU issues.")
-                .size(12)
-                .color(theme::TEXT_DIM),
+            text(
+                "Disable GPU compute shaders for color sampling. Use if you experience GPU issues."
+            )
+            .size(12)
+            .color(theme::TEXT_DIM),
         ]
         .spacing(10)
     }

@@ -180,10 +180,9 @@ impl Cocuyo {
                             }
                         }
                         return if let Some(states) = self.saved_bulb_states.take() {
-                            Task::perform(
-                                crate::ambient::restore_bulb_states(states),
-                                |()| Message::ExitApp,
-                            )
+                            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                                Message::ExitApp
+                            })
                         } else {
                             iced::exit()
                         };
@@ -308,10 +307,9 @@ impl Cocuyo {
                             }
                         }
                         if let Some(states) = self.saved_bulb_states.take() {
-                            Task::perform(
-                                crate::ambient::restore_bulb_states(states),
-                                |()| Message::ExitApp,
-                            )
+                            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                                Message::ExitApp
+                            })
                         } else {
                             iced::exit()
                         }
@@ -349,19 +347,16 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
-                self.tray.update_menu_text(
-                    self.find_window_id(WindowKind::Main).is_some(),
-                    true,
-                );
+                self.tray
+                    .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
                 // Lazily spawn GPU sampling worker when ambient starts
                 if self.sampling_worker.is_none() && !self.config.force_cpu_sampling {
                     if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
-                        self.sampling_worker =
-                            Some(crate::sampling::gpu::SamplingWorker::spawn(
-                                device.clone(),
-                                queue.clone(),
-                            ));
+                        self.sampling_worker = Some(crate::sampling::gpu::SamplingWorker::spawn(
+                            device.clone(),
+                            queue.clone(),
+                        ));
                     }
                 }
                 if !self.is_recording {
@@ -378,10 +373,8 @@ impl Cocuyo {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
                 self.sampling_worker = None;
-                self.tray.update_menu_text(
-                    self.find_window_id(WindowKind::Main).is_some(),
-                    false,
-                );
+                self.tray
+                    .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), false);
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -418,7 +411,12 @@ impl Cocuyo {
                         if self.is_ambient_active {
                             let should_update = self
                                 .last_bulb_update
-                                .map(|t| t.elapsed() >= Duration::from_millis(self.config.bulb_update_interval_ms))
+                                .map(|t| {
+                                    t.elapsed()
+                                        >= Duration::from_millis(
+                                            self.config.bulb_update_interval_ms,
+                                        )
+                                })
                                 .unwrap_or(true);
 
                             if should_update {
@@ -466,15 +464,14 @@ impl Cocuyo {
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
                                         for region in &mut self.regions {
-                                            region.sampled_color =
-                                                crate::sampling::sample_region(
-                                                    sf,
-                                                    region.x,
-                                                    region.y,
-                                                    region.width,
-                                                    region.height,
-                                                    &region.strategy,
-                                                );
+                                            region.sampled_color = crate::sampling::sample_region(
+                                                sf,
+                                                region.x,
+                                                region.y,
+                                                region.width,
+                                                region.height,
+                                                &region.strategy,
+                                            );
                                         }
                                     }
 
@@ -500,7 +497,7 @@ impl Cocuyo {
                 if !self.is_ambient_active {
                     return Task::none();
                 }
-                
+
                 self.last_bulb_update = Some(Instant::now());
                 for (region_id, color) in &results {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
@@ -513,10 +510,9 @@ impl Cocuyo {
                     self.config.min_brightness_percent,
                     self.config.white_color_temp,
                 ) {
-                    Task::perform(
-                        crate::ambient::dispatch_bulb_colors(targets),
-                        |()| Message::Noop,
-                    )
+                    Task::perform(crate::ambient::dispatch_bulb_colors(targets), |()| {
+                        Message::Noop
+                    })
                 } else {
                     Task::none()
                 }
@@ -615,8 +611,7 @@ impl Cocuyo {
         }
 
         subs.push(
-            Subscription::run_with((), crate::tray::tray_subscription)
-                .map(Message::TrayEvent),
+            Subscription::run_with((), crate::tray::tray_subscription).map(Message::TrayEvent),
         );
 
         Subscription::batch(subs)
