@@ -420,6 +420,7 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
+                            self.current_frame = None;
                             self.tray.update_menu_text(
                                 self.find_window_id(WindowKind::Main).is_some(),
                                 false,
