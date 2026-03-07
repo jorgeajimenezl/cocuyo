@@ -8,7 +8,6 @@ use screencapturekit::content_sharing_picker::{
     AsyncSCContentSharingPicker, SCContentSharingPickerConfiguration,
     SCContentSharingPickerMode, SCPickerOutcome,
 };
-use screencapturekit::cv::pixel_buffer::CVPixelBufferLockFlags;
 use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::output_type::SCStreamOutputType;
 use tokio::sync::mpsc;
@@ -91,12 +90,12 @@ pub fn recording_subscription(
         );
 
         // Configure capture stream
-        let frame_rate = if fps_limit == 0 { 60.0 } else { fps_limit as f64 };
+        let fps = if fps_limit == 0 { 60 } else { fps_limit };
         let config = SCStreamConfiguration::new()
-            .with_width(pixel_width as f64)
-            .with_height(pixel_height as f64)
+            .with_width(pixel_width)
+            .with_height(pixel_height)
             .with_shows_cursor(false)
-            .with_frame_rate(frame_rate);
+            .with_fps(fps);
 
         let mut stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
 
