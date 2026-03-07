@@ -17,6 +17,9 @@ pub const BORDER: Color = color!(0x4f474d);
 pub const DANGER: Color = color!(0xe06b75);
 pub const WARNING: Color = color!(0xffa07a);
 pub const SUCCESS: Color = color!(0xb1b695);
+pub const HUD_BG: Color = Color::from_rgba8(0x24, 0x22, 0x26, 0.75);
+pub const HUD_BORDER: Color = Color::from_rgba8(0x4f, 0x47, 0x4d, 0.5);
+pub const HUD_TEXT: Color = Color::from_rgba8(0xfe, 0xcd, 0xb2, 0.9);
 
 // ── Theme constructor ────────────────────────────────────────
 

@@ -67,7 +67,9 @@ pub enum Message {
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
 
-    GpuSamplingComplete(Vec<(usize, Option<(u8, u8, u8)>)>),
+    GpuSamplingComplete(crate::sampling::gpu::SamplingResult),
+
+    BulbDispatchComplete(f64),
 
     TrayEvent(crate::tray::TrayAction),
 
@@ -77,10 +79,14 @@ pub enum Message {
 
 pub struct Cocuyo {
     windows: BTreeMap<window::Id, WindowKind>,
+    config: AppConfig,
+
+    // Recording state
     current_frame: Option<Arc<FrameData>>,
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
+    recording_fps_limit: u32,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
     bulb_setup: bulb_setup::BulbSetupState,
     is_ambient_active: bool,
@@ -89,9 +95,12 @@ pub struct Cocuyo {
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
-    config: AppConfig,
 
+    // GPU sampling worker
     sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
+
+    // Performance stats
+    perf_stats: crate::perf_stats::PerfStats,
 
     tray: &'static crate::tray::TrayState,
     tray_hide_requested: bool,
@@ -112,6 +121,7 @@ impl Cocuyo {
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
+            recording_fps_limit: 0,
             recording_cmd_tx: None,
             bulb_setup: bulb_setup::BulbSetupState::new(&config),
             is_ambient_active: false,
@@ -121,6 +131,7 @@ impl Cocuyo {
             next_region_id: 1,
             selected_region: None,
             sampling_worker: None,
+            perf_stats: crate::perf_stats::PerfStats::new(),
             tray,
             tray_hide_requested: false,
             settings: settings::Settings::new(&config),
@@ -216,6 +227,7 @@ impl Cocuyo {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
+                    self.recording_fps_limit = self.config.capture_fps_limit;
                     Task::none()
                 }
                 #[cfg(target_os = "windows")]
@@ -228,6 +240,7 @@ impl Cocuyo {
                 }
             }
             Message::StopRecording => {
+                self.perf_stats.reset();
                 if let Some(cmd_tx) = self.recording_cmd_tx.take() {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
@@ -366,10 +379,12 @@ impl Cocuyo {
                     crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
+                    self.recording_fps_limit = self.config.capture_fps_limit;
                 }
                 Task::none()
             }
             Message::StopAmbient => {
+                self.perf_stats.reset();
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
                 self.sampling_worker = None;
@@ -394,6 +409,7 @@ impl Cocuyo {
                     }
                     RecordingEvent::StateChanged(state) => {
                         if state == RecordingState::Idle {
+                            self.perf_stats.reset();
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.recording_cmd_tx = None;
@@ -405,6 +421,7 @@ impl Cocuyo {
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
+                        self.perf_stats.record_frame_arrival();
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
@@ -460,6 +477,7 @@ impl Cocuyo {
 
                                 // CPU fallback (fast, stays on main thread)
                                 if self.sampling_worker.is_none() {
+                                    self.perf_stats.mark_sampling_start();
                                     self.last_bulb_update = Some(Instant::now());
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
@@ -474,6 +492,7 @@ impl Cocuyo {
                                             );
                                         }
                                     }
+                                    self.perf_stats.record_sampling_complete();
 
                                     if let Some(targets) = crate::ambient::build_bulb_targets(
                                         &self.regions,
@@ -481,9 +500,12 @@ impl Cocuyo {
                                         self.config.min_brightness_percent,
                                         self.config.white_color_temp,
                                     ) {
+                                        let dispatch_start = Instant::now();
                                         return Task::perform(
                                             crate::ambient::dispatch_bulb_colors(targets),
-                                            |()| Message::Noop,
+                                            move |()| Message::BulbDispatchComplete(
+                                                dispatch_start.elapsed().as_secs_f64() * 1000.0,
+                                            ),
                                         );
                                     }
                                 }
@@ -493,13 +515,14 @@ impl Cocuyo {
                 }
                 Task::none()
             }
-            Message::GpuSamplingComplete(results) => {
+            Message::GpuSamplingComplete(result) => {
+                self.perf_stats.record_sampling_time(result.gpu_time_ms);
                 if !self.is_ambient_active {
                     return Task::none();
                 }
 
                 self.last_bulb_update = Some(Instant::now());
-                for (region_id, color) in &results {
+                for (region_id, color) in &result.colors {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
                         region.sampled_color = *color;
                     }
@@ -510,12 +533,20 @@ impl Cocuyo {
                     self.config.min_brightness_percent,
                     self.config.white_color_temp,
                 ) {
-                    Task::perform(crate::ambient::dispatch_bulb_colors(targets), |()| {
-                        Message::Noop
-                    })
+                    let dispatch_start = Instant::now();
+                    Task::perform(
+                        crate::ambient::dispatch_bulb_colors(targets),
+                        move |()| Message::BulbDispatchComplete(
+                            dispatch_start.elapsed().as_secs_f64() * 1000.0,
+                        ),
+                    )
                 } else {
                     Task::none()
                 }
+            }
+            Message::BulbDispatchComplete(elapsed_ms) => {
+                self.perf_stats.record_bulb_dispatch(elapsed_ms);
+                Task::none()
             }
             Message::RegionStrategyChanged(id, strategy) => {
                 if let Some(region) = self.regions.iter_mut().find(|r| r.id == id) {
@@ -568,6 +599,8 @@ impl Cocuyo {
                     self.bulb_setup.selected_bulbs().len(),
                     &self.regions,
                     self.selected_region,
+                    &self.perf_stats,
+                    self.config.show_perf_overlay,
                 )
             }
             Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
@@ -622,7 +655,7 @@ impl Cocuyo {
         let backend = self.settings.selected_backend();
 
         Subscription::run_with(
-            (self.session_id, backend),
+            (self.session_id, backend, self.recording_fps_limit),
             recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
@@ -633,8 +666,11 @@ impl Cocuyo {
         let target = self
             .capture_target
             .expect("capture_target must be set before recording");
-        Subscription::run_with((self.session_id, target), recording::recording_subscription)
-            .map(Message::RecordingEvent)
+        Subscription::run_with(
+            (self.session_id, target, self.recording_fps_limit),
+            recording::recording_subscription,
+        )
+        .map(Message::RecordingEvent)
     }
 
     // --- Event handlers for delegated screens ---
@@ -681,6 +717,16 @@ impl Cocuyo {
             }
             settings::Event::MinimizeToTrayChanged(val) => {
                 self.config.minimize_to_tray = val;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::CaptureFpsLimitChanged(fps) => {
+                self.config.capture_fps_limit = fps;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::ShowPerfOverlayChanged(val) => {
+                self.config.show_perf_overlay = val;
                 self.config.save();
                 Task::none()
             }
@@ -734,6 +780,7 @@ impl Cocuyo {
                         crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                         self.is_recording = true;
                         self.session_id += 1;
+                        self.recording_fps_limit = self.config.capture_fps_limit;
                         close_task
                     }
                     PickerIntent::StartAmbient => {

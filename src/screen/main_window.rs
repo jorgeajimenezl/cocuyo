@@ -6,10 +6,12 @@ use iced::{Center, Color, Fill, Length};
 
 use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
+use crate::perf_stats::PerfStats;
 use crate::region::Region;
 use crate::sampling;
 use crate::theme;
 use crate::widget::Element;
+use crate::widget::perf_hud::PerfHud;
 use crate::widget::region_overlay::RegionOverlay;
 use crate::widget::video_shader::VideoScene;
 
@@ -23,6 +25,8 @@ pub fn view<'a>(
     selected_count: usize,
     regions: &'a [Region],
     selected_region: Option<usize>,
+    perf_stats: &'a PerfStats,
+    show_perf_overlay: bool,
 ) -> Element<'a, Message> {
     let menu_bar = container(
         row![
@@ -39,17 +43,25 @@ pub fn view<'a>(
     .width(Fill)
     .style(theme::menu_bar_container);
 
-    // Left panel: video preview + region overlay
+    // Left panel: video preview + region overlay + perf HUD
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video = shader(VideoScene::new(Some(f))).width(Fill).height(Fill);
+            let video: Element<'a, Message> =
+                shader(VideoScene::new(Some(f))).width(Fill).height(Fill).into();
+
+            let mut layers: Vec<Element<'a, Message>> = vec![video];
 
             if is_ambient_active {
                 let overlay = RegionOverlay::new(regions, fw, fh, selected_region).view();
-                stack![video, overlay].width(Fill).height(Fill).into()
-            } else {
-                video.into()
+                layers.push(overlay.into());
             }
+
+            if show_perf_overlay && perf_stats.has_frame_data() {
+                let hud: Element<'a, Message> = PerfHud::new(perf_stats).view().into();
+                layers.push(hud);
+            }
+
+            stack(layers).width(Fill).height(Fill).into()
         }
         _ => center(
             column![

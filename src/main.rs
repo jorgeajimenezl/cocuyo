@@ -8,6 +8,7 @@ mod app;
 mod config;
 mod frame;
 mod gpu_context;
+mod perf_stats;
 mod platform;
 mod recording;
 mod region;
@@ -20,6 +21,14 @@ mod widget;
 use app::Cocuyo;
 
 fn main() -> iced::Result {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        windows::Win32::System::Console::AttachConsole(
+            windows::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        )
+        .ok();
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()

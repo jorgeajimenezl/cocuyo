@@ -1,5 +1,6 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tracing::info;
 
@@ -28,10 +29,26 @@ pub enum SendResult<M> {
     Dead,
 }
 
+/// Results from a GPU sampling request, including timing measured on the worker thread.
+#[derive(Debug, Clone)]
+pub struct SamplingResult {
+    pub colors: Vec<(usize, Option<(u8, u8, u8)>)>,
+    pub gpu_time_ms: f64,
+}
+
+impl Default for SamplingResult {
+    fn default() -> Self {
+        Self {
+            colors: Vec::new(),
+            gpu_time_ms: 0.0,
+        }
+    }
+}
+
 struct SamplingRequest {
     frame: Arc<FrameData>,
     regions: Vec<RegionParams>,
-    result_tx: tokio::sync::oneshot::Sender<Vec<(usize, Option<(u8, u8, u8)>)>>,
+    result_tx: tokio::sync::oneshot::Sender<SamplingResult>,
 }
 
 /// Handle to a background GPU sampling thread.
@@ -52,7 +69,9 @@ impl SamplingWorker {
             .spawn(move || {
                 let mut sampler = GpuSampler::new(device, queue);
                 while let Ok(request) = request_rx.recv() {
+                    let start = Instant::now();
                     let results = sampler.sample_regions(&request.frame, &request.regions);
+                    let gpu_time_ms = start.elapsed().as_secs_f64() * 1000.0;
                     let colors = match results {
                         Ok(v) => v,
                         Err(e) => {
@@ -64,7 +83,7 @@ impl SamplingWorker {
                                 .collect()
                         }
                     };
-                    let _ = request.result_tx.send(colors);
+                    let _ = request.result_tx.send(SamplingResult { colors, gpu_time_ms });
                 }
                 info!("GPU sampler worker thread exiting");
             })
@@ -85,7 +104,7 @@ impl SamplingWorker {
         &self,
         frame: Arc<FrameData>,
         regions: Vec<RegionParams>,
-        map_fn: fn(Vec<(usize, Option<(u8, u8, u8)>)>) -> M,
+        map_fn: fn(SamplingResult) -> M,
     ) -> SendResult<M> {
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let request = SamplingRequest {

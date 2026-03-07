@@ -1,4 +1,4 @@
-use iced::widget::rule;
+use iced::widget::{rule, scrollable};
 use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, tooltip};
 use iced::{Fill, Task, padding};
 
@@ -21,6 +21,8 @@ pub enum Message {
     MinBrightnessChanged(f32),
     WhiteColorTempChanged(f32),
     MinimizeToTrayToggled(bool),
+    CaptureFpsLimitChanged(f32),
+    ShowPerfOverlayToggled(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +36,8 @@ pub enum Event {
     MinBrightnessChanged(u8),
     WhiteColorTempChanged(u16),
     MinimizeToTrayChanged(bool),
+    CaptureFpsLimitChanged(u32),
+    ShowPerfOverlayChanged(bool),
 }
 
 pub struct Settings {
@@ -49,6 +53,8 @@ pub struct Settings {
     min_brightness_percent: u8,
     white_color_temp: u16,
     minimize_to_tray: bool,
+    capture_fps_limit: u32,
+    show_perf_overlay: bool,
 }
 
 impl Settings {
@@ -96,6 +102,8 @@ impl Settings {
             min_brightness_percent: config.min_brightness_percent,
             white_color_temp: config.white_color_temp,
             minimize_to_tray: config.minimize_to_tray,
+            capture_fps_limit: config.capture_fps_limit,
+            show_perf_overlay: config.show_perf_overlay,
         }
     }
 
@@ -139,6 +147,17 @@ impl Settings {
                 self.minimize_to_tray = val;
                 (Task::none(), Some(Event::MinimizeToTrayChanged(val)))
             }
+            Message::CaptureFpsLimitChanged(val) => {
+                self.capture_fps_limit = val as u32;
+                (
+                    Task::none(),
+                    Some(Event::CaptureFpsLimitChanged(val as u32)),
+                )
+            }
+            Message::ShowPerfOverlayToggled(val) => {
+                self.show_perf_overlay = val;
+                (Task::none(), Some(Event::ShowPerfOverlayChanged(val)))
+            }
         }
     }
 
@@ -181,7 +200,7 @@ impl Settings {
         .width(Fill)
         .padding(padding::all(20));
 
-        container(content)
+        container(scrollable(content))
             .width(Fill)
             .height(Fill)
             .style(theme::styled_container)
@@ -203,6 +222,12 @@ impl Settings {
                 .label("Minimize to Tray")
                 .on_toggle(Message::MinimizeToTrayToggled),
             text("Keep the app running in the system tray when the main window is closed.")
+                .size(12)
+                .color(theme::TEXT_DIM),
+            toggler(self.show_perf_overlay)
+                .label("Performance Overlay")
+                .on_toggle(Message::ShowPerfOverlayToggled),
+            text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
                 .size(12)
                 .color(theme::TEXT_DIM),
         ]
@@ -311,6 +336,25 @@ impl Settings {
     fn build_sampling_section(&self) -> iced::widget::Column<'_, Message> {
         column![
             text("Sampling").size(18).color(theme::TEXT),
+            column![
+                text(if self.capture_fps_limit == 0 {
+                    "Capture Frame Rate: Unlimited".to_string()
+                } else {
+                    format!("Capture Frame Rate: {} fps", self.capture_fps_limit)
+                })
+                .size(14)
+                .color(theme::TEXT),
+                slider(
+                    0.0..=60.0,
+                    self.capture_fps_limit as f32,
+                    Message::CaptureFpsLimitChanged,
+                )
+                .step(5.0),
+                text("Limit how many frames per second are processed. Lower values reduce CPU/GPU usage. 0 = unlimited.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            ]
+            .spacing(5),
             toggler(self.force_cpu_sampling)
                 .label("Force CPU Sampling")
                 .on_toggle(Message::ForceCpuSamplingToggled),
