@@ -8,6 +8,7 @@ use screencapturekit::async_api::AsyncSCContentSharingPicker;
 use screencapturekit::content_sharing_picker::{
     SCContentSharingPickerConfiguration, SCContentSharingPickerMode, SCPickerOutcome,
 };
+use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::output_type::SCStreamOutputType;
 use tokio::sync::mpsc;
@@ -95,10 +96,11 @@ pub fn recording_subscription(
         let config = SCStreamConfiguration::new()
             .with_width(pixel_width)
             .with_height(pixel_height)
+            .with_pixel_format(PixelFormat::BGRA)
             .with_shows_cursor(false)
             .with_fps(fps);
 
-        let mut stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
+        let stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
 
         if let Err(e) = stream.start_capture() {
             let msg = format!("Failed to start macOS capture: {e}");
