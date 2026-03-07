@@ -335,7 +335,7 @@ impl Settings {
                     self.capture_fps_limit as f32,
                     Message::CaptureFpsLimitChanged,
                 )
-                .step(1.0),
+                .step(5.0),
                 text("Limit how many frames per second are processed. Lower values reduce CPU/GPU usage. 0 = unlimited.")
                     .size(12)
                     .color(theme::TEXT_DIM),
