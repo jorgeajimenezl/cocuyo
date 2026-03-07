@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use iced::futures::Stream;
 use screencapturekit::async_api::AsyncSCStream;
+use screencapturekit::async_api::AsyncSCContentSharingPicker;
 use screencapturekit::content_sharing_picker::{
-    AsyncSCContentSharingPicker, SCContentSharingPickerConfiguration,
-    SCContentSharingPickerMode, SCPickerOutcome,
+    SCContentSharingPickerConfiguration, SCContentSharingPickerMode, SCPickerOutcome,
 };
 use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::output_type::SCStreamOutputType;
