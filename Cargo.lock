@@ -2231,7 +2231,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -2247,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "bitflags 2.10.0",
  "bytes",
@@ -2264,7 +2264,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -2274,7 +2274,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "futures",
  "iced_core",
@@ -2288,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "bitflags 2.10.0",
  "bytemuck",
@@ -2309,7 +2309,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -2318,7 +2318,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2330,7 +2330,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "bytes",
  "iced_core",
@@ -2342,7 +2342,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2358,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "bitflags 2.10.0",
  "bytemuck",
@@ -2378,7 +2378,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.14.2"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_renderer",
  "log",
@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.14.0"
-source = "git+https://github.com/jorgeajimenezl/iced.git?rev=316900763ee710f719c390aa0a25c39a38d1ce12#316900763ee710f719c390aa0a25c39a38d1ce12"
+source = "git+https://github.com/jorgeajimenezl/iced.git?rev=235d4ed77d36e9db99ac117ce23fcf5332d90314#235d4ed77d36e9db99ac117ce23fcf5332d90314"
 dependencies = [
  "iced_debug",
  "iced_program",
