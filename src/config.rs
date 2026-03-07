@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     #[serde(default = "default_capture_fps_limit")]
     pub capture_fps_limit: u32,
+    #[serde(default)]
+    pub show_perf_overlay: bool,
 }
 
 fn default_minimize_to_tray() -> bool {
@@ -59,6 +61,7 @@ impl Default for AppConfig {
             white_color_temp: default_white_temp(),
             minimize_to_tray: default_minimize_to_tray(),
             capture_fps_limit: default_capture_fps_limit(),
+            show_perf_overlay: false,
         }
     }
 }

@@ -8,6 +8,7 @@ mod app;
 mod config;
 mod frame;
 mod gpu_context;
+mod perf_stats;
 mod platform;
 mod recording;
 mod region;

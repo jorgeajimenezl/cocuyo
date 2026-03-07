@@ -22,6 +22,7 @@ pub enum Message {
     WhiteColorTempChanged(f32),
     MinimizeToTrayToggled(bool),
     CaptureFpsLimitChanged(f32),
+    ShowPerfOverlayToggled(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,7 @@ pub enum Event {
     WhiteColorTempChanged(u16),
     MinimizeToTrayChanged(bool),
     CaptureFpsLimitChanged(u32),
+    ShowPerfOverlayChanged(bool),
 }
 
 pub struct Settings {
@@ -52,6 +54,7 @@ pub struct Settings {
     white_color_temp: u16,
     minimize_to_tray: bool,
     capture_fps_limit: u32,
+    show_perf_overlay: bool,
 }
 
 impl Settings {
@@ -100,6 +103,7 @@ impl Settings {
             white_color_temp: config.white_color_temp,
             minimize_to_tray: config.minimize_to_tray,
             capture_fps_limit: config.capture_fps_limit,
+            show_perf_overlay: config.show_perf_overlay,
         }
     }
 
@@ -149,6 +153,10 @@ impl Settings {
                     Task::none(),
                     Some(Event::CaptureFpsLimitChanged(val as u32)),
                 )
+            }
+            Message::ShowPerfOverlayToggled(val) => {
+                self.show_perf_overlay = val;
+                (Task::none(), Some(Event::ShowPerfOverlayChanged(val)))
             }
         }
     }
@@ -214,6 +222,12 @@ impl Settings {
                 .label("Minimize to Tray")
                 .on_toggle(Message::MinimizeToTrayToggled),
             text("Keep the app running in the system tray when the main window is closed.")
+                .size(12)
+                .color(theme::TEXT_DIM),
+            toggler(self.show_perf_overlay)
+                .label("Performance Overlay")
+                .on_toggle(Message::ShowPerfOverlayToggled),
+            text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
                 .size(12)
                 .color(theme::TEXT_DIM),
         ]
