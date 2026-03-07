@@ -56,8 +56,7 @@ pub fn recording_subscription(
             SCContentSharingPickerMode::SingleWindow,
         ]);
 
-        let picker = AsyncSCContentSharingPicker::new();
-        let outcome = picker.show(&picker_config).await;
+        let outcome = AsyncSCContentSharingPicker::show(&picker_config).await;
 
         let result = match outcome {
             SCPickerOutcome::Picked(result) => result,
