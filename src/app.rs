@@ -230,6 +230,13 @@ impl Cocuyo {
                     self.recording_fps_limit = self.config.capture_fps_limit;
                     Task::none()
                 }
+                #[cfg(target_os = "macos")]
+                {
+                    self.is_recording = true;
+                    self.session_id += 1;
+                    self.recording_fps_limit = self.config.capture_fps_limit;
+                    Task::none()
+                }
                 #[cfg(target_os = "windows")]
                 {
                     let parent = self.find_window_id(WindowKind::Main);
@@ -668,6 +675,15 @@ impl Cocuyo {
             .expect("capture_target must be set before recording");
         Subscription::run_with(
             (self.session_id, target, self.recording_fps_limit),
+            recording::recording_subscription,
+        )
+        .map(Message::RecordingEvent)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn build_recording_subscription(&self) -> Subscription<Message> {
+        Subscription::run_with(
+            (self.session_id, self.recording_fps_limit),
             recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
