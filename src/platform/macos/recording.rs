@@ -23,7 +23,9 @@ fn bgra_to_rgba(src: &[u8], width: usize, height: usize, bytes_per_row: usize) -
     let mut rgba = Vec::with_capacity(width * height * 4);
     for row in 0..height {
         let row_start = row * bytes_per_row;
-        let row_data = &src[row_start..row_start + stride];
+        // Last row may not have full bytes_per_row of data
+        let available = (src.len() - row_start).min(stride);
+        let row_data = &src[row_start..row_start + available];
         for chunk in row_data.chunks_exact(4) {
             rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
         }
