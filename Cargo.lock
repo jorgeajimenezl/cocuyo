@@ -781,6 +781,7 @@ dependencies = [
  "iced",
  "nix 0.29.0",
  "pipewire",
+ "screencapturekit",
  "serde",
  "tokio",
  "toml 1.0.3+spec-1.1.0",
@@ -4470,6 +4471,12 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "screencapturekit"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28bf0c6b5e97e3694e290f31f6103465295d48053c80a84bc29be884893ba4e6"
 
 [[package]]
 name = "sctk-adwaita"
