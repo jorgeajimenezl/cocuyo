@@ -67,7 +67,7 @@ pub enum Message {
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
 
-    GpuSamplingComplete(Vec<(usize, Option<(u8, u8, u8)>)>),
+    GpuSamplingComplete(crate::sampling::gpu::SamplingResult),
 
     BulbDispatchComplete(f64),
 
@@ -446,7 +446,6 @@ impl Cocuyo {
                                 // not here, to avoid throttle drift when GPU is slow.
                                 if let Some(ref worker) = self.sampling_worker {
                                     use crate::sampling::gpu::{RegionParams, SendResult};
-                                    self.perf_stats.mark_sampling_start();
                                     let params: Vec<RegionParams> = self
                                         .regions
                                         .iter()
@@ -516,14 +515,14 @@ impl Cocuyo {
                 }
                 Task::none()
             }
-            Message::GpuSamplingComplete(results) => {
-                self.perf_stats.record_sampling_complete();
+            Message::GpuSamplingComplete(result) => {
+                self.perf_stats.record_sampling_time(result.gpu_time_ms);
                 if !self.is_ambient_active {
                     return Task::none();
                 }
 
                 self.last_bulb_update = Some(Instant::now());
-                for (region_id, color) in &results {
+                for (region_id, color) in &result.colors {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
                         region.sampled_color = *color;
                     }

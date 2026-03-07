@@ -78,6 +78,11 @@ impl PerfStats {
         }
     }
 
+    /// Record a known sampling duration directly (e.g. measured on the GPU worker thread).
+    pub fn record_sampling_time(&mut self, elapsed_ms: f64) {
+        self.sampling_time_ema.update(elapsed_ms);
+    }
+
     /// Record a bulb dispatch round-trip duration.
     pub fn record_bulb_dispatch(&mut self, elapsed_ms: f64) {
         self.bulb_dispatch_ema.update(elapsed_ms);
