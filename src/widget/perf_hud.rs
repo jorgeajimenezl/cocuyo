@@ -3,7 +3,7 @@ use std::cell::Cell;
 use iced::mouse;
 use iced::widget::canvas;
 use iced::widget::canvas::{Cache, Canvas, Geometry, Path, Text};
-use iced::{Color, Point, Rectangle, Size, Theme};
+use iced::{Point, Rectangle, Size, Theme};
 
 use crate::app::Message;
 use crate::perf_stats::PerfStats;
@@ -12,6 +12,8 @@ use crate::theme;
 const HUD_PADDING: f32 = 8.0;
 const LINE_HEIGHT: f32 = 16.0;
 const FONT_SIZE: f32 = 12.0;
+/// Approximate monospace character width at FONT_SIZE (12px).
+const CHAR_WIDTH: f32 = 7.2;
 const HUD_CORNER_RADIUS: f32 = 6.0;
 const HUD_MARGIN: f32 = 8.0;
 
@@ -97,7 +99,7 @@ impl canvas::Program<Message, Theme> for PerfHud<'_> {
             // Compute HUD dimensions
             // Approximate width: longest line * ~7px per char (monospace)
             let max_chars = lines.iter().map(|l| l.len()).max().unwrap_or(0);
-            let hud_width = (max_chars as f32) * 7.2 + HUD_PADDING * 2.0;
+            let hud_width = (max_chars as f32) * CHAR_WIDTH + HUD_PADDING * 2.0;
             let hud_height = (lines.len() as f32) * LINE_HEIGHT + HUD_PADDING * 2.0;
 
             let hud_x = HUD_MARGIN;
@@ -123,7 +125,7 @@ impl canvas::Program<Message, Theme> for PerfHud<'_> {
                 frame.fill_text(Text {
                     content: line.clone(),
                     position: Point::new(hud_x + HUD_PADDING, y),
-                    color: Color::from_rgba8(254, 205, 178, 0.9),
+                    color: theme::HUD_TEXT,
                     size: FONT_SIZE.into(),
                     font: iced::Font::MONOSPACE,
                     ..Text::default()

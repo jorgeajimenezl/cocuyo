@@ -129,6 +129,8 @@ impl PerfStats {
     /// Fingerprint for cache invalidation -- rounded metric values.
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
+        // DefaultHasher is not stable across Rust versions, but this fingerprint
+        // is only used for intra-process cache invalidation so stability is not required.
         let mut h = std::collections::hash_map::DefaultHasher::new();
         // Round to 1 decimal place to avoid constant cache churn
         ((self.effective_fps() * 10.0) as u64).hash(&mut h);
