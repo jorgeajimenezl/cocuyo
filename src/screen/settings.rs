@@ -1,4 +1,4 @@
-use iced::widget::rule;
+use iced::widget::{rule, scrollable};
 use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, tooltip};
 use iced::{Fill, Task, padding};
 
@@ -192,7 +192,7 @@ impl Settings {
         .width(Fill)
         .padding(padding::all(20));
 
-        container(content)
+        container(scrollable(content))
             .width(Fill)
             .height(Fill)
             .style(theme::styled_container)

@@ -156,9 +156,10 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 }
 
 pub fn recording_subscription(
-    input: &(u64, CaptureTarget),
+    input: &(u64, CaptureTarget, u32),
 ) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
     let target = input.1;
+    let fps_limit = input.2;
 
     Box::pin(iced::stream::channel(2, async move |mut output| {
         use iced::futures::SinkExt;
@@ -206,9 +207,13 @@ pub fn recording_subscription(
             .await
             .ok();
 
-        // Frame rate gating state
+        // Frame rate gating: compute interval once from the input
+        let frame_interval: Option<Duration> = if fps_limit == 0 {
+            None
+        } else {
+            Some(Duration::from_secs_f64(1.0 / fps_limit as f64))
+        };
         let mut last_forwarded: Option<Instant> = None;
-        let mut frame_interval: Option<Duration> = None;
 
         // Forward frames until capture finishes or we receive a stop command
         loop {
@@ -248,14 +253,6 @@ pub fn recording_subscription(
                             })
                             .await;
                             break;
-                        }
-                        Some(RecordingCommand::SetFrameRateLimit(fps)) => {
-                            frame_interval = if fps == 0 {
-                                None
-                            } else {
-                                Some(Duration::from_secs_f64(1.0 / fps as f64))
-                            };
-                            info!(fps = fps, "Frame rate limit updated");
                         }
                     }
                 }

@@ -77,10 +77,14 @@ pub enum Message {
 
 pub struct Cocuyo {
     windows: BTreeMap<window::Id, WindowKind>,
+    config: AppConfig,
+
+    // Recording state
     current_frame: Option<Arc<FrameData>>,
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
+    recording_fps_limit: u32,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
     bulb_setup: bulb_setup::BulbSetupState,
     is_ambient_active: bool,
@@ -89,8 +93,8 @@ pub struct Cocuyo {
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
-    config: AppConfig,
 
+    // GPU sampling worker
     sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
 
     tray: &'static crate::tray::TrayState,
@@ -112,6 +116,7 @@ impl Cocuyo {
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
+            recording_fps_limit: 0,
             recording_cmd_tx: None,
             bulb_setup: bulb_setup::BulbSetupState::new(&config),
             is_ambient_active: false,
@@ -216,6 +221,7 @@ impl Cocuyo {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
+                    self.recording_fps_limit = self.config.capture_fps_limit;
                     Task::none()
                 }
                 #[cfg(target_os = "windows")]
@@ -366,6 +372,7 @@ impl Cocuyo {
                     crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
+                    self.recording_fps_limit = self.config.capture_fps_limit;
                 }
                 Task::none()
             }
@@ -390,9 +397,6 @@ impl Cocuyo {
             Message::RecordingEvent(event) => {
                 match event {
                     RecordingEvent::Ready(cmd_tx) => {
-                        let _ = cmd_tx.try_send(RecordingCommand::SetFrameRateLimit(
-                            self.config.capture_fps_limit,
-                        ));
                         self.recording_cmd_tx = Some(cmd_tx);
                     }
                     RecordingEvent::StateChanged(state) => {
@@ -625,7 +629,7 @@ impl Cocuyo {
         let backend = self.settings.selected_backend();
 
         Subscription::run_with(
-            (self.session_id, backend),
+            (self.session_id, backend, self.recording_fps_limit),
             recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
@@ -636,8 +640,11 @@ impl Cocuyo {
         let target = self
             .capture_target
             .expect("capture_target must be set before recording");
-        Subscription::run_with((self.session_id, target), recording::recording_subscription)
-            .map(Message::RecordingEvent)
+        Subscription::run_with(
+            (self.session_id, target, self.recording_fps_limit),
+            recording::recording_subscription,
+        )
+        .map(Message::RecordingEvent)
     }
 
     // --- Event handlers for delegated screens ---
@@ -690,9 +697,6 @@ impl Cocuyo {
             settings::Event::CaptureFpsLimitChanged(fps) => {
                 self.config.capture_fps_limit = fps;
                 self.config.save();
-                if let Some(ref cmd_tx) = self.recording_cmd_tx {
-                    let _ = cmd_tx.try_send(RecordingCommand::SetFrameRateLimit(fps));
-                }
                 Task::none()
             }
         }
@@ -745,6 +749,7 @@ impl Cocuyo {
                         crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
                         self.is_recording = true;
                         self.session_id += 1;
+                        self.recording_fps_limit = self.config.capture_fps_limit;
                         close_task
                     }
                     PickerIntent::StartAmbient => {

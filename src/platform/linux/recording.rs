@@ -14,9 +14,10 @@ use crate::frame::FrameData;
 use crate::recording::{RecordingCommand, RecordingEvent};
 
 pub fn recording_subscription(
-    input: &(u64, GpuBackend),
+    input: &(u64, GpuBackend, u32),
 ) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
     let backend = input.1.clone();
+    let fps_limit = input.2;
 
     Box::pin(iced::stream::channel(2, async move |mut output| {
         use iced::futures::SinkExt;
@@ -70,9 +71,13 @@ pub fn recording_subscription(
         let pw_handle =
             std::thread::spawn(move || stream::start_streaming(node_id, fd, frame_tx, backend));
 
-        // Frame rate gating state
+        // Frame rate gating: compute interval once from the input
+        let frame_interval: Option<Duration> = if fps_limit == 0 {
+            None
+        } else {
+            Some(Duration::from_secs_f64(1.0 / fps_limit as f64))
+        };
         let mut last_forwarded: Option<Instant> = None;
-        let mut frame_interval: Option<Duration> = None;
 
         // Forward frames until PipeWire thread finishes or we receive a stop command.
         // On stop: drop frame_rx to close the channel, causing the PipeWire thread
@@ -107,14 +112,6 @@ pub fn recording_subscription(
                             // Drop receiver to signal PipeWire thread via channel close
                             drop(frame_rx);
                             break;
-                        }
-                        Some(RecordingCommand::SetFrameRateLimit(fps)) => {
-                            frame_interval = if fps == 0 {
-                                None
-                            } else {
-                                Some(Duration::from_secs_f64(1.0 / fps as f64))
-                            };
-                            info!(fps = fps, "Frame rate limit updated");
                         }
                     }
                 }
