@@ -232,6 +232,7 @@ impl Cocuyo {
                 }
                 #[cfg(target_os = "macos")]
                 {
+                    crate::platform::macos::metal_import::reset_iosurface_import_failed();
                     self.is_recording = true;
                     self.session_id += 1;
                     self.recording_fps_limit = self.config.capture_fps_limit;
