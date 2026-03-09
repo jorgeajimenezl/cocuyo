@@ -85,62 +85,117 @@ pub trait LightingOps: Send + Sync {
     fn short_id(&self, id: &LightId) -> String;
 }
 
-/// Top-level enum wrapping concrete lighting backends.
-pub enum LightingBackend {
-    Wiz(WizBackend),
+/// Registry holding all active lighting backends. Routes per-light operations
+/// to the correct backend based on `BackendData`.
+pub struct LightingRegistry {
+    wiz: WizBackend,
+    // Future backends: ha: Option<HomeAssistantBackend>,
 }
 
-impl LightingBackend {
-    pub fn discover(&self) -> Pin<Box<dyn Future<Output = Vec<LightInfo>> + Send>> {
-        match self {
-            Self::Wiz(b) => b.discover(),
+impl LightingRegistry {
+    pub fn new() -> Self {
+        Self {
+            wiz: WizBackend::new(),
         }
     }
 
+    /// Discover lights from all backends concurrently.
+    pub fn discover(&self) -> Pin<Box<dyn Future<Output = Vec<LightInfo>> + Send>> {
+        let wiz_fut = self.wiz.discover();
+        Box::pin(async move {
+            let wiz_lights = wiz_fut.await;
+            // Future: merge results from other backends
+            wiz_lights
+        })
+    }
+
+    /// Map a sampled color to a light color command, routed by backend.
     pub fn map_color(
         &self,
+        data: &BackendData,
         r: u8,
         g: u8,
         b: u8,
         min_brightness: u8,
         white_temp: u16,
     ) -> LightColor {
-        match self {
-            Self::Wiz(backend) => backend.map_color(r, g, b, min_brightness, white_temp),
+        match data {
+            BackendData::Wiz { .. } => self.wiz.map_color(r, g, b, min_brightness, white_temp),
         }
     }
 
+    /// Partition targets by backend and dispatch each group concurrently.
     pub fn dispatch_colors(
         &self,
         targets: Vec<(LightInfo, LightColor)>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        match self {
-            Self::Wiz(b) => b.dispatch_colors(targets),
+        // Partition by backend (currently only WiZ)
+        let mut wiz_targets = Vec::new();
+        for target in targets {
+            match &target.0.backend_data {
+                BackendData::Wiz { .. } => wiz_targets.push(target),
+            }
         }
+
+        let wiz_fut = self.wiz.dispatch_colors(wiz_targets);
+        Box::pin(async move {
+            wiz_fut.await;
+            // Future: join with other backend futures
+        })
     }
 
+    /// Partition lights by backend, save each group, merge results.
     pub fn save_states(
         &self,
         lights: Vec<LightInfo>,
     ) -> Pin<Box<dyn Future<Output = Vec<SavedLightState>> + Send>> {
-        match self {
-            Self::Wiz(b) => b.save_states(lights),
+        let mut wiz_lights = Vec::new();
+        for light in lights {
+            match &light.backend_data {
+                BackendData::Wiz { .. } => wiz_lights.push(light),
+            }
         }
+
+        let wiz_fut = self.wiz.save_states(wiz_lights);
+        Box::pin(async move {
+            let all = wiz_fut.await;
+            // Future: merge results from other backends
+            all
+        })
     }
 
+    /// Partition states by backend and restore each group concurrently.
     pub fn restore_states(
         &self,
         states: Vec<SavedLightState>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        match self {
-            Self::Wiz(b) => b.restore_states(states),
+        let mut wiz_states = Vec::new();
+        for state in states {
+            match &state.info.backend_data {
+                BackendData::Wiz { .. } => wiz_states.push(state),
+            }
+        }
+
+        let wiz_fut = self.wiz.restore_states(wiz_states);
+        Box::pin(async move {
+            wiz_fut.await;
+            // Future: join with other backend futures
+        })
+    }
+
+    /// Format a short display ID, routed by the light's backend data.
+    #[allow(dead_code)]
+    pub fn short_id(&self, info: &LightInfo) -> String {
+        match &info.backend_data {
+            BackendData::Wiz { .. } => self.wiz.short_id(&info.id),
         }
     }
 
-    pub fn short_id(&self, id: &LightId) -> String {
-        match self {
-            Self::Wiz(b) => b.short_id(id),
-        }
+    /// Convenience: format a short display ID from just a `LightId`.
+    /// Delegates to the appropriate backend (currently always WiZ).
+    pub fn short_id_by_id(&self, id: &LightId) -> String {
+        // When multiple backends exist, this could check ID format or try each.
+        self.wiz.short_id(id)
     }
 }
 
@@ -148,7 +203,7 @@ impl LightingBackend {
 pub fn build_light_targets(
     regions: &[crate::region::Region],
     lights: &[LightInfo],
-    backend: &LightingBackend,
+    registry: &LightingRegistry,
     min_brightness: u8,
     white_temp: u16,
 ) -> Option<Vec<(LightInfo, LightColor)>> {
@@ -162,7 +217,7 @@ pub fn build_light_targets(
         let Some(light) = lights.iter().find(|l| &l.id == id) else {
             continue;
         };
-        let color = backend.map_color(r, g, b, min_brightness, white_temp);
+        let color = registry.map_color(&light.backend_data, r, g, b, min_brightness, white_temp);
         targets.push((light.clone(), color));
     }
 
