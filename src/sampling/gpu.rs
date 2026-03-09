@@ -838,6 +838,8 @@ impl GpuSampler {
                 width,
                 height,
             } => {
+                // Re-import on the sampler thread (safe — not inside winit event handler).
+                // We need an owned wgpu::Texture for PendingCopy.
                 let (imported, wgpu_format) = unsafe {
                     crate::platform::macos::metal_import::import_iosurface_texture(
                         &self.device,

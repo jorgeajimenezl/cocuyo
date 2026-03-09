@@ -641,17 +641,17 @@ impl VideoPipeline {
         height: u32,
         bounds: Rectangle,
     ) {
-        let result = unsafe {
+        // Wrap Metal/ObjC calls in an autoreleasepool to prevent Cocoa
+        // run-loop re-entrancy panics inside the winit event handler.
+        let result = screencapturekit::metal::autoreleasepool(|| unsafe {
             metal_import::import_iosurface_texture(device, surface, width, height)
-        };
+        });
 
         match result {
             Ok((imported_texture, wgpu_format)) => {
-                // Use the imported texture directly — no copy or queue.submit().
-                // On macOS, queue.submit() inside iced's prepare callback (which
-                // runs inside winit's event handler) causes Cocoa run-loop
-                // re-entrancy panics. The IOSurface backing memory stays valid
-                // because it is reference-counted and held by Arc<FrameData>.
+                // Bind the imported texture directly — no copy or queue.submit().
+                // The IOSurface backing memory stays valid because it is
+                // reference-counted and held by Arc<FrameData>.
                 let view =
                     imported_texture.create_view(&wgpu::TextureViewDescriptor::default());
 

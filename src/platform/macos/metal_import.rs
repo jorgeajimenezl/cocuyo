@@ -45,7 +45,7 @@ impl std::error::Error for MetalImportError {}
 
 /// Import an IOSurface as a `wgpu::Texture` via the Metal HAL.
 ///
-/// Uses `[MTLDevice newTextureWithDescriptor:iosurface:plane:level:]` to create
+/// Uses `[MTLDevice newTextureWithDescriptor:iosurface:plane:]` to create
 /// a Metal texture backed by the IOSurface without copying pixel data.
 ///
 /// # Safety
@@ -88,18 +88,19 @@ pub unsafe fn import_iosurface_texture(
                 height:height as u64
                 mipmapped:false]
         };
-        // Set usage: ShaderRead (0x01) | RenderTarget (0x04) to allow both
-        // sampling and copy_texture_to_texture (which needs COPY_SRC).
+        // ShaderRead (0x01) | RenderTarget (0x04) — RenderTarget is needed
+        // because wgpu maps COPY_SRC to it on Metal (used by GPU sampler).
         let _: () = unsafe { msg_send![descriptor, setUsage: 0x05u64] };
+        // IOSurface-backed textures require shared storage mode.
+        let _: () = unsafe { msg_send![descriptor, setStorageMode: 1u64] }; // MTLStorageModeShared
 
         // Create Metal texture from IOSurface via
-        // [MTLDevice newTextureWithDescriptor:iosurface:plane:level:]
+        // [MTLDevice newTextureWithDescriptor:iosurface:plane:]
         let iosurface_ptr = surface.as_ptr();
         let metal_texture_ptr: *mut Object = unsafe {
             msg_send![device_ptr, newTextureWithDescriptor:descriptor
                 iosurface:iosurface_ptr
-                plane:0u64
-                level:0u64]
+                plane:0u64]
         };
 
         if metal_texture_ptr.is_null() {
