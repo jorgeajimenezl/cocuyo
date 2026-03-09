@@ -647,48 +647,22 @@ impl VideoPipeline {
 
         match result {
             Ok((imported_texture, wgpu_format)) => {
-                // Reuse the local GPU texture across frames when resolution is unchanged.
-                // The copy decouples rendering from the IOSurface lifetime.
-                let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
+                // Use the imported texture directly — no copy or queue.submit().
+                // On macOS, queue.submit() inside iced's prepare callback (which
+                // runs inside winit's event handler) causes Cocoa run-loop
+                // re-entrancy panics. The IOSurface backing memory stays valid
+                // because it is reference-counted and held by Arc<FrameData>.
+                let view =
+                    imported_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                // Copy imported IOSurface texture → local texture
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("iosurface_copy"),
-                });
-                let copy_size = wgpu::Extent3d {
+                // Store the imported texture to keep it alive until next frame.
+                self.cached_texture = Some(CachedTexture {
+                    texture: imported_texture,
                     width,
                     height,
-                    depth_or_array_layers: 1,
-                };
-                encoder.copy_texture_to_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &imported_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::TexelCopyTextureInfo {
-                        texture: local_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    copy_size,
-                );
+                    format: wgpu_format,
+                });
 
-                // Submit immediately so the GPU copy is in-flight before we
-                // drop the imported texture.
-                queue.submit(std::iter::once(encoder.finish()));
-
-                // Use the local texture for rendering. imported_texture is dropped
-                // here — wgpu defers Metal resource cleanup until the GPU finishes
-                // the copy command submitted above.
-                let view = self
-                    .cached_texture
-                    .as_ref()
-                    .unwrap()
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {

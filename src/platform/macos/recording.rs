@@ -40,11 +40,14 @@ pub fn bgra_to_rgba(src: &[u8], width: usize, height: usize, bytes_per_row: usiz
 
 /// Build a `FrameData` from a captured sample.
 ///
-/// Tries zero-copy IOSurface path first; falls back to CPU BGRA→RGBA conversion.
+/// Tries the zero-copy IOSurface path first (the imported Metal texture wraps
+/// the IOSurface backing memory directly). Falls back to CPU BGRA→RGBA
+/// conversion when IOSurface import is unavailable.
 fn build_frame(
     pixel_buffer: &screencapturekit::CVPixelBuffer,
 ) -> Option<Arc<FrameData>> {
-    // Try zero-copy IOSurface path
+    // Zero-copy path: send the IOSurface directly to the shader widget,
+    // which imports it as a Metal texture without any GPU copy.
     if metal_import::is_iosurface_import_available() {
         if let Some(surface) = pixel_buffer.io_surface() {
             let w = surface.width() as u32;
