@@ -6,7 +6,7 @@ use iced::{Center, Color, Fill, Length};
 
 use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
-use crate::lighting::LightingBackend;
+use crate::lighting::LightingRegistry;
 use crate::perf_stats::PerfStats;
 use crate::region::Region;
 use crate::sampling;
@@ -28,7 +28,7 @@ pub fn view<'a>(
     selected_region: Option<usize>,
     perf_stats: &'a PerfStats,
     show_perf_overlay: bool,
-    backend: &'a LightingBackend,
+    registry: &'a LightingRegistry,
 ) -> Element<'a, Message> {
     let menu_bar = container(
         row![
@@ -144,7 +144,7 @@ pub fn view<'a>(
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let short = backend.short_id(&r.light_id);
+                let short = registry.short_id_by_id(&r.light_id);
                 let label = format!("R{} ({})", i + 1, short);
 
                 let color_indicator: Element<'a, Message> = if let Some((cr, cg, cb)) =

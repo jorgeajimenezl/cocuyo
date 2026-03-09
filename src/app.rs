@@ -10,8 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 use crate::frame::FrameData;
-use crate::lighting::{LightId, LightingBackend, SavedLightState};
-use crate::lighting::wiz::WizBackend;
+use crate::lighting::{LightId, LightingRegistry, SavedLightState};
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::BoxedStrategy;
@@ -92,7 +91,7 @@ pub enum Message {
 pub struct Cocuyo {
     windows: BTreeMap<window::Id, WindowKind>,
     config: AppConfig,
-    lighting_backend: LightingBackend,
+    lighting_registry: LightingRegistry,
 
     // Recording state
     current_frame: Option<Arc<FrameData>>,
@@ -140,7 +139,7 @@ impl Cocuyo {
             recording_resolution_scale: 100,
             recording_cmd_tx: None,
             light_setup: light_setup::LightSetupState::new(&config),
-            lighting_backend: LightingBackend::Wiz(WizBackend::new()),
+            lighting_registry: LightingRegistry::new(),
             is_ambient_active: false,
             last_light_update: None,
             saved_light_states: None,
@@ -286,7 +285,7 @@ impl Cocuyo {
 
                 if is_scan {
                     let discover_task = Task::perform(
-                        self.lighting_backend.discover(),
+                        self.lighting_registry.discover(),
                         |lights| Message::LightSetup(light_setup::Message::LightsDiscovered(lights)),
                     );
                     tasks.push(discover_task);
@@ -361,7 +360,7 @@ impl Cocuyo {
                 {
                     let lights = self.light_setup.selected_light_infos();
                     Task::perform(
-                        self.lighting_backend.save_states(lights),
+                        self.lighting_registry.save_states(lights),
                         Message::LightStatesSaved,
                     )
                 }
@@ -408,7 +407,7 @@ impl Cocuyo {
                 self.current_frame = None;
                 if let Some(states) = self.saved_light_states.take() {
                     Task::perform(
-                        self.lighting_backend.restore_states(states),
+                        self.lighting_registry.restore_states(states),
                         |()| Message::Noop,
                     )
                 } else {
@@ -516,13 +515,13 @@ impl Cocuyo {
                                     if let Some(targets) = crate::lighting::build_light_targets(
                                         &self.regions,
                                         self.light_setup.discovered_lights(),
-                                        &self.lighting_backend,
+                                        &self.lighting_registry,
                                         self.config.min_brightness_percent,
                                         self.config.white_color_temp,
                                     ) {
                                         let dispatch_start = Instant::now();
                                         return Task::perform(
-                                            self.lighting_backend.dispatch_colors(targets),
+                                            self.lighting_registry.dispatch_colors(targets),
                                             move |()| Message::LightDispatchComplete(
                                                 dispatch_start.elapsed().as_secs_f64() * 1000.0,
                                             ),
@@ -550,13 +549,13 @@ impl Cocuyo {
                 if let Some(targets) = crate::lighting::build_light_targets(
                     &self.regions,
                     self.light_setup.discovered_lights(),
-                    &self.lighting_backend,
+                    &self.lighting_registry,
                     self.config.min_brightness_percent,
                     self.config.white_color_temp,
                 ) {
                     let dispatch_start = Instant::now();
                     Task::perform(
-                        self.lighting_backend.dispatch_colors(targets),
+                        self.lighting_registry.dispatch_colors(targets),
                         move |()| Message::LightDispatchComplete(
                             dispatch_start.elapsed().as_secs_f64() * 1000.0,
                         ),
@@ -622,7 +621,7 @@ impl Cocuyo {
                     self.selected_region,
                     &self.perf_stats,
                     self.config.show_perf_overlay,
-                    &self.lighting_backend,
+                    &self.lighting_registry,
                 )
             }
             Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
@@ -827,7 +826,7 @@ impl Cocuyo {
                         Task::batch([
                             close_task,
                             Task::perform(
-                                self.lighting_backend.save_states(lights),
+                                self.lighting_registry.save_states(lights),
                                 Message::LightStatesSaved,
                             ),
                         ])
@@ -876,7 +875,7 @@ impl Cocuyo {
         }
         if let Some(states) = self.saved_light_states.take() {
             Task::perform(
-                self.lighting_backend.restore_states(states),
+                self.lighting_registry.restore_states(states),
                 |()| Message::ExitApp,
             )
         } else {
