@@ -2,20 +2,21 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
-use crate::{adapters::GpuAdapter, ambient::BulbInfo};
+use crate::adapters::GpuAdapter;
+use crate::lighting::LightInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub preferred_adapter: Option<GpuAdapter>,
     pub preferred_backend: Option<String>,
-    #[serde(default)]
-    pub saved_bulbs: Vec<BulbInfo>,
-    #[serde(default)]
-    pub selected_bulb_macs: Vec<String>,
+    #[serde(default, alias = "saved_bulbs")]
+    pub saved_lights: Vec<LightInfo>,
+    #[serde(default, alias = "selected_bulb_macs")]
+    pub selected_light_ids: Vec<String>,
     #[serde(default)]
     pub force_cpu_sampling: bool,
-    #[serde(default = "default_bulb_update_ms")]
-    pub bulb_update_interval_ms: u64,
+    #[serde(default = "default_light_update_ms", alias = "bulb_update_interval_ms")]
+    pub light_update_interval_ms: u64,
     #[serde(default = "default_min_brightness")]
     pub min_brightness_percent: u8,
     #[serde(default = "default_white_temp")]
@@ -36,7 +37,7 @@ fn default_capture_fps_limit() -> u32 {
     0
 }
 
-fn default_bulb_update_ms() -> u64 {
+fn default_light_update_ms() -> u64 {
     150
 }
 
@@ -53,10 +54,10 @@ impl Default for AppConfig {
         Self {
             preferred_adapter: None,
             preferred_backend: None,
-            saved_bulbs: Vec::new(),
-            selected_bulb_macs: Vec::new(),
+            saved_lights: Vec::new(),
+            selected_light_ids: Vec::new(),
             force_cpu_sampling: false,
-            bulb_update_interval_ms: default_bulb_update_ms(),
+            light_update_interval_ms: default_light_update_ms(),
             min_brightness_percent: default_min_brightness(),
             white_color_temp: default_white_temp(),
             minimize_to_tray: default_minimize_to_tray(),

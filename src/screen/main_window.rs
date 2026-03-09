@@ -6,6 +6,7 @@ use iced::{Center, Color, Fill, Length};
 
 use crate::app::{Message, RecordingState};
 use crate::frame::FrameData;
+use crate::lighting::LightingBackend;
 use crate::perf_stats::PerfStats;
 use crate::region::Region;
 use crate::sampling;
@@ -21,17 +22,18 @@ pub fn view<'a>(
     recording_state: &RecordingState,
     frame_info: Option<(u32, u32)>,
     is_ambient_active: bool,
-    has_selected_bulbs: bool,
+    has_selected_lights: bool,
     selected_count: usize,
     regions: &'a [Region],
     selected_region: Option<usize>,
     perf_stats: &'a PerfStats,
     show_perf_overlay: bool,
+    backend: &'a LightingBackend,
 ) -> Element<'a, Message> {
     let menu_bar = container(
         row![
-            button("Bulbs")
-                .on_press(Message::OpenBulbSetup(window_id))
+            button("Lights")
+                .on_press(Message::OpenLightSetup(window_id))
                 .style(theme::styled_button),
             button("Settings")
                 .on_press(Message::OpenSettings(window_id))
@@ -84,13 +86,13 @@ pub fn view<'a>(
             .on_press(Message::StopAmbient)
             .style(theme::styled_button)
             .into()
-    } else if has_selected_bulbs {
+    } else if has_selected_lights {
         button("Start Ambient")
             .on_press(Message::StartAmbient)
             .style(theme::styled_button)
             .into()
     } else {
-        text("Select bulbs to enable ambient")
+        text("Select lights to enable ambient")
             .size(12)
             .color(theme::TEXT_DIM)
             .into()
@@ -133,7 +135,7 @@ pub fn view<'a>(
 
     // Region list
     let region_list: Element<'a, Message> = if regions.is_empty() {
-        text("Select bulbs to create regions")
+        text("Select lights to create regions")
             .size(12)
             .color(theme::TEXT_DIM)
             .into()
@@ -142,11 +144,8 @@ pub fn view<'a>(
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let label = format!(
-                    "R{} ({})",
-                    i + 1,
-                    &r.bulb_mac[r.bulb_mac.len().saturating_sub(8)..]
-                );
+                let short = backend.short_id(&r.light_id);
+                let label = format!("R{} ({})", i + 1, short);
 
                 let color_indicator: Element<'a, Message> = if let Some((cr, cg, cb)) =
                     r.sampled_color
@@ -229,7 +228,7 @@ pub fn view<'a>(
     // Status bar
     let status_text = if is_ambient_active {
         text(format!(
-            "Ambient active -- {} bulb{} -- {} region{}",
+            "Ambient active -- {} light{} -- {} region{}",
             selected_count,
             if selected_count == 1 { "" } else { "s" },
             regions.len(),
@@ -239,11 +238,11 @@ pub fn view<'a>(
     } else {
         match recording_state {
             RecordingState::Idle => {
-                if !has_selected_bulbs {
-                    text("No bulbs selected").color(theme::TEXT_DIM)
+                if !has_selected_lights {
+                    text("No lights selected").color(theme::TEXT_DIM)
                 } else {
                     text(format!(
-                        "{} bulb{} selected",
+                        "{} light{} selected",
                         selected_count,
                         if selected_count == 1 { "" } else { "s" }
                     ))

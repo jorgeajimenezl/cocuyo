@@ -17,7 +17,7 @@ pub enum Message {
     AdapterSelected(GpuAdapterSelection),
     RestartApp,
     ForceCpuSamplingToggled(bool),
-    BulbUpdateIntervalChanged(f32),
+    LightUpdateIntervalChanged(f32),
     MinBrightnessChanged(f32),
     WhiteColorTempChanged(f32),
     MinimizeToTrayToggled(bool),
@@ -32,7 +32,7 @@ pub enum Event {
     AdapterChanged(Option<GpuAdapter>),
     RestartApp,
     ForceCpuSamplingChanged(bool),
-    BulbUpdateIntervalChanged(u64),
+    LightUpdateIntervalChanged(u64),
     MinBrightnessChanged(u8),
     WhiteColorTempChanged(u16),
     MinimizeToTrayChanged(bool),
@@ -49,7 +49,7 @@ pub struct Settings {
     selected_adapter: GpuAdapterSelection,
     active_adapter_preference: Option<GpuAdapter>,
     force_cpu_sampling: bool,
-    bulb_update_interval_ms: u64,
+    light_update_interval_ms: u64,
     min_brightness_percent: u8,
     white_color_temp: u16,
     minimize_to_tray: bool,
@@ -98,7 +98,7 @@ impl Settings {
             selected_adapter,
             active_adapter_preference,
             force_cpu_sampling: config.force_cpu_sampling,
-            bulb_update_interval_ms: config.bulb_update_interval_ms,
+            light_update_interval_ms: config.light_update_interval_ms,
             min_brightness_percent: config.min_brightness_percent,
             white_color_temp: config.white_color_temp,
             minimize_to_tray: config.minimize_to_tray,
@@ -128,11 +128,11 @@ impl Settings {
                 self.force_cpu_sampling = val;
                 (Task::none(), Some(Event::ForceCpuSamplingChanged(val)))
             }
-            Message::BulbUpdateIntervalChanged(val) => {
-                self.bulb_update_interval_ms = val as u64;
+            Message::LightUpdateIntervalChanged(val) => {
+                self.light_update_interval_ms = val as u64;
                 (
                     Task::none(),
-                    Some(Event::BulbUpdateIntervalChanged(val as u64)),
+                    Some(Event::LightUpdateIntervalChanged(val as u64)),
                 )
             }
             Message::MinBrightnessChanged(val) => {
@@ -227,7 +227,7 @@ impl Settings {
             toggler(self.show_perf_overlay)
                 .label("Performance Overlay")
                 .on_toggle(Message::ShowPerfOverlayToggled),
-            text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
+            text("Show capture FPS, sampling time, and light dispatch latency on the video preview.")
                 .size(12)
                 .color(theme::TEXT_DIM),
         ]
@@ -372,18 +372,18 @@ impl Settings {
             text("Ambient Lighting").size(18).color(theme::TEXT),
             column![
                 text(format!(
-                    "Bulb Update Interval: {}ms",
-                    self.bulb_update_interval_ms
+                    "Light Update Interval: {}ms",
+                    self.light_update_interval_ms
                 ))
                 .size(14)
                 .color(theme::TEXT),
                 slider(
                     50.0..=500.0,
-                    self.bulb_update_interval_ms as f32,
-                    Message::BulbUpdateIntervalChanged,
+                    self.light_update_interval_ms as f32,
+                    Message::LightUpdateIntervalChanged,
                 )
                 .step(10.0),
-                text("How often colors are sent to bulbs. Lower = more responsive, higher = less network traffic.")
+                text("How often colors are sent to lights. Lower = more responsive, higher = less network traffic.")
                     .size(12)
                     .color(theme::TEXT_DIM),
             ]
@@ -401,7 +401,7 @@ impl Settings {
                     Message::MinBrightnessChanged,
                 )
                 .step(1.0),
-                text("Minimum bulb brightness. Set to 0% to allow bulbs to turn fully off.")
+                text("Minimum light brightness. Set to 0% to allow lights to turn fully off.")
                     .size(12)
                     .color(theme::TEXT_DIM),
             ]

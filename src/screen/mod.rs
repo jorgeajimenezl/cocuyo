@@ -1,6 +1,6 @@
-pub mod bulb_setup;
 #[cfg(target_os = "windows")]
 pub mod capture_picker;
+pub mod light_setup;
 pub mod main_window;
 pub mod settings;
 
@@ -8,7 +8,7 @@ pub mod settings;
 pub enum WindowKind {
     Main,
     Settings,
-    BulbSetup,
+    LightSetup,
     #[cfg(target_os = "windows")]
     CapturePicker,
 }

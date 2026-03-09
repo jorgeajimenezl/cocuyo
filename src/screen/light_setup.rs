@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use iced::widget::{button, center, checkbox, column, container, row, rule, scrollable, text};
 use iced::{Center, Fill, Task};
 
-use crate::ambient::BulbInfo;
 use crate::config::AppConfig;
+use crate::lighting::{LightId, LightInfo};
 use crate::theme;
 
 type Element<'a> = iced::Element<'a, Message, iced::Theme, iced::Renderer>;
@@ -12,75 +12,72 @@ type Element<'a> = iced::Element<'a, Message, iced::Theme, iced::Renderer>;
 #[derive(Debug, Clone)]
 pub enum Message {
     Scan,
-    BulbsDiscovered(Vec<BulbInfo>),
-    ToggleBulb(String),
+    LightsDiscovered(Vec<LightInfo>),
+    ToggleLight(LightId),
     Done,
 }
 
 #[derive(Debug, Clone)]
-pub enum BulbSetupEvent {
+pub enum LightSetupEvent {
     Done,
     SelectionChanged,
-    BulbsDiscovered,
+    LightsDiscovered,
 }
 
-pub struct BulbSetupState {
-    discovered_bulbs: Vec<BulbInfo>,
-    selected_bulbs: HashSet<String>,
+pub struct LightSetupState {
+    discovered_lights: Vec<LightInfo>,
+    selected_lights: HashSet<String>,
     is_scanning: bool,
 }
 
-impl BulbSetupState {
+impl LightSetupState {
     pub fn new(config: &AppConfig) -> Self {
-        let saved_bulbs = config.saved_bulbs.clone();
-        let selected_macs: Vec<String> = config.selected_bulb_macs.iter().cloned().collect();
+        let saved_lights = config.saved_lights.clone();
+        let selected_ids: Vec<String> = config.selected_light_ids.iter().cloned().collect();
 
-        // Only keep selections that correspond to known bulbs
-        let valid_selections: HashSet<String> = selected_macs
+        // Only keep selections that correspond to known lights
+        let valid_selections: HashSet<String> = selected_ids
             .into_iter()
-            .filter(|mac| saved_bulbs.iter().any(|b| b.mac == *mac))
+            .filter(|id| saved_lights.iter().any(|l| l.id.0 == *id))
             .collect();
         Self {
-            discovered_bulbs: saved_bulbs,
-            selected_bulbs: valid_selections,
+            discovered_lights: saved_lights,
+            selected_lights: valid_selections,
             is_scanning: false,
         }
     }
 
-    pub fn update(&mut self, msg: Message) -> (Task<Message>, Option<BulbSetupEvent>) {
+    pub fn update(&mut self, msg: Message) -> (Task<Message>, Option<LightSetupEvent>) {
         match msg {
             Message::Scan => {
                 self.is_scanning = true;
-                (
-                    Task::perform(crate::ambient::discover_bulbs(), Message::BulbsDiscovered),
-                    None,
-                )
+                (Task::none(), None)
             }
-            Message::BulbsDiscovered(new_bulbs) => {
+            Message::LightsDiscovered(new_lights) => {
                 self.is_scanning = false;
-                for discovered in new_bulbs {
+                for discovered in new_lights {
                     if let Some(existing) = self
-                        .discovered_bulbs
+                        .discovered_lights
                         .iter_mut()
-                        .find(|b| b.mac == discovered.mac)
+                        .find(|l| l.id == discovered.id)
                     {
-                        existing.ip = discovered.ip;
+                        existing.backend_data = discovered.backend_data;
                         if discovered.name.is_some() {
                             existing.name = discovered.name;
                         }
                     } else {
-                        self.discovered_bulbs.push(discovered);
+                        self.discovered_lights.push(discovered);
                     }
                 }
-                (Task::none(), Some(BulbSetupEvent::BulbsDiscovered))
+                (Task::none(), Some(LightSetupEvent::LightsDiscovered))
             }
-            Message::ToggleBulb(mac) => {
-                if !self.selected_bulbs.remove(&mac) {
-                    self.selected_bulbs.insert(mac);
+            Message::ToggleLight(id) => {
+                if !self.selected_lights.remove(&id.0) {
+                    self.selected_lights.insert(id.0);
                 }
-                (Task::none(), Some(BulbSetupEvent::SelectionChanged))
+                (Task::none(), Some(LightSetupEvent::SelectionChanged))
             }
-            Message::Done => (Task::none(), Some(BulbSetupEvent::Done)),
+            Message::Done => (Task::none(), Some(LightSetupEvent::Done)),
         }
     }
 
@@ -94,19 +91,19 @@ impl BulbSetupState {
         };
 
         let header = row![
-            text("Bulb Discovery").size(18).color(theme::TEXT),
+            text("Light Discovery").size(18).color(theme::TEXT),
             iced::widget::space().width(Fill),
             scan_button,
         ]
         .spacing(15)
         .align_y(Center);
 
-        let bulb_list: Element<'_> = if self.discovered_bulbs.is_empty() {
+        let light_list: Element<'_> = if self.discovered_lights.is_empty() {
             center(
                 text(if self.is_scanning {
-                    "Scanning for bulbs..."
+                    "Scanning for lights..."
                 } else {
-                    "No bulbs found. Press Scan to discover."
+                    "No lights found. Press Scan to discover."
                 })
                 .size(14)
                 .color(theme::TEXT_DIM),
@@ -114,19 +111,23 @@ impl BulbSetupState {
             .into()
         } else {
             let items =
-                self.discovered_bulbs
+                self.discovered_lights
                     .iter()
-                    .fold(column![].spacing(8).padding(10), |col, bulb| {
-                        let is_selected = self.selected_bulbs.contains(&bulb.mac);
-                        let label = bulb.name.as_deref().unwrap_or("WiZ Bulb").to_string();
-                        let detail = format!("{} - {}", bulb.ip, bulb.mac);
-                        let mac = bulb.mac.clone();
+                    .fold(column![].spacing(8).padding(10), |col, light| {
+                        let is_selected = self.selected_lights.contains(&light.id.0);
+                        let label = light.name.as_deref().unwrap_or("WiZ Bulb").to_string();
+                        let detail = match &light.backend_data {
+                            crate::lighting::BackendData::Wiz { ip, mac } => {
+                                format!("{} - {}", ip, mac)
+                            }
+                        };
+                        let id = light.id.clone();
 
                         col.push(
                             row![
                                 checkbox(is_selected)
                                     .label(label)
-                                    .on_toggle(move |_| { Message::ToggleBulb(mac.clone()) }),
+                                    .on_toggle(move |_| { Message::ToggleLight(id.clone()) }),
                                 text(detail).size(12).color(theme::TEXT_DIM),
                             ]
                             .spacing(10)
@@ -136,12 +137,12 @@ impl BulbSetupState {
             scrollable(items).width(Fill).height(Fill).into()
         };
 
-        let selected_count = self.selected_bulbs.len();
+        let selected_count = self.selected_lights.len();
         let status_text = if self.is_scanning {
             text("Scanning...").color(theme::TEXT_DIM)
         } else {
             text(format!(
-                "{} bulb{} selected",
+                "{} light{} selected",
                 selected_count,
                 if selected_count == 1 { "" } else { "s" }
             ))
@@ -164,7 +165,7 @@ impl BulbSetupState {
         column![
             container(header).width(Fill).padding(15),
             rule::horizontal(1).style(theme::styled_rule),
-            bulb_list,
+            light_list,
             rule::horizontal(1).style(theme::styled_rule),
             bottom_bar,
         ]
@@ -173,26 +174,26 @@ impl BulbSetupState {
         .into()
     }
 
-    pub fn discovered_bulbs(&self) -> &[BulbInfo] {
-        &self.discovered_bulbs
+    pub fn discovered_lights(&self) -> &[LightInfo] {
+        &self.discovered_lights
     }
 
-    pub fn selected_bulbs(&self) -> &HashSet<String> {
-        &self.selected_bulbs
+    pub fn selected_lights(&self) -> &HashSet<String> {
+        &self.selected_lights
     }
 
-    pub fn has_selected_bulbs(&self) -> bool {
-        !self.selected_bulbs.is_empty()
+    pub fn has_selected_lights(&self) -> bool {
+        !self.selected_lights.is_empty()
     }
 
-    pub fn selected_bulbs_vec(&self) -> Vec<String> {
-        self.selected_bulbs.iter().cloned().collect()
+    pub fn selected_lights_vec(&self) -> Vec<String> {
+        self.selected_lights.iter().cloned().collect()
     }
 
-    pub fn selected_bulb_infos(&self) -> Vec<BulbInfo> {
-        self.discovered_bulbs
+    pub fn selected_light_infos(&self) -> Vec<LightInfo> {
+        self.discovered_lights
             .iter()
-            .filter(|b| self.selected_bulbs.contains(&b.mac))
+            .filter(|l| self.selected_lights.contains(&l.id.0))
             .cloned()
             .collect()
     }

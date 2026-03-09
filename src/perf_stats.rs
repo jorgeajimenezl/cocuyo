@@ -40,7 +40,7 @@ pub struct PerfStats {
     sampling_send_time: Option<Instant>,
     sampling_time_ema: Ema,
 
-    bulb_dispatch_ema: Ema,
+    light_dispatch_ema: Ema,
 }
 
 impl PerfStats {
@@ -51,7 +51,7 @@ impl PerfStats {
             frame_interval_ema: Ema::new(alpha),
             sampling_send_time: None,
             sampling_time_ema: Ema::new(alpha),
-            bulb_dispatch_ema: Ema::new(alpha),
+            light_dispatch_ema: Ema::new(alpha),
         }
     }
 
@@ -83,9 +83,9 @@ impl PerfStats {
         self.sampling_time_ema.update(elapsed_ms);
     }
 
-    /// Record a bulb dispatch round-trip duration.
-    pub fn record_bulb_dispatch(&mut self, elapsed_ms: f64) {
-        self.bulb_dispatch_ema.update(elapsed_ms);
+    /// Record a light dispatch round-trip duration.
+    pub fn record_light_dispatch(&mut self, elapsed_ms: f64) {
+        self.light_dispatch_ema.update(elapsed_ms);
     }
 
     /// Reset all stats (e.g., when recording stops).
@@ -110,8 +110,8 @@ impl PerfStats {
         self.sampling_time_ema.get()
     }
 
-    pub fn bulb_dispatch_ms(&self) -> f64 {
-        self.bulb_dispatch_ema.get()
+    pub fn light_dispatch_ms(&self) -> f64 {
+        self.light_dispatch_ema.get()
     }
 
     pub fn has_frame_data(&self) -> bool {
@@ -122,8 +122,8 @@ impl PerfStats {
         self.sampling_time_ema.initialized
     }
 
-    pub fn has_bulb_data(&self) -> bool {
-        self.bulb_dispatch_ema.initialized
+    pub fn has_light_data(&self) -> bool {
+        self.light_dispatch_ema.initialized
     }
 
     /// Fingerprint for cache invalidation -- rounded metric values.
@@ -136,7 +136,7 @@ impl PerfStats {
         ((self.effective_fps() * 10.0) as u64).hash(&mut h);
         ((self.frame_interval_ms() * 10.0) as u64).hash(&mut h);
         ((self.sampling_time_ms() * 10.0) as u64).hash(&mut h);
-        ((self.bulb_dispatch_ms() * 10.0) as u64).hash(&mut h);
+        ((self.light_dispatch_ms() * 10.0) as u64).hash(&mut h);
         h.finish()
     }
 }

@@ -88,8 +88,8 @@ impl canvas::Program<Message, Theme> for PerfHud<'_> {
             if stats.has_sampling_data() {
                 lines.push(format!("Sample: {:.1}ms", stats.sampling_time_ms()));
             }
-            if stats.has_bulb_data() {
-                lines.push(format!("Bulbs: {:.0}ms", stats.bulb_dispatch_ms()));
+            if stats.has_light_data() {
+                lines.push(format!("Lights: {:.0}ms", stats.light_dispatch_ms()));
             }
 
             if lines.is_empty() {
