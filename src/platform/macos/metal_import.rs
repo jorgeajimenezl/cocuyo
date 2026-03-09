@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use foreign_types::ForeignType;
-use objc::runtime::Object;
-use objc::{class, msg_send, sel, sel_impl};
+use objc2::runtime::AnyObject;
+use objc2::{class, msg_send};
 use screencapturekit::cm::IOSurface;
 use tracing::debug;
 
@@ -77,30 +77,30 @@ pub unsafe fn import_iosurface_texture(
         let metal_device = metal_device_mutex.lock();
 
         // Get raw pointer to the MTLDevice ObjC object
-        let device_ptr = metal_device.as_ptr() as *mut Object;
+        let device_ptr = metal_device.as_ptr() as *mut AnyObject;
 
         // Create an MTLTextureDescriptor for 2D BGRA8Unorm_sRGB
         // MTLPixelFormatBGRA8Unorm_sRGB = 81
-        let descriptor: *mut Object = unsafe {
+        let descriptor: *mut AnyObject = unsafe {
             msg_send![class!(MTLTextureDescriptor),
-                texture2DDescriptorWithPixelFormat:81u64
-                width:width as u64
-                height:height as u64
-                mipmapped:false]
+                texture2DDescriptorWithPixelFormat: 81u64,
+                width: width as u64,
+                height: height as u64,
+                mipmapped: false]
         };
         // ShaderRead (0x01) | RenderTarget (0x04) — RenderTarget is needed
         // because wgpu maps COPY_SRC to it on Metal (used by GPU sampler).
-        let _: () = unsafe { msg_send![descriptor, setUsage: 0x05u64] };
+        let _: () = unsafe { msg_send![&*descriptor, setUsage: 0x05u64] };
         // IOSurface-backed textures require shared storage mode.
-        let _: () = unsafe { msg_send![descriptor, setStorageMode: 1u64] }; // MTLStorageModeShared
+        let _: () = unsafe { msg_send![&*descriptor, setStorageMode: 1u64] }; // MTLStorageModeShared
 
         // Create Metal texture from IOSurface via
         // [MTLDevice newTextureWithDescriptor:iosurface:plane:]
         let iosurface_ptr = surface.as_ptr();
-        let metal_texture_ptr: *mut Object = unsafe {
-            msg_send![device_ptr, newTextureWithDescriptor:descriptor
-                iosurface:iosurface_ptr
-                plane:0u64]
+        let metal_texture_ptr: *mut AnyObject = unsafe {
+            msg_send![&*device_ptr, newTextureWithDescriptor: descriptor,
+                iosurface: iosurface_ptr,
+                plane: 0u64]
         };
 
         if metal_texture_ptr.is_null() {

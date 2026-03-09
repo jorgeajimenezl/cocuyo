@@ -52,5 +52,5 @@ wgpu-hal = { version = "27", features = ["dx12"] }
 screencapturekit = { version = "1.5.3", features = ["async", "macos_14_0"] }
 wgpu-hal = { version = "27", features = ["metal"] }
 metal = "0.32"
-objc = "0.2"
+objc2 = "0.6.4"
 foreign-types = "0.5"
