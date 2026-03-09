@@ -8,14 +8,15 @@ use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
 
-use crate::ambient::SavedBulbState;
 use crate::config::AppConfig;
 use crate::frame::FrameData;
+use crate::lighting::{LightId, LightingBackend, SavedLightState};
+use crate::lighting::wiz::WizBackend;
 use crate::recording::{self, RecordingCommand, RecordingEvent};
 use crate::region::Region;
 use crate::sampling::BoxedStrategy;
 use crate::screen::WindowKind;
-use crate::screen::bulb_setup;
+use crate::screen::light_setup;
 use crate::screen::settings;
 use crate::widget::Element;
 use crate::widget::region_overlay::RegionMessage;
@@ -24,8 +25,6 @@ const MAIN_WINDOW_SIZE: Size = Size::new(1200.0, 750.0);
 const MAIN_WINDOW_MIN: Size = Size::new(800.0, 500.0);
 const SETTINGS_WINDOW_SIZE: Size = Size::new(500.0, 700.0);
 const SETTINGS_WINDOW_MIN: Size = Size::new(300.0, 200.0);
-const BULB_SETUP_WINDOW_SIZE: Size = Size::new(500.0, 400.0);
-const BULB_SETUP_WINDOW_MIN: Size = Size::new(350.0, 300.0);
 #[cfg(target_os = "windows")]
 const PICKER_WINDOW_SIZE: Size = Size::new(500.0, 500.0);
 #[cfg(target_os = "windows")]
@@ -61,27 +60,27 @@ pub enum Message {
 
     // Main window controls
     OpenSettings(window::Id),
-    OpenBulbSetup(window::Id),
+    OpenLightSetup(window::Id),
     #[cfg(target_os = "windows")]
     OpenCapturePicker(Option<window::Id>, PickerIntent),
     StartRecording,
     StopRecording,
     StartAmbient,
     StopAmbient,
-    BulbStatesSaved(Vec<SavedBulbState>),
+    LightStatesSaved(Vec<SavedLightState>),
     RecordingEvent(RecordingEvent),
     RegionUpdate(RegionMessage),
     RegionStrategyChanged(usize, BoxedStrategy),
 
     // Delegated screens
     Settings(settings::Message),
-    BulbSetup(bulb_setup::Message),
+    LightSetup(light_setup::Message),
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
 
     GpuSamplingComplete(crate::sampling::gpu::SamplingResult),
 
-    BulbDispatchComplete(f64),
+    LightDispatchComplete(f64),
 
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     TrayEvent(crate::tray::TrayAction),
@@ -93,6 +92,7 @@ pub enum Message {
 pub struct Cocuyo {
     windows: BTreeMap<window::Id, WindowKind>,
     config: AppConfig,
+    lighting_backend: LightingBackend,
 
     // Recording state
     current_frame: Option<Arc<FrameData>>,
@@ -102,10 +102,10 @@ pub struct Cocuyo {
     recording_fps_limit: u32,
     recording_resolution_scale: u32,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
-    bulb_setup: bulb_setup::BulbSetupState,
+    light_setup: light_setup::LightSetupState,
     is_ambient_active: bool,
-    last_bulb_update: Option<Instant>,
-    saved_bulb_states: Option<Vec<SavedBulbState>>,
+    last_light_update: Option<Instant>,
+    saved_light_states: Option<Vec<SavedLightState>>,
     regions: Vec<Region>,
     next_region_id: usize,
     selected_region: Option<usize>,
@@ -139,10 +139,11 @@ impl Cocuyo {
             recording_fps_limit: 0,
             recording_resolution_scale: 100,
             recording_cmd_tx: None,
-            bulb_setup: bulb_setup::BulbSetupState::new(&config),
+            light_setup: light_setup::LightSetupState::new(&config),
+            lighting_backend: LightingBackend::Wiz(WizBackend::new()),
             is_ambient_active: false,
-            last_bulb_update: None,
-            saved_bulb_states: None,
+            last_light_update: None,
+            saved_light_states: None,
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
@@ -158,7 +159,7 @@ impl Cocuyo {
             #[cfg(target_os = "windows")]
             capture_target: None,
         };
-        app.sync_regions_to_bulbs();
+        app.sync_regions_to_lights();
 
         let task = app.open_window(
             WindowKind::Main,
@@ -174,7 +175,7 @@ impl Cocuyo {
         match self.windows.get(&window_id) {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
-            Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
+            Some(WindowKind::LightSetup) => "Cocuyo - Light Setup".to_string(),
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => "Cocuyo - Select Target".to_string(),
             None => String::new(),
@@ -194,14 +195,14 @@ impl Cocuyo {
                     self.capture_picker = None;
                     return Task::none();
                 }
-                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::BulbSetup) {
+                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::LightSetup) {
                     self.flush_config();
                 }
                 if kind == Some(WindowKind::Main) {
                     #[cfg(not(target_os = "linux"))]
                     if self.config.minimize_to_tray || self.tray_hide_requested {
                         self.tray_hide_requested = false;
-                        // Hide to tray — don't stop recording/ambient, don't exit
+                        // Hide to tray -- don't stop recording/ambient, don't exit
                         self.tray.update_menu_text(false, self.is_ambient_active);
                         return Task::none();
                     }
@@ -259,10 +260,10 @@ impl Cocuyo {
                 self.current_frame = None;
                 Task::none()
             }
-            Message::OpenBulbSetup(parent) => self.open_window(
-                WindowKind::BulbSetup,
-                BULB_SETUP_WINDOW_SIZE,
-                BULB_SETUP_WINDOW_MIN,
+            Message::OpenLightSetup(parent) => self.open_window(
+                WindowKind::LightSetup,
+                Size::new(500.0, 400.0),
+                Size::new(350.0, 300.0),
                 Some(parent),
             ),
             Message::Settings(msg) => {
@@ -275,15 +276,27 @@ impl Cocuyo {
                     task
                 }
             }
-            Message::BulbSetup(msg) => {
-                let (task, event) = self.bulb_setup.update(msg);
-                let task = task.map(Message::BulbSetup);
-                if let Some(event) = event {
-                    let event_task = self.handle_bulb_setup_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
+            Message::LightSetup(msg) => {
+                // Handle Scan specially to route through the backend
+                let is_scan = matches!(msg, light_setup::Message::Scan);
+                let (task, event) = self.light_setup.update(msg);
+                let task = task.map(Message::LightSetup);
+
+                let mut tasks = vec![task];
+
+                if is_scan {
+                    let discover_task = Task::perform(
+                        self.lighting_backend.discover(),
+                        |lights| Message::LightSetup(light_setup::Message::LightsDiscovered(lights)),
+                    );
+                    tasks.push(discover_task);
                 }
+
+                if let Some(event) = event {
+                    let event_task = self.handle_light_setup_event(event);
+                    tasks.push(event_task);
+                }
+                Task::batch(tasks)
             }
             #[cfg(target_os = "windows")]
             Message::CapturePicker(msg) => {
@@ -333,7 +346,7 @@ impl Cocuyo {
                 iced::exit()
             }
             Message::StartAmbient => {
-                if !self.bulb_setup.has_selected_bulbs() {
+                if !self.light_setup.has_selected_lights() {
                     return Task::none();
                 }
                 #[cfg(target_os = "windows")]
@@ -346,21 +359,21 @@ impl Cocuyo {
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    let bulbs = self.bulb_setup.selected_bulb_infos();
+                    let lights = self.light_setup.selected_light_infos();
                     Task::perform(
-                        crate::ambient::save_bulb_states(bulbs),
-                        Message::BulbStatesSaved,
+                        self.lighting_backend.save_states(lights),
+                        Message::LightStatesSaved,
                     )
                 }
             }
-            Message::BulbStatesSaved(states) => {
-                self.saved_bulb_states = if states.is_empty() {
+            Message::LightStatesSaved(states) => {
+                self.saved_light_states = if states.is_empty() {
                     None
                 } else {
                     Some(states)
                 };
                 self.is_ambient_active = true;
-                self.last_bulb_update = None;
+                self.last_light_update = None;
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
@@ -385,7 +398,7 @@ impl Cocuyo {
             Message::StopAmbient => {
                 self.perf_stats.reset();
                 self.is_ambient_active = false;
-                self.last_bulb_update = None;
+                self.last_light_update = None;
                 self.sampling_worker = None;
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), false);
@@ -393,10 +406,11 @@ impl Cocuyo {
                     let _ = cmd_tx.try_send(RecordingCommand::Stop);
                 }
                 self.current_frame = None;
-                if let Some(states) = self.saved_bulb_states.take() {
-                    Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                        Message::Noop
-                    })
+                if let Some(states) = self.saved_light_states.take() {
+                    Task::perform(
+                        self.lighting_backend.restore_states(states),
+                        |()| Message::Noop,
+                    )
                 } else {
                     Task::none()
                 }
@@ -432,11 +446,11 @@ impl Cocuyo {
 
                         if self.is_ambient_active {
                             let should_update = self
-                                .last_bulb_update
+                                .last_light_update
                                 .map(|t| {
                                     t.elapsed()
                                         >= Duration::from_millis(
-                                            self.config.bulb_update_interval_ms,
+                                            self.config.light_update_interval_ms,
                                         )
                                 })
                                 .unwrap_or(true);
@@ -447,8 +461,6 @@ impl Cocuyo {
                                 }
 
                                 // Try GPU sampling (async, off main thread)
-                                // Note: last_bulb_update is set in GpuSamplingComplete,
-                                // not here, to avoid throttle drift when GPU is slow.
                                 if let Some(ref worker) = self.sampling_worker {
                                     use crate::sampling::gpu::{RegionParams, SendResult};
                                     if worker.is_idle() {
@@ -485,7 +497,7 @@ impl Cocuyo {
                                 // CPU fallback (fast, stays on main thread)
                                 if self.sampling_worker.is_none() {
                                     self.perf_stats.mark_sampling_start();
-                                    self.last_bulb_update = Some(Instant::now());
+                                    self.last_light_update = Some(Instant::now());
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
                                         for region in &mut self.regions {
@@ -501,7 +513,21 @@ impl Cocuyo {
                                     }
                                     self.perf_stats.record_sampling_complete();
 
-                                    return self.dispatch_to_bulbs();
+                                    if let Some(targets) = crate::lighting::build_light_targets(
+                                        &self.regions,
+                                        self.light_setup.discovered_lights(),
+                                        &self.lighting_backend,
+                                        self.config.min_brightness_percent,
+                                        self.config.white_color_temp,
+                                    ) {
+                                        let dispatch_start = Instant::now();
+                                        return Task::perform(
+                                            self.lighting_backend.dispatch_colors(targets),
+                                            move |()| Message::LightDispatchComplete(
+                                                dispatch_start.elapsed().as_secs_f64() * 1000.0,
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -515,16 +541,32 @@ impl Cocuyo {
                     return Task::none();
                 }
 
-                self.last_bulb_update = Some(Instant::now());
+                self.last_light_update = Some(Instant::now());
                 for (region_id, color) in &result.colors {
                     if let Some(region) = self.regions.iter_mut().find(|r| r.id == *region_id) {
                         region.sampled_color = *color;
                     }
                 }
-                self.dispatch_to_bulbs()
+                if let Some(targets) = crate::lighting::build_light_targets(
+                    &self.regions,
+                    self.light_setup.discovered_lights(),
+                    &self.lighting_backend,
+                    self.config.min_brightness_percent,
+                    self.config.white_color_temp,
+                ) {
+                    let dispatch_start = Instant::now();
+                    Task::perform(
+                        self.lighting_backend.dispatch_colors(targets),
+                        move |()| Message::LightDispatchComplete(
+                            dispatch_start.elapsed().as_secs_f64() * 1000.0,
+                        ),
+                    )
+                } else {
+                    Task::none()
+                }
             }
-            Message::BulbDispatchComplete(elapsed_ms) => {
-                self.perf_stats.record_bulb_dispatch(elapsed_ms);
+            Message::LightDispatchComplete(elapsed_ms) => {
+                self.perf_stats.record_light_dispatch(elapsed_ms);
                 Task::none()
             }
             Message::RegionStrategyChanged(id, strategy) => {
@@ -559,7 +601,7 @@ impl Cocuyo {
         let title = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => "Cocuyo",
             Some(WindowKind::Settings) => "Settings",
-            Some(WindowKind::BulbSetup) => "Bulb Setup",
+            Some(WindowKind::LightSetup) => "Light Setup",
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => "Select Capture Target",
             None => "",
@@ -574,16 +616,17 @@ impl Cocuyo {
                     &self.recording_state,
                     frame_info,
                     self.is_ambient_active,
-                    self.bulb_setup.has_selected_bulbs(),
-                    self.bulb_setup.selected_bulbs().len(),
+                    self.light_setup.has_selected_lights(),
+                    self.light_setup.selected_lights().len(),
                     &self.regions,
                     self.selected_region,
                     &self.perf_stats,
                     self.config.show_perf_overlay,
+                    &self.lighting_backend,
                 )
             }
             Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
-            Some(WindowKind::BulbSetup) => self.bulb_setup.view().map(Message::BulbSetup),
+            Some(WindowKind::LightSetup) => self.light_setup.view().map(Message::LightSetup),
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => {
                 if let Some(ref picker) = self.capture_picker {
@@ -693,8 +736,8 @@ impl Cocuyo {
                 }
                 Task::none()
             }
-            settings::Event::BulbUpdateIntervalChanged(ms) => {
-                self.config.bulb_update_interval_ms = ms;
+            settings::Event::LightUpdateIntervalChanged(ms) => {
+                self.config.light_update_interval_ms = ms;
                 self.mark_config_dirty();
                 Task::none()
             }
@@ -746,19 +789,20 @@ impl Cocuyo {
         }
     }
 
-    fn handle_bulb_setup_event(&mut self, event: bulb_setup::BulbSetupEvent) -> Task<Message> {
+    fn handle_light_setup_event(&mut self, event: light_setup::LightSetupEvent) -> Task<Message> {
         match event {
-            bulb_setup::BulbSetupEvent::Done => {
-                self.sync_regions_to_bulbs();
-                self.save_bulb_config();
-                self.close_window_by_kind(WindowKind::BulbSetup)
+            light_setup::LightSetupEvent::Done => {
+                self.sync_regions_to_lights();
+                self.save_light_config();
+                self.close_window_by_kind(WindowKind::LightSetup)
             }
-            bulb_setup::BulbSetupEvent::SelectionChanged => {
-                self.sync_regions_to_bulbs();
+            light_setup::LightSetupEvent::SelectionChanged => {
+                self.sync_regions_to_lights();
+                self.save_light_config();
                 Task::none()
             }
-            bulb_setup::BulbSetupEvent::BulbsDiscovered => {
-                self.save_bulb_config();
+            light_setup::LightSetupEvent::LightsDiscovered => {
+                self.save_light_config();
                 Task::none()
             }
         }
@@ -779,12 +823,12 @@ impl Cocuyo {
                         close_task
                     }
                     PickerIntent::StartAmbient => {
-                        let bulbs = self.bulb_setup.selected_bulb_infos();
+                        let lights = self.light_setup.selected_light_infos();
                         Task::batch([
                             close_task,
                             Task::perform(
-                                crate::ambient::save_bulb_states(bulbs),
-                                Message::BulbStatesSaved,
+                                self.lighting_backend.save_states(lights),
+                                Message::LightStatesSaved,
                             ),
                         ])
                     }
@@ -830,39 +874,20 @@ impl Cocuyo {
                 let _ = cmd_tx.try_send(RecordingCommand::Stop);
             }
         }
-        if let Some(states) = self.saved_bulb_states.take() {
-            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                Message::ExitApp
-            })
+        if let Some(states) = self.saved_light_states.take() {
+            Task::perform(
+                self.lighting_backend.restore_states(states),
+                |()| Message::ExitApp,
+            )
         } else {
             iced::exit()
         }
     }
 
-    fn dispatch_to_bulbs(&self) -> Task<Message> {
-        if let Some(targets) = crate::ambient::build_bulb_targets(
-            &self.regions,
-            self.bulb_setup.discovered_bulbs(),
-            self.config.min_brightness_percent,
-            self.config.white_color_temp,
-        ) {
-            let dispatch_start = Instant::now();
-            Task::perform(
-                crate::ambient::dispatch_bulb_colors(targets),
-                move |()| {
-                    Message::BulbDispatchComplete(
-                        dispatch_start.elapsed().as_secs_f64() * 1000.0,
-                    )
-                },
-            )
-        } else {
-            Task::none()
-        }
-    }
+    fn sync_regions_to_lights(&mut self) {
+        let selected_ids = self.light_setup.selected_lights_vec();
 
-    fn sync_regions_to_bulbs(&mut self) {
-        let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
-        self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
+        self.regions.retain(|r| selected_ids.contains(&r.light_id.0));
 
         if let Some(sel) = self.selected_region {
             if !self.regions.iter().any(|r| r.id == sel) {
@@ -870,9 +895,9 @@ impl Cocuyo {
             }
         }
 
-        let num_total = selected_macs.len();
-        for (i, mac) in selected_macs.iter().enumerate() {
-            if self.regions.iter().any(|r| r.bulb_mac == *mac) {
+        let num_total = selected_ids.len();
+        for (i, id) in selected_ids.iter().enumerate() {
+            if self.regions.iter().any(|r| r.light_id.0 == *id) {
                 continue;
             }
 
@@ -893,7 +918,7 @@ impl Cocuyo {
                 y: (cy - default_h / 2.0).clamp(0.0, frame_h - default_h),
                 width: default_w,
                 height: default_h,
-                bulb_mac: mac.clone(),
+                light_id: LightId(id.clone()),
                 sampled_color: None,
                 strategy: BoxedStrategy::default(),
             };
@@ -928,9 +953,9 @@ impl Cocuyo {
         open.map(move |id| Message::WindowOpened(id, kind))
     }
 
-    fn save_bulb_config(&mut self) {
-        self.config.saved_bulbs = self.bulb_setup.discovered_bulbs().to_vec();
-        self.config.selected_bulb_macs = self.bulb_setup.selected_bulbs().iter().cloned().collect();
+    fn save_light_config(&mut self) {
+        self.config.saved_lights = self.light_setup.discovered_lights().to_vec();
+        self.config.selected_light_ids = self.light_setup.selected_lights_vec();
         self.mark_config_dirty();
     }
 

@@ -3,11 +3,11 @@
 use tracing::info;
 
 mod adapters;
-mod ambient;
 mod app;
 mod config;
 mod frame;
 mod gpu_context;
+mod lighting;
 mod perf_stats;
 mod platform;
 mod recording;

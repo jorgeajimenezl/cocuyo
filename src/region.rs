@@ -1,5 +1,6 @@
 use iced::Rectangle;
 
+use crate::lighting::LightId;
 use crate::sampling::BoxedStrategy;
 
 #[derive(Debug, Clone)]
@@ -10,7 +11,7 @@ pub struct Region {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub bulb_mac: String,
+    pub light_id: LightId,
     pub sampled_color: Option<(u8, u8, u8)>,
     pub strategy: BoxedStrategy,
 }

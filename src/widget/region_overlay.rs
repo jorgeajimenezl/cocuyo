@@ -63,7 +63,7 @@ fn region_fingerprint(regions: &[Region], selected: Option<usize>) -> u64 {
         r.y.to_bits().hash(&mut h);
         r.width.to_bits().hash(&mut h);
         r.height.to_bits().hash(&mut h);
-        r.bulb_mac.hash(&mut h);
+        r.light_id.hash(&mut h);
     }
     h.finish()
 }
@@ -398,11 +398,11 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
                         .with_width(stroke_width),
                 );
 
-                // Label: show bulb name or MAC suffix
+                // Label: show light ID suffix
                 let label = format!(
                     "R{} ({})",
                     i + 1,
-                    &region.bulb_mac[region.bulb_mac.len().saturating_sub(5)..]
+                    &region.light_id.0[region.light_id.0.len().saturating_sub(5)..]
                 );
 
                 frame.fill_text(Text {
