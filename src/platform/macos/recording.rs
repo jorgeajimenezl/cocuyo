@@ -132,10 +132,6 @@ pub fn recording_subscription(
                     .send(RecordingEvent::StateChanged(RecordingState::Error(msg)))
                     .await
                     .ok();
-                output
-                    .send(RecordingEvent::StateChanged(RecordingState::Idle))
-                    .await
-                    .ok();
                 std::future::pending::<()>().await;
                 return;
             }
@@ -165,10 +161,6 @@ pub fn recording_subscription(
             warn!("{}", msg);
             output
                 .send(RecordingEvent::StateChanged(RecordingState::Error(msg)))
-                .await
-                .ok();
-            output
-                .send(RecordingEvent::StateChanged(RecordingState::Idle))
                 .await
                 .ok();
             std::future::pending::<()>().await;

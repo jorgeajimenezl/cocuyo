@@ -416,7 +416,7 @@ impl Cocuyo {
                         self.recording_cmd_tx = Some(cmd_tx);
                     }
                     RecordingEvent::StateChanged(state) => {
-                        if state == RecordingState::Idle {
+                        if matches!(state, RecordingState::Idle | RecordingState::Error(_)) {
                             self.perf_stats.reset();
                             self.is_recording = false;
                             self.is_ambient_active = false;
