@@ -430,6 +430,11 @@ impl Cocuyo {
                         self.recording_state = state;
                     }
                     RecordingEvent::Frame(frame) => {
+                        // Double check
+                        if !self.is_recording {
+                            return Task::none();
+                        }
+
                         self.perf_stats.record_frame_arrival();
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
