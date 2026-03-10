@@ -491,51 +491,8 @@ impl VideoPipeline {
         };
 
         match result {
-            Ok((imported_texture, wgpu_format)) => {
-                // Reuse the local GPU texture across frames when resolution is unchanged.
-                // The copy decouples rendering from the DMA-BUF lifetime.
-                let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
-
-                // Copy imported DMA-BUF texture → local texture
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("dmabuf_copy"),
-                });
-                let copy_size = wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                };
-                encoder.copy_texture_to_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &imported_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::TexelCopyTextureInfo {
-                        texture: local_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    copy_size,
-                );
-
-                // Submit immediately — this triggers vkQueueSubmit which attaches
-                // the DRM implicit-sync read fence to the DMA-BUF. The compositor
-                // must wait for this fence before reusing the buffer.
-                queue.submit(std::iter::once(encoder.finish()));
-
-                // Use the local texture (not the imported one) for rendering.
-                // imported_texture is dropped here — wgpu defers the actual Vulkan
-                // resource cleanup (vkDestroyImage + vkFreeMemory) until the GPU
-                // finishes the copy command submitted above.
-                let view = self
-                    .cached_texture
-                    .as_ref()
-                    .unwrap()
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((texture, _wgpu_format)) => {
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
