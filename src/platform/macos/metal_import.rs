@@ -6,6 +6,11 @@ use objc2::{class, msg_send};
 use screencapturekit::cm::IOSurface;
 use tracing::debug;
 
+// Metal API constants
+const MTL_PIXEL_FORMAT_BGRA8_UNORM_SRGB: u64 = 81;
+const MTL_TEXTURE_USAGE_SHADER_READ_RENDER_TARGET: u64 = 0x01 | 0x04; // ShaderRead | RenderTarget
+const MTL_STORAGE_MODE_SHARED: u64 = 1;
+
 /// Global flag: once Metal IOSurface import fails, fall back to CPU for all future frames.
 static IOSURFACE_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
 
@@ -79,20 +84,22 @@ pub unsafe fn import_iosurface_texture(
         // Get raw pointer to the MTLDevice ObjC object
         let device_ptr = metal_device.as_ptr() as *mut AnyObject;
 
-        // Create an MTLTextureDescriptor for 2D BGRA8Unorm_sRGB
-        // MTLPixelFormatBGRA8Unorm_sRGB = 81
         let descriptor: *mut AnyObject = unsafe {
             msg_send![class!(MTLTextureDescriptor),
-                texture2DDescriptorWithPixelFormat: 81u64,
+                texture2DDescriptorWithPixelFormat: MTL_PIXEL_FORMAT_BGRA8_UNORM_SRGB,
                 width: width as u64,
                 height: height as u64,
                 mipmapped: false]
         };
-        // ShaderRead (0x01) | RenderTarget (0x04) — RenderTarget is needed
-        // because wgpu maps COPY_SRC to it on Metal (used by GPU sampler).
-        let _: () = unsafe { msg_send![&*descriptor, setUsage: 0x05u64] };
+
+        if descriptor.is_null() {
+            return Err(MetalImportError::TextureCreationFailed);
+        }
+
+        // RenderTarget is needed because wgpu maps COPY_SRC to it on Metal (used by GPU sampler).
+        let _: () = unsafe { msg_send![&*descriptor, setUsage: MTL_TEXTURE_USAGE_SHADER_READ_RENDER_TARGET] };
         // IOSurface-backed textures require shared storage mode.
-        let _: () = unsafe { msg_send![&*descriptor, setStorageMode: 1u64] }; // MTLStorageModeShared
+        let _: () = unsafe { msg_send![&*descriptor, setStorageMode: MTL_STORAGE_MODE_SHARED] };
 
         // Create Metal texture from IOSurface via
         // [MTLDevice newTextureWithDescriptor:iosurface:plane:]

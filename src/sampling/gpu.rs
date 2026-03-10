@@ -840,15 +840,17 @@ impl GpuSampler {
             } => {
                 // Re-import on the sampler thread (safe — not inside winit event handler).
                 // We need an owned wgpu::Texture for PendingCopy.
-                let (imported, wgpu_format) = unsafe {
-                    crate::platform::macos::metal_import::import_iosurface_texture(
-                        &self.device,
-                        surface,
-                        *width,
-                        *height,
-                    )
-                }
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
+                // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
+                let (imported, wgpu_format) =
+                    screencapturekit::metal::autoreleasepool(|| unsafe {
+                        crate::platform::macos::metal_import::import_iosurface_texture(
+                            &self.device,
+                            surface,
+                            *width,
+                            *height,
+                        )
+                    })
+                    .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
 
                 self.ensure_texture(*width, *height, wgpu_format);
                 let view = create_non_srgb_view(

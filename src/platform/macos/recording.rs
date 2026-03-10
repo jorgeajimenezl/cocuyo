@@ -21,17 +21,21 @@ use crate::recording::{RecordingCommand, RecordingEvent};
 /// Convert BGRA pixel data to RGBA, stripping row padding if present.
 pub fn bgra_to_rgba(src: &[u8], width: usize, height: usize, bytes_per_row: usize) -> Vec<u8> {
     let stride = width * 4;
-    let mut rgba = Vec::with_capacity(width * height * 4);
+    let mut rgba = vec![0u8; width * height * 4];
     for row in 0..height {
-        let row_start = row * bytes_per_row;
-        if row_start >= src.len() {
+        let src_start = row * bytes_per_row;
+        if src_start >= src.len() {
             break;
         }
-        // Last row may not have full bytes_per_row of data
-        let available = (src.len() - row_start).min(stride);
-        let row_data = &src[row_start..row_start + available];
-        for chunk in row_data.chunks_exact(4) {
-            rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
+        let available = (src.len() - src_start).min(stride);
+        let src_row = &src[src_start..src_start + available];
+        let dst_start = row * stride;
+        let dst_row = &mut rgba[dst_start..dst_start + stride];
+        for (dst, src_px) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            dst[0] = src_px[2];
+            dst[1] = src_px[1];
+            dst[2] = src_px[0];
+            dst[3] = src_px[3];
         }
     }
     rgba
