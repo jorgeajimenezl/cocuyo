@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-use std::mem::ManuallyDrop;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::Arc;
 
@@ -17,41 +15,12 @@ use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
 use crate::frame::FrameData;
 
-struct HeldBuffer {
-    inner: ManuallyDrop<pw::buffer::Buffer<'static>>,
-}
-
-impl HeldBuffer {
-    /// Takes ownership of a PipeWire buffer, preventing its automatic re-queuing.
-    unsafe fn new(buffer: pw::buffer::Buffer<'_>) -> Self {
-        let erased: pw::buffer::Buffer<'static> = unsafe { std::mem::transmute(buffer) };
-        Self {
-            inner: ManuallyDrop::new(erased),
-        }
-    }
-}
-
-impl Drop for HeldBuffer {
-    fn drop(&mut self) {
-        unsafe { ManuallyDrop::drop(&mut self.inner) }
-    }
-}
-
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
     pub frame_sender: mpsc::Sender<Arc<FrameData>>,
     pub gst_converter: Option<gst_pipeline::GstVideoConverter>,
     pub mainloop: pw::main_loop::MainLoop,
     pub selected_backend: GpuBackend,
-    /// PipeWire buffers held back from being re-queued to give the GPU time
-    /// to submit rendering commands and attach DRM implicit-sync read fences.
-    ///
-    /// We hold up to 3 buffers (~50ms at 60fps). When the deque reaches 3,
-    /// the oldest buffer is released (dropped → `pw_stream_queue_buffer`).
-    /// This gives the UI thread enough time to import the DMA-BUF, copy it
-    /// to a local GPU texture, and call `queue.submit()` — which attaches
-    /// the read fence the compositor waits for before reusing the buffer.
-    held_dmabuf_buffers: VecDeque<HeldBuffer>,
 }
 
 pub async fn open_portal() -> ashpd::Result<(
@@ -100,7 +69,6 @@ pub fn start_streaming(
         gst_converter: None,
         mainloop: mainloop.clone(),
         selected_backend,
-        held_dmabuf_buffers: VecDeque::new(),
     };
 
     let stream = pw::stream::Stream::new(
@@ -115,11 +83,8 @@ pub fn start_streaming(
 
     let _listener = stream
         .add_local_listener_with_user_data(data)
-        .state_changed(|_, user_data, old, new| {
+        .state_changed(|_, _user_data, old, new| {
             debug!(?old, ?new, "Stream state changed");
-            // Release any held buffer on state transitions so we don't leak buffers
-            // when the stream pauses or errors out between on_process calls.
-            user_data.held_dmabuf_buffers.clear();
         })
         .param_changed(on_param_changed)
         .process(on_process)
@@ -163,7 +128,7 @@ pub fn start_streaming(
 }
 
 fn on_param_changed(
-    _stream: &pw::stream::StreamRef,
+    stream: &pw::stream::StreamRef,
     user_data: &mut UserData,
     id: u32,
     param: Option<&spa::pod::Pod>,
@@ -200,34 +165,50 @@ fn on_param_changed(
         framerate_denom = user_data.format.framerate().denom,
         "Got video format"
     );
+
+    // Request 3 buffers from PipeWire so the compositor has spare buffers to
+    // write to while the GPU is still reading from a previously dequeued one.
+    const SPA_PARAM_BUFFERS_BUFFERS: u32 = 1;
+    let buffers_obj = pw::spa::pod::object!(
+        pw::spa::utils::SpaTypes::ObjectParamBuffers,
+        pw::spa::param::ParamType::Buffers,
+        pw::spa::pod::Property {
+            key: SPA_PARAM_BUFFERS_BUFFERS,
+            flags: pw::spa::pod::PropertyFlags::empty(),
+            value: pw::spa::pod::Value::Int(3),
+        },
+    );
+
+    let values = pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &pw::spa::pod::Value::Object(buffers_obj),
+    )
+    .unwrap()
+    .0
+    .into_inner();
+
+    let pod = spa::pod::Pod::from_bytes(&values).unwrap();
+    let mut params = [pod];
+    if let Err(e) = stream.update_params(&mut params) {
+        warn!(error = %e, "Failed to update buffer params");
+    }
 }
 
 fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
-    while user_data.held_dmabuf_buffers.len() >= 3 {
-        user_data.held_dmabuf_buffers.pop_front();
-    }
-
     let Some(mut buffer) = stream.dequeue_buffer() else {
         warn!("Out of buffers");
         return;
     };
 
     if let Some(frame) = try_process_dmabuf(&mut buffer, user_data) {
-        let is_vulkan_zerocopy = matches!(frame, FrameData::DmaBuf { .. });
-        let delivered = send_frame(frame, user_data);
-
-        if is_vulkan_zerocopy && delivered {
-            let held = unsafe { HeldBuffer::new(buffer) };
-            user_data.held_dmabuf_buffers.push_back(held);
-        }
-        // If GStreamer path (FrameData::Cpu): buffer drops here → queue_buffer immediately
+        send_frame(frame, user_data);
         return;
     }
 
     if let Some(frame) = try_process_cpu(&mut buffer, user_data) {
         send_frame(frame, user_data);
     }
-    // buffer drops here → queue_buffer
+    // buffer drops here → pw_stream_queue_buffer
 }
 
 fn try_process_dmabuf(
