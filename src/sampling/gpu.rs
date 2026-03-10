@@ -832,6 +832,40 @@ impl GpuSampler {
                     }),
                 })
             }
+            #[cfg(target_os = "macos")]
+            FrameData::IOSurface {
+                surface,
+                width,
+                height,
+            } => {
+                // Re-import on the sampler thread (safe — not inside winit event handler).
+                // We need an owned wgpu::Texture for PendingCopy.
+                // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
+                let (imported, wgpu_format) =
+                    screencapturekit::metal::autoreleasepool(|| unsafe {
+                        crate::platform::macos::metal_import::import_iosurface_texture(
+                            &self.device,
+                            surface,
+                            *width,
+                            *height,
+                        )
+                    })
+                    .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
+
+                self.ensure_texture(*width, *height, wgpu_format);
+                let view = create_non_srgb_view(
+                    &self.cached_texture.as_ref().unwrap().texture,
+                    wgpu_format,
+                );
+                Ok(ImportedFrame {
+                    view,
+                    pending_copy: Some(PendingCopy {
+                        src: imported,
+                        width: *width,
+                        height: *height,
+                    }),
+                })
+            }
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
                 slot,

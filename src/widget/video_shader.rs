@@ -11,6 +11,8 @@ use tracing::{error, warn};
 use crate::frame::FrameData;
 #[cfg(target_os = "linux")]
 use crate::platform::linux::vulkan_dmabuf;
+#[cfg(target_os = "macos")]
+use crate::platform::macos::metal_import;
 #[cfg(target_os = "windows")]
 use crate::platform::windows::dx12_import;
 
@@ -29,6 +31,12 @@ enum FrameInfo {
         drm_format: DrmFourcc,
         stride: u32,
         offset: u32,
+    },
+    #[cfg(target_os = "macos")]
+    IOSurface {
+        surface: screencapturekit::cm::IOSurface,
+        width: u32,
+        height: u32,
     },
     #[cfg(target_os = "windows")]
     D3DShared {
@@ -62,6 +70,16 @@ impl VideoScene {
                 drm_format: *drm_format,
                 stride: *stride,
                 offset: *offset,
+            },
+            #[cfg(target_os = "macos")]
+            FrameData::IOSurface {
+                surface,
+                width,
+                height,
+            } => FrameInfo::IOSurface {
+                surface: surface.clone(),
+                width: *width,
+                height: *height,
             },
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
@@ -116,6 +134,17 @@ impl<Message> shader::Program<Message> for VideoScene {
                 offset: *offset,
                 bounds,
             },
+            #[cfg(target_os = "macos")]
+            Some(FrameInfo::IOSurface {
+                surface,
+                width,
+                height,
+            }) => VideoPrimitive::IOSurface {
+                surface: surface.clone(),
+                width: *width,
+                height: *height,
+                bounds,
+            },
             #[cfg(target_os = "windows")]
             Some(FrameInfo::D3DShared {
                 shared_handle,
@@ -153,6 +182,13 @@ pub enum VideoPrimitive {
         drm_format: DrmFourcc,
         stride: u32,
         offset: u32,
+        bounds: Rectangle,
+    },
+    #[cfg(target_os = "macos")]
+    IOSurface {
+        surface: screencapturekit::cm::IOSurface,
+        width: u32,
+        height: u32,
         bounds: Rectangle,
     },
     #[cfg(target_os = "windows")]
@@ -202,6 +238,22 @@ impl shader::Primitive for VideoPrimitive {
                     *drm_format,
                     *stride,
                     *offset,
+                    *bounds,
+                );
+            }
+            #[cfg(target_os = "macos")]
+            VideoPrimitive::IOSurface {
+                surface,
+                width,
+                height,
+                bounds,
+            } => {
+                pipeline.prepare_iosurface(
+                    device,
+                    queue,
+                    surface,
+                    *width,
+                    *height,
                     *bounds,
                 );
             }
@@ -573,6 +625,54 @@ impl VideoPipeline {
                     "D3D shared texture import failed, disabling for future frames"
                 );
                 dx12_import::mark_d3d_shared_import_failed();
+                self.current_bind_group = None;
+                self.cached_texture = None;
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn prepare_iosurface(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface: &screencapturekit::cm::IOSurface,
+        width: u32,
+        height: u32,
+        bounds: Rectangle,
+    ) {
+        // Wrap Metal/ObjC calls in an autoreleasepool to prevent Cocoa
+        // run-loop re-entrancy panics inside the winit event handler.
+        let result = screencapturekit::metal::autoreleasepool(|| unsafe {
+            metal_import::import_iosurface_texture(device, surface, width, height)
+        });
+
+        match result {
+            Ok((imported_texture, wgpu_format)) => {
+                // Bind the imported texture directly — no copy or queue.submit().
+                // The IOSurface backing memory stays valid because it is
+                // reference-counted and held by Arc<FrameData>.
+                let view =
+                    imported_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                // Store the imported texture to keep it alive until next frame.
+                self.cached_texture = Some(CachedTexture {
+                    texture: imported_texture,
+                    width,
+                    height,
+                    format: wgpu_format,
+                });
+
+                self.update_bind_group(device, queue, &view, width, height, bounds);
+            }
+            Err(e) => {
+                error!(
+                    error = %e,
+                    width,
+                    height,
+                    "IOSurface Metal import failed, disabling for future frames"
+                );
+                metal_import::mark_iosurface_import_failed();
                 self.current_bind_group = None;
                 self.cached_texture = None;
             }
