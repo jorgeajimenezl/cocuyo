@@ -184,6 +184,7 @@ pub fn recording_subscription(
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
+            3,
             frame_tx,
         );
 
