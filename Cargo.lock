@@ -5994,7 +5994,7 @@ dependencies = [
 [[package]]
 name = "windows-capture"
 version = "2.0.0-alpha.7"
-source = "git+https://github.com/jorgeajimenezl/windows-capture.git?rev=3873af233db402d0f13210f72a14e956b26ab02a#3873af233db402d0f13210f72a14e956b26ab02a"
+source = "git+https://github.com/jorgeajimenezl/windows-capture.git?rev=2191b793f74052f6353db901394cc230cb08d6e1#2191b793f74052f6353db901394cc230cb08d6e1"
 dependencies = [
  "parking_lot",
  "rayon",

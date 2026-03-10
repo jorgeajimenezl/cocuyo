@@ -868,12 +868,12 @@ impl GpuSampler {
             }
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
-                slot,
+                frame,
                 width,
                 height,
             } => {
                 use windows::Win32::Foundation::HANDLE;
-                let handle = HANDLE(slot.shared_handle.0 as *mut core::ffi::c_void);
+                let handle = HANDLE(frame.shared_handle().0 as *mut core::ffi::c_void);
                 let (imported, wgpu_format) = unsafe {
                     crate::platform::windows::dx12_import::import_shared_texture(
                         &self.device,

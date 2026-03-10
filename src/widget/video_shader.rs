@@ -83,11 +83,11 @@ impl VideoScene {
             },
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
-                slot,
+                frame,
                 width,
                 height,
             } => FrameInfo::D3DShared {
-                shared_handle: slot.shared_handle.0 as isize,
+                shared_handle: frame.shared_handle().0 as isize,
                 width: *width,
                 height: *height,
             },
@@ -434,8 +434,6 @@ impl shader::Pipeline for VideoPipeline {
 }
 
 impl VideoPipeline {
-    /// Returns a reference to a cached texture with the given dimensions and format,
-    /// creating a new one only when the parameters change.
     fn get_or_create_texture(
         &mut self,
         device: &wgpu::Device,
@@ -572,49 +570,8 @@ impl VideoPipeline {
         let result = unsafe { dx12_import::import_shared_texture(device, handle, width, height) };
 
         match result {
-            Ok((imported_texture, wgpu_format)) => {
-                // Reuse the local GPU texture across frames when resolution is unchanged.
-                // The copy decouples rendering from the shared texture lifetime.
-                let local_texture = self.get_or_create_texture(device, width, height, wgpu_format);
-
-                // Copy imported shared texture → local texture
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("d3d_shared_copy"),
-                });
-                let copy_size = wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                };
-                encoder.copy_texture_to_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &imported_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    wgpu::TexelCopyTextureInfo {
-                        texture: local_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    copy_size,
-                );
-
-                // Submit immediately so the GPU copy is in-flight before we
-                // drop the imported texture.
-                queue.submit(std::iter::once(encoder.finish()));
-
-                // Use the local texture for rendering. imported_texture is dropped
-                // here — wgpu defers the DX12 resource cleanup until the GPU
-                // finishes the copy command submitted above.
-                let view = self
-                    .cached_texture
-                    .as_ref()
-                    .unwrap()
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((texture, _wgpu_format)) => {
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
@@ -626,7 +583,6 @@ impl VideoPipeline {
                 );
                 dx12_import::mark_d3d_shared_import_failed();
                 self.current_bind_group = None;
-                self.cached_texture = None;
             }
         }
     }
@@ -648,21 +604,8 @@ impl VideoPipeline {
         });
 
         match result {
-            Ok((imported_texture, wgpu_format)) => {
-                // Bind the imported texture directly — no copy or queue.submit().
-                // The IOSurface backing memory stays valid because it is
-                // reference-counted and held by Arc<FrameData>.
-                let view =
-                    imported_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-                // Store the imported texture to keep it alive until next frame.
-                self.cached_texture = Some(CachedTexture {
-                    texture: imported_texture,
-                    width,
-                    height,
-                    format: wgpu_format,
-                });
-
+            Ok((texture, _wgpu_format)) => {
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
@@ -674,7 +617,6 @@ impl VideoPipeline {
                 );
                 metal_import::mark_iosurface_import_failed();
                 self.current_bind_group = None;
-                self.cached_texture = None;
             }
         }
     }
