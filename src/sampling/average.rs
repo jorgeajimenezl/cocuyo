@@ -39,9 +39,9 @@ impl SamplingStrategy for Average {
             while px < x1 {
                 let idx = row_base + (px as usize) * 4;
                 if idx + 2 < data.len() {
-                    r_sum += data[idx] as u64;
+                    b_sum += data[idx] as u64;
                     g_sum += data[idx + 1] as u64;
-                    b_sum += data[idx + 2] as u64;
+                    r_sum += data[idx + 2] as u64;
                     count += 1;
                 }
                 px += stride;

@@ -129,10 +129,10 @@ impl std::fmt::Display for DmaBufReadError {
 
 impl std::error::Error for DmaBufReadError {}
 
-/// Reads pixel data from a DMA-BUF fd via mmap, returning tightly-packed RGBA bytes.
+/// Reads pixel data from a DMA-BUF fd via mmap, returning tightly-packed BGRA bytes.
 ///
-/// Handles stride padding (stride may be > width * 4) and normalizes BGRA
-/// formats (Xrgb8888, Argb8888) to RGBA byte order.
+/// Handles stride padding (stride may be > width * 4) and normalizes RGBA
+/// formats (Abgr8888, Xbgr8888) to BGRA byte order.
 pub fn read_dmabuf_pixels(
     fd: RawFd,
     width: u32,
@@ -144,7 +144,7 @@ pub fn read_dmabuf_pixels(
     use drm_fourcc::DrmFourcc;
     use nix::sys::mman::{MapFlags, ProtFlags, mmap, munmap};
 
-    let needs_bgra_swap = matches!(format, DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888);
+    let needs_rgba_swap = matches!(format, DrmFourcc::Abgr8888 | DrmFourcc::Xbgr8888);
     let has_padding_alpha = matches!(format, DrmFourcc::Xrgb8888 | DrmFourcc::Xbgr8888);
 
     if !matches!(
@@ -185,7 +185,7 @@ pub fn read_dmabuf_pixels(
 
     // Copy pixel data, handling stride and format conversion
     let src_base = mapped_ptr.as_ptr() as *const u8;
-    let mut rgba = vec![0u8; row_bytes * height as usize];
+    let mut bgra = vec![0u8; row_bytes * height as usize];
 
     for y in 0..height as usize {
         let src_row = unsafe {
@@ -194,15 +194,15 @@ pub fn read_dmabuf_pixels(
                 row_bytes,
             )
         };
-        let dst_row = &mut rgba[y * row_bytes..(y + 1) * row_bytes];
+        let dst_row = &mut bgra[y * row_bytes..(y + 1) * row_bytes];
 
-        if needs_bgra_swap {
-            // BGRA -> RGBA: swap channels 0 and 2
+        if needs_rgba_swap {
+            // RGBA -> BGRA: swap channels 0 and 2
             for px in 0..width as usize {
                 let si = px * 4;
-                dst_row[si] = src_row[si + 2]; // R <- B position
+                dst_row[si] = src_row[si + 2]; // B <- R position
                 dst_row[si + 1] = src_row[si + 1]; // G
-                dst_row[si + 2] = src_row[si]; // B <- R position
+                dst_row[si + 2] = src_row[si]; // R <- B position
                 dst_row[si + 3] = if has_padding_alpha {
                     255
                 } else {
@@ -226,7 +226,7 @@ pub fn read_dmabuf_pixels(
     // Unmap
     unsafe { munmap(mapped_ptr, map_size) }.map_err(DmaBufReadError::MunmapFailed)?;
 
-    Ok(rgba)
+    Ok(bgra)
 }
 
 #[cfg(test)]

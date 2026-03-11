@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::frame::FrameData;
 
 /// Trait for sampling strategies that extract a single RGB color from a
-/// rectangular region of RGBA pixel data.
+/// rectangular region of BGRA pixel data.
 ///
 /// Each implementation receives pre-computed, clamped region bounds and a
 /// stride value that limits sampling to ~1000 pixels.
@@ -28,7 +28,7 @@ pub trait SamplingStrategy: Send + Sync + fmt::Debug {
 
     /// Sample the pixel data within the given bounds.
     ///
-    /// `data` is a contiguous RGBA buffer. The region spans rows `y0..y1` and
+    /// `data` is a contiguous BGRA buffer. The region spans rows `y0..y1` and
     /// columns `x0..x1` in a frame that is `width` pixels wide. `stride`
     /// controls the step between sampled pixels (both horizontally and
     /// vertically).
@@ -79,7 +79,7 @@ pub(crate) fn sample_extremum<const IS_MAX: bool>(
         while px < x1 {
             let idx = row_base + (px as usize) * 4;
             if idx + 2 < data.len() {
-                let (r, g, b) = (data[idx], data[idx + 1], data[idx + 2]);
+                let (r, g, b) = (data[idx + 2], data[idx + 1], data[idx]);
                 let lum = luminance_u32(r, g, b);
                 let better = if IS_MAX {
                     lum > best_lum
@@ -224,7 +224,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    /// Helper to create a CPU FrameData from raw RGBA bytes.
+    /// Helper to create a CPU FrameData from raw BGRA bytes.
     fn cpu_frame(data: Vec<u8>, width: u32, height: u32) -> FrameData {
         FrameData::Cpu {
             data: Arc::new(data),
@@ -233,7 +233,7 @@ mod tests {
         }
     }
 
-    /// 2x2 RGBA buffer:
+    /// 2x2 BGRA buffer:
     ///   (0,0) = red    (255,0,0)
     ///   (1,0) = green  (0,255,0)
     ///   (0,1) = blue   (0,0,255)
@@ -241,9 +241,9 @@ mod tests {
     fn make_2x2() -> FrameData {
         #[rustfmt::skip]
         let data = vec![
-            255, 0,   0,   255,  // red
-            0,   255, 0,   255,  // green
-            0,   0,   255, 255,  // blue
+            0,   0,   255, 255,  // red   (B=0, G=0, R=255, A=255)
+            0,   255, 0,   255,  // green (B=0, G=255, R=0, A=255)
+            255, 0,   0,   255,  // blue  (B=255, G=0, R=0, A=255)
             255, 255, 255, 255,  // white
         ];
         cpu_frame(data, 2, 2)
@@ -336,14 +336,14 @@ mod tests {
         // 4x4 frame: 12 red pixels + 4 blue pixels → palette returns red
         #[rustfmt::skip]
         let data = vec![
-            // Row 0: red, red, red, blue
-            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            // Row 0: red, red, red, blue (BGRA)
+            0,0,255,255, 0,0,255,255, 0,0,255,255, 255,0,0,255,
             // Row 1: red, red, red, blue
-            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            0,0,255,255, 0,0,255,255, 0,0,255,255, 255,0,0,255,
             // Row 2: red, red, red, blue
-            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            0,0,255,255, 0,0,255,255, 0,0,255,255, 255,0,0,255,
             // Row 3: red, red, red, blue
-            255,0,0,255, 255,0,0,255, 255,0,0,255, 0,0,255,255,
+            0,0,255,255, 0,0,255,255, 0,0,255,255, 255,0,0,255,
         ];
         let frame = cpu_frame(data, 4, 4);
         let result = sample_region(&frame, 0.0, 0.0, 4.0, 4.0, &palette());

@@ -18,34 +18,31 @@ use crate::app::RecordingState;
 use crate::frame::FrameData;
 use crate::recording::{RecordingCommand, RecordingEvent};
 
-/// Convert BGRA pixel data to RGBA, stripping row padding if present.
-pub fn bgra_to_rgba(src: &[u8], width: usize, height: usize, bytes_per_row: usize) -> Vec<u8> {
+/// Copy BGRA pixel data, stripping row padding if present.
+pub fn strip_stride_padding(src: &[u8], width: usize, height: usize, bytes_per_row: usize) -> Vec<u8> {
     let stride = width * 4;
-    let mut rgba = vec![0u8; width * height * 4];
+    if bytes_per_row == stride {
+        let total = stride * height;
+        return src[..total.min(src.len())].to_vec();
+    }
+    let mut bgra = vec![0u8; stride * height];
     for row in 0..height {
         let src_start = row * bytes_per_row;
         if src_start >= src.len() {
             break;
         }
         let available = (src.len() - src_start).min(stride);
-        let src_row = &src[src_start..src_start + available];
-        let dst_start = row * stride;
-        let dst_row = &mut rgba[dst_start..dst_start + stride];
-        for (dst, src_px) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
-            dst[0] = src_px[2];
-            dst[1] = src_px[1];
-            dst[2] = src_px[0];
-            dst[3] = src_px[3];
-        }
+        bgra[row * stride..row * stride + available]
+            .copy_from_slice(&src[src_start..src_start + available]);
     }
-    rgba
+    bgra
 }
 
 /// Build a `FrameData` from a captured sample.
 ///
 /// Tries the zero-copy IOSurface path first (sends the IOSurface directly to
 /// the shader widget, which imports it as a Metal texture in `prepare()`).
-/// Falls back to CPU BGRA→RGBA conversion when IOSurface is unavailable.
+/// Falls back to CPU BGRA copy when IOSurface is unavailable.
 fn build_frame(
     pixel_buffer: &screencapturekit::CVPixelBuffer,
 ) -> Option<Arc<FrameData>> {
@@ -66,7 +63,7 @@ fn build_frame(
         }
     }
 
-    // CPU fallback: lock pixel buffer and convert BGRA→RGBA
+    // CPU fallback: lock pixel buffer and copy BGRA data
     let guard = match pixel_buffer.lock_read_only() {
         Ok(g) => g,
         Err(e) => {
@@ -80,10 +77,10 @@ fn build_frame(
     let bpr = guard.bytes_per_row();
     let src = guard.as_slice();
 
-    let rgba = bgra_to_rgba(src, w as usize, h as usize, bpr);
+    let bgra = strip_stride_padding(src, w as usize, h as usize, bpr);
 
     Some(Arc::new(FrameData::Cpu {
-        data: Arc::new(rgba),
+        data: Arc::new(bgra),
         width: w,
         height: h,
     }))

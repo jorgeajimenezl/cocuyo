@@ -104,7 +104,7 @@ impl FrameData {
         }
     }
 
-    /// Returns a reference to the RGBA pixel data, if available.
+    /// Returns a reference to the BGRA pixel data, if available.
     pub fn pixels(&self) -> Option<&[u8]> {
         match self {
             FrameData::Cpu { data, .. } => Some(data.as_slice()),
@@ -137,13 +137,13 @@ impl FrameData {
                     *offset,
                     *drm_format,
                 ) {
-                    Ok(rgba_data) => Some(Arc::new(FrameData::Cpu {
-                        data: Arc::new(rgba_data),
+                    Ok(bgra_data) => Some(Arc::new(FrameData::Cpu {
+                        data: Arc::new(bgra_data),
                         width: *width,
                         height: *height,
                     })),
                     Err(e) => {
-                        tracing::error!(error = %e, "Failed to convert DmaBuf to RGBA");
+                        tracing::error!(error = %e, "Failed to convert DmaBuf to BGRA");
                         None
                     }
                 }
@@ -158,14 +158,14 @@ impl FrameData {
                     Ok(guard) => {
                         let bpr = surface.bytes_per_row();
                         let src = guard.as_slice();
-                        let rgba = crate::platform::macos::recording::bgra_to_rgba(
+                        let bgra = crate::platform::macos::recording::strip_stride_padding(
                             src,
                             *width as usize,
                             *height as usize,
                             bpr,
                         );
                         Some(Arc::new(FrameData::Cpu {
-                            data: Arc::new(rgba),
+                            data: Arc::new(bgra),
                             width: *width,
                             height: *height,
                         }))

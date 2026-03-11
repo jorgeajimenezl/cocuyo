@@ -3,7 +3,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC,
     D3D11_USAGE_STAGING, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows_capture::HeldCaptureFrame;
 
 /// A captured frame ready for DX12 import via NT shared handle.
@@ -68,7 +68,7 @@ fn read_texture_pixels(
         Height: height,
         MipLevels: 1,
         ArraySize: 1,
-        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
         SampleDesc: DXGI_SAMPLE_DESC {
             Count: 1,
             Quality: 0,
@@ -98,7 +98,7 @@ fn read_texture_pixels(
 
     let row_pitch = mapped.RowPitch as usize;
     let row_bytes = (width as usize) * 4;
-    let mut rgba = vec![0u8; row_bytes * height as usize];
+    let mut bgra = vec![0u8; row_bytes * height as usize];
 
     for y in 0..height as usize {
         let src = unsafe {
@@ -107,14 +107,14 @@ fn read_texture_pixels(
                 row_bytes,
             )
         };
-        rgba[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
+        bgra[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
     }
 
     unsafe {
         context.Unmap(&staging, 0);
     }
 
-    Ok(rgba)
+    Ok(bgra)
 }
 
 #[derive(Debug)]

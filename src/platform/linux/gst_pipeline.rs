@@ -174,7 +174,7 @@ impl GstVideoConverter {
         appsrc.set_property("block", true);
 
         let output_caps = gst::Caps::builder("video/x-raw")
-            .field("format", "RGBA")
+            .field("format", "BGRA")
             .field("width", width as i32)
             .field("height", height as i32)
             .build();
@@ -355,7 +355,7 @@ impl GstVideoConverter {
         Ok(())
     }
 
-    pub fn pull_rgba_frame(&self) -> Result<Vec<u8>, GstError> {
+    pub fn pull_frame(&self) -> Result<Vec<u8>, GstError> {
         let sample = self
             .appsink
             .pull_sample()
