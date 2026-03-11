@@ -51,6 +51,8 @@ fn main() -> iced::Result {
 
     #[cfg(target_os = "linux")]
     {
+        gtk::init().expect("Failed to initialize GTK");
+
         gstreamer::init().expect("Failed to initialize GStreamer");
         info!("GStreamer initialized");
 
