@@ -182,8 +182,8 @@ impl FrameData {
                 width,
                 height,
             } => match frame.read_pixels() {
-                Ok(rgba_data) => Some(Arc::new(FrameData::Cpu {
-                    data: Arc::new(rgba_data),
+                Ok(bgra_data) => Some(Arc::new(FrameData::Cpu {
+                    data: Arc::new(bgra_data),
                     width: *width,
                     height: *height,
                 })),

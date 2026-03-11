@@ -357,7 +357,7 @@ fn try_process_dmabuf_gstreamer(
         return None;
     }
 
-    match converter.pull_frame() {
+    match converter.pull_bgra_frame() {
         Ok(data) => Some(FrameData::Cpu {
             data: Arc::new(data),
             width: user_data.format.size().width,
@@ -399,7 +399,7 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
             error!(error = %e, "Failed to push buffer to GStreamer");
             return None;
         }
-        match converter.pull_frame() {
+        match converter.pull_bgra_frame() {
             Ok(data) => data,
             Err(e) => {
                 error!(error = %e, "Failed to pull BGRA frame");

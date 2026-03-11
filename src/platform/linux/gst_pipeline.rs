@@ -355,7 +355,7 @@ impl GstVideoConverter {
         Ok(())
     }
 
-    pub fn pull_frame(&self) -> Result<Vec<u8>, GstError> {
+    pub fn pull_bgra_frame(&self) -> Result<Vec<u8>, GstError> {
         let sample = self
             .appsink
             .pull_sample()
