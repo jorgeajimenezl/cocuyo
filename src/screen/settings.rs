@@ -20,6 +20,7 @@ pub enum Message {
     BulbUpdateIntervalChanged(f32),
     MinBrightnessChanged(f32),
     WhiteColorTempChanged(f32),
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     MinimizeToTrayToggled(bool),
     CaptureFpsLimitChanged(f32),
     ShowPerfOverlayToggled(bool),
@@ -216,22 +217,35 @@ impl Settings {
     }
 
     fn build_general_section(&self) -> iced::widget::Column<'_, Message> {
-        column![
-            text("General").size(18).color(theme::TEXT),
-            toggler(self.minimize_to_tray)
-                .label("Minimize to Tray")
-                .on_toggle(Message::MinimizeToTrayToggled),
-            text("Keep the app running in the system tray when the main window is closed.")
-                .size(12)
-                .color(theme::TEXT_DIM),
+        let mut col = iced::widget::Column::new().spacing(10);
+        col = col.push(text("General").size(18).color(theme::TEXT));
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            col = col.push(
+                toggler(self.minimize_to_tray)
+                    .label("Minimize to Tray")
+                    .on_toggle(Message::MinimizeToTrayToggled),
+            );
+            col = col.push(
+                text("Keep the app running in the system tray when the main window is closed.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            );
+        }
+
+        col = col.push(
             toggler(self.show_perf_overlay)
                 .label("Performance Overlay")
                 .on_toggle(Message::ShowPerfOverlayToggled),
+        );
+        col = col.push(
             text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
                 .size(12)
                 .color(theme::TEXT_DIM),
-        ]
-        .spacing(10)
+        );
+
+        col
     }
 
     fn build_adapter_section(&self) -> iced::widget::Column<'_, Message> {

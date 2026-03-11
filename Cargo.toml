@@ -23,6 +23,8 @@ futures = "0.3.31"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.0.3"
 dirs = "6.0.0"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = "0.19"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -39,7 +41,7 @@ wgpu-hal = { version = "27", features = ["vulkan"] }
 pipewire = { version = "0.8", features = ["v0_3_77"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-capture = "2.0.0-alpha"
+windows-capture = { git = "https://github.com/jorgeajimenezl/windows-capture.git", rev = "2191b793f74052f6353db901394cc230cb08d6e1" }
 windows = { version = "0.58", features = [
     "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi",

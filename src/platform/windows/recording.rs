@@ -4,16 +4,20 @@ use std::time::{Duration, Instant};
 
 use iced::futures::Stream;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::app::RecordingState;
 use crate::frame::FrameData;
 use crate::platform::windows::capture_target::CaptureTarget;
 use crate::platform::windows::dx12_import;
-use crate::platform::windows::shared_texture::SharedTexturePool;
+use crate::platform::windows::shared_texture::HeldFrame;
 use crate::recording::{RecordingCommand, RecordingEvent};
 
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::Win32::Graphics::Dxgi::{
+    DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE, IDXGIResource1,
+};
+use windows::core::Interface;
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
@@ -25,69 +29,65 @@ use windows_capture::settings::{
 struct CaptureHandler {
     frame_tx: mpsc::Sender<Arc<FrameData>>,
     nopadding_buf: Vec<u8>,
-    pool: Option<SharedTexturePool>,
     zero_copy_failed: bool,
 }
 
 impl CaptureHandler {
-    /// Try the zero-copy path: copy WGC texture → shared texture → send D3DShared.
-    /// Returns `true` if the frame was sent successfully, `false` to fall through to CPU.
     fn try_zero_copy(&mut self, frame: &mut Frame, width: u32, height: u32) -> bool {
         if self.zero_copy_failed || !dx12_import::is_d3d_shared_import_available() {
             return false;
         }
 
-        // Get the raw D3D11 texture from the capture frame.
-        // Safety: the texture is valid for the duration of on_frame_arrived.
-        // The returned type is from windows-capture's transitive windows crate (0.62),
-        // but COM interfaces are ABI-stable across crate versions since they are
-        // #[repr(transparent)] wrappers around raw COM pointers with identical vtables.
+        // Safety: COM ABI is stable across windows crate versions.
         let source_texture: &ID3D11Texture2D = unsafe {
             let raw = frame.as_raw_texture();
             &*(raw as *const _ as *const ID3D11Texture2D)
         };
 
-        // Lazy-init the shared texture pool on first zero-copy frame
-        if self.pool.is_none() {
-            match SharedTexturePool::new(source_texture) {
-                Ok(pool) => {
-                    debug!("Shared texture pool initialized");
-                    self.pool = Some(pool);
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to create shared texture pool, falling back to CPU");
-                    self.zero_copy_failed = true;
-                    return false;
-                }
-            }
-        }
-
-        let pool = self.pool.as_mut().unwrap();
-        match pool.acquire_and_copy(source_texture, width, height) {
-            Ok(Some(slot)) => {
-                let frame_data = Arc::new(FrameData::D3DShared {
-                    slot,
-                    width,
-                    height,
-                });
-                match self.frame_tx.try_send(frame_data) {
-                    Ok(()) => true,
-                    Err(mpsc::error::TrySendError::Full(_)) => true, // Backpressure, frame dropped
-                    Err(mpsc::error::TrySendError::Closed(_)) => true, // Will be handled by caller
-                }
-            }
-            Ok(None) => {
-                // All slots busy (backpressure) — skip frame entirely
-                true
-            }
+        let shared_handle = match create_shared_handle_from_texture(source_texture) {
+            Ok(h) => h,
             Err(e) => {
-                warn!(error = %e, "Shared texture acquire_and_copy failed, falling back to CPU");
+                warn!(error = %e, "CreateSharedHandle failed on WGC texture, disabling zero-copy");
                 self.zero_copy_failed = true;
-                self.pool = None;
-                false
+                return false;
             }
+        };
+
+        // Hold the capture frame so WGC doesn't reclaim the buffer slot.
+        let held = frame.hold_capture_frame();
+
+        // Safety: COM ABI is stable; clone AddRefs so the texture outlives the callback.
+        let texture_clone: ID3D11Texture2D = unsafe {
+            let raw = frame.as_raw_texture();
+            (*(raw as *const _ as *const ID3D11Texture2D)).clone()
+        };
+
+        let frame_data = Arc::new(FrameData::D3DShared {
+            frame: HeldFrame::new(held, texture_clone, shared_handle, width, height),
+            width,
+            height,
+        });
+
+        match self.frame_tx.try_send(frame_data) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => true,
+            Err(mpsc::error::TrySendError::Closed(_)) => true,
         }
     }
+}
+
+fn create_shared_handle_from_texture(
+    texture: &ID3D11Texture2D,
+) -> Result<windows::Win32::Foundation::HANDLE, Box<dyn std::error::Error + Send + Sync>> {
+    let dxgi_resource: IDXGIResource1 = texture.cast()?;
+    let handle = unsafe {
+        dxgi_resource.CreateSharedHandle(
+            None,
+            DXGI_SHARED_RESOURCE_READ.0 | DXGI_SHARED_RESOURCE_WRITE.0,
+            None,
+        )?
+    };
+    Ok(handle)
 }
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
@@ -98,7 +98,6 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         Ok(Self {
             frame_tx: ctx.flags,
             nopadding_buf: Vec::new(),
-            pool: None,
             zero_copy_failed: false,
         })
     }
@@ -111,16 +110,13 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let width = frame.width();
         let height = frame.height();
 
-        // Try zero-copy path first (GPU→GPU via shared texture)
         if self.try_zero_copy(frame, width, height) {
-            // Check if channel was closed
             if self.frame_tx.is_closed() {
                 capture_control.stop();
             }
             return Ok(());
         }
 
-        // CPU fallback: read pixels from GPU → system memory
         let mut buffer = frame.buffer()?;
 
         let rgba_data = if buffer.has_padding() {
@@ -137,11 +133,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
         match self.frame_tx.try_send(frame_data) {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                // Backpressure: drop frame, UI is behind
-            }
+            Err(mpsc::error::TrySendError::Full(_)) => {}
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                // Receiver dropped, stop capture
                 capture_control.stop();
             }
         }
@@ -184,6 +177,7 @@ pub fn recording_subscription(
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
+            3,
             frame_tx,
         );
 
@@ -207,7 +201,6 @@ pub fn recording_subscription(
             .await
             .ok();
 
-        // Frame rate gating: compute interval once from the input
         let frame_interval: Option<Duration> = if fps_limit == 0 {
             None
         } else {
@@ -215,7 +208,6 @@ pub fn recording_subscription(
         };
         let mut last_forwarded: Option<Instant> = None;
 
-        // Forward frames until capture finishes or we receive a stop command
         loop {
             tokio::select! {
                 frame = frame_rx.recv() => {
@@ -234,7 +226,6 @@ pub fn recording_subscription(
                             }
                         }
                         None => {
-                            // Capture thread finished (sender dropped)
                             break;
                         }
                     }
@@ -243,9 +234,7 @@ pub fn recording_subscription(
                     match cmd {
                         Some(RecordingCommand::Stop) | None => {
                             info!("Stop command received, shutting down capture");
-                            // Drop frame_rx so the handler sees Closed on next try_send
                             drop(frame_rx);
-                            // Stop the capture thread and wait for it to finish
                             let _ = tokio::task::spawn_blocking(move || {
                                 if let Err(e) = capture_control.stop() {
                                     warn!("Capture stop error: {:?}", e);
@@ -264,7 +253,6 @@ pub fn recording_subscription(
             .await
             .ok();
 
-        // Keep alive so the subscription isn't restarted
         std::future::pending::<()>().await;
     }))
 }

@@ -68,7 +68,7 @@ pub enum FrameData {
     },
     #[cfg(target_os = "windows")]
     D3DShared {
-        slot: Arc<shared_texture::SharedTextureSlot>,
+        frame: shared_texture::HeldFrame,
         width: u32,
         height: u32,
     },
@@ -178,10 +178,10 @@ impl FrameData {
             }
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
-                slot,
+                frame,
                 width,
                 height,
-            } => match slot.read_pixels() {
+            } => match frame.read_pixels() {
                 Ok(rgba_data) => Some(Arc::new(FrameData::Cpu {
                     data: Arc::new(rgba_data),
                     width: *width,
