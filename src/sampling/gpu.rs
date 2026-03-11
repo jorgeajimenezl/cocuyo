@@ -903,7 +903,7 @@ impl GpuSampler {
                 width,
                 height,
             } => {
-                let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+                let format = wgpu::TextureFormat::Bgra8UnormSrgb;
                 self.ensure_texture(*width, *height, format);
                 let ct = self.cached_texture.as_ref().unwrap();
                 self.queue.write_texture(

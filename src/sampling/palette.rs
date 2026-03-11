@@ -66,9 +66,9 @@ impl SamplingStrategy for Palette {
             while px < x1 {
                 let idx = row_base + (px as usize) * 4;
                 if idx + 2 < data.len() {
-                    let r = data[idx];
+                    let b = data[idx];
                     let g = data[idx + 1];
-                    let b = data[idx + 2];
+                    let r = data[idx + 2];
                     let bin = &mut bins[bin_index(r, g, b)];
                     bin.r_sum += r as u64;
                     bin.g_sum += g as u64;

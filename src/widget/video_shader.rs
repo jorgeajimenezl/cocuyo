@@ -599,7 +599,7 @@ impl VideoPipeline {
             return;
         }
 
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
         let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(

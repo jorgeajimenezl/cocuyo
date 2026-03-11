@@ -119,14 +119,14 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
         let mut buffer = frame.buffer()?;
 
-        let rgba_data = if buffer.has_padding() {
+        let bgra_data = if buffer.has_padding() {
             buffer.as_nopadding_buffer(&mut self.nopadding_buf).to_vec()
         } else {
             buffer.as_raw_buffer().to_vec()
         };
 
         let frame_data = Arc::new(FrameData::Cpu {
-            data: Arc::new(rgba_data),
+            data: Arc::new(bgra_data),
             width,
             height,
         });
@@ -176,7 +176,7 @@ pub fn recording_subscription(
             SecondaryWindowSettings::Default,
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
-            ColorFormat::Rgba8,
+            ColorFormat::Bgra8,
             3,
             frame_tx,
         );
