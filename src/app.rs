@@ -71,6 +71,7 @@ pub enum Message {
 
     BulbDispatchComplete(f64),
 
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     TrayEvent(crate::tray::TrayAction),
 
     ExitApp,
@@ -178,26 +179,26 @@ impl Cocuyo {
                     return Task::none();
                 }
                 if kind == Some(WindowKind::Main) {
+                    #[cfg(not(target_os = "linux"))]
                     if self.config.minimize_to_tray || self.tray_hide_requested {
                         self.tray_hide_requested = false;
                         // Hide to tray — don't stop recording/ambient, don't exit
                         self.tray.update_menu_text(false, self.is_ambient_active);
                         return Task::none();
-                    } else {
-                        // Exit normally: stop recording, restore bulbs
-                        if self.is_ambient_active || self.is_recording {
-                            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                                let _ = cmd_tx.try_send(RecordingCommand::Stop);
-                            }
-                        }
-                        return if let Some(states) = self.saved_bulb_states.take() {
-                            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                                Message::ExitApp
-                            })
-                        } else {
-                            iced::exit()
-                        };
                     }
+                    // Exit normally: stop recording, restore bulbs
+                    if self.is_ambient_active || self.is_recording {
+                        if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                            let _ = cmd_tx.try_send(RecordingCommand::Stop);
+                        }
+                    }
+                    return if let Some(states) = self.saved_bulb_states.take() {
+                        Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                            Message::ExitApp
+                        })
+                    } else {
+                        iced::exit()
+                    };
                 }
                 Task::none()
             }
@@ -657,6 +658,7 @@ impl Cocuyo {
             subs.push(self.build_recording_subscription());
         }
 
+        #[cfg(not(target_os = "linux"))]
         subs.push(
             Subscription::run_with((), crate::tray::tray_subscription).map(Message::TrayEvent),
         );
