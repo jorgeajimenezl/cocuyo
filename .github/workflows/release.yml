@@ -21,6 +21,14 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: cocuyo-linux-x86_64
             binary: cocuyo
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: cocuyo-macos-aarch64
+            binary: cocuyo
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: cocuyo-macos-x86_64
+            binary: cocuyo
 
     runs-on: ${{ matrix.os }}
 
@@ -79,6 +87,13 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} staging/
           cd staging && 7z a ../${{ matrix.artifact }}.zip *
 
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} staging/
+          cd staging && tar czf ../${{ matrix.artifact }}.tar.gz *
+
       - name: Upload release asset (Linux)
         if: runner.os == 'Linux'
         env:
@@ -91,3 +106,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}.zip" --clobber
+
+      - name: Upload release asset (macOS)
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}.tar.gz" --clobber
