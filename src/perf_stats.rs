@@ -2,7 +2,7 @@ use std::time::Instant;
 
 /// Exponential moving average smoother.
 ///
-/// Alpha of 0.1 gives roughly a 10-sample smoothing window.
+/// Alpha of 0.05 gives roughly a 20-sample smoothing window.
 struct Ema {
     value: f64,
     initialized: bool,
@@ -45,7 +45,7 @@ pub struct PerfStats {
 
 impl PerfStats {
     pub fn new() -> Self {
-        let alpha = 0.1;
+        let alpha = 0.05;
         Self {
             last_frame_time: None,
             frame_interval_ema: Ema::new(alpha),
@@ -132,11 +132,11 @@ impl PerfStats {
         // DefaultHasher is not stable across Rust versions, but this fingerprint
         // is only used for intra-process cache invalidation so stability is not required.
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        // Round to 1 decimal place to avoid constant cache churn
-        ((self.effective_fps() * 10.0) as u64).hash(&mut h);
-        ((self.frame_interval_ms() * 10.0) as u64).hash(&mut h);
-        ((self.sampling_time_ms() * 10.0) as u64).hash(&mut h);
-        ((self.bulb_dispatch_ms() * 10.0) as u64).hash(&mut h);
+        // Round to integer to avoid constant cache churn
+        (self.effective_fps() as u64).hash(&mut h);
+        (self.frame_interval_ms() as u64).hash(&mut h);
+        (self.sampling_time_ms() as u64).hash(&mut h);
+        (self.bulb_dispatch_ms() as u64).hash(&mut h);
         h.finish()
     }
 }
