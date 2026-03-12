@@ -87,9 +87,10 @@ fn build_frame(
 }
 
 pub fn recording_subscription(
-    input: &(u64, u32),
+    input: &(u64, u32, u32),
 ) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
     let fps_limit = input.1;
+    let resolution_scale = input.2;
 
     Box::pin(iced::stream::channel(2, async move |mut output| {
         use iced::futures::SinkExt;
@@ -143,10 +144,22 @@ pub fn recording_subscription(
         );
 
         // Configure capture stream
+        let scale = resolution_scale.max(25).min(100);
+        let scaled_w = if scale >= 100 {
+            pixel_width
+        } else {
+            (pixel_width as u64 * scale as u64 / 100) as u32
+        };
+        let scaled_h = if scale >= 100 {
+            pixel_height
+        } else {
+            (pixel_height as u64 * scale as u64 / 100) as u32
+        };
+
         let fps = if fps_limit == 0 { 60 } else { fps_limit };
         let config = SCStreamConfiguration::new()
-            .with_width(pixel_width)
-            .with_height(pixel_height)
+            .with_width(scaled_w)
+            .with_height(scaled_h)
             .with_pixel_format(PixelFormat::BGRA)
             .with_shows_cursor(false)
             .with_fps(fps);

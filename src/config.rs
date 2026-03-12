@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub capture_fps_limit: u32,
     #[serde(default)]
     pub show_perf_overlay: bool,
+    #[serde(default = "default_capture_resolution_scale")]
+    pub capture_resolution_scale: u32,
 }
 
 fn default_minimize_to_tray() -> bool {
@@ -48,6 +50,10 @@ fn default_white_temp() -> u16 {
     6500
 }
 
+fn default_capture_resolution_scale() -> u32 {
+    100
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -62,6 +68,7 @@ impl Default for AppConfig {
             minimize_to_tray: default_minimize_to_tray(),
             capture_fps_limit: default_capture_fps_limit(),
             show_perf_overlay: false,
+            capture_resolution_scale: default_capture_resolution_scale(),
         }
     }
 }

@@ -88,6 +88,7 @@ pub struct Cocuyo {
     is_recording: bool,
     session_id: u64,
     recording_fps_limit: u32,
+    recording_resolution_scale: u32,
     recording_cmd_tx: Option<mpsc::Sender<RecordingCommand>>,
     bulb_setup: bulb_setup::BulbSetupState,
     is_ambient_active: bool,
@@ -123,6 +124,7 @@ impl Cocuyo {
             is_recording: false,
             session_id: 0,
             recording_fps_limit: 0,
+            recording_resolution_scale: 100,
             recording_cmd_tx: None,
             bulb_setup: bulb_setup::BulbSetupState::new(&config),
             is_ambient_active: false,
@@ -229,6 +231,7 @@ impl Cocuyo {
                     self.is_recording = true;
                     self.session_id += 1;
                     self.recording_fps_limit = self.config.capture_fps_limit;
+                    self.recording_resolution_scale = self.config.capture_resolution_scale;
                     Task::none()
                 }
                 #[cfg(target_os = "macos")]
@@ -237,6 +240,7 @@ impl Cocuyo {
                     self.is_recording = true;
                     self.session_id += 1;
                     self.recording_fps_limit = self.config.capture_fps_limit;
+                    self.recording_resolution_scale = self.config.capture_resolution_scale;
                     Task::none()
                 }
                 #[cfg(target_os = "windows")]
@@ -389,6 +393,7 @@ impl Cocuyo {
                     self.is_recording = true;
                     self.session_id += 1;
                     self.recording_fps_limit = self.config.capture_fps_limit;
+                    self.recording_resolution_scale = self.config.capture_resolution_scale;
                 }
                 Task::none()
             }
@@ -692,7 +697,11 @@ impl Cocuyo {
     #[cfg(target_os = "macos")]
     fn build_recording_subscription(&self) -> Subscription<Message> {
         Subscription::run_with(
-            (self.session_id, self.recording_fps_limit),
+            (
+                self.session_id,
+                self.recording_fps_limit,
+                self.recording_resolution_scale,
+            ),
             recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
@@ -747,6 +756,11 @@ impl Cocuyo {
             }
             settings::Event::CaptureFpsLimitChanged(fps) => {
                 self.config.capture_fps_limit = fps;
+                self.config.save();
+                Task::none()
+            }
+            settings::Event::CaptureResolutionScaleChanged(scale) => {
+                self.config.capture_resolution_scale = scale;
                 self.config.save();
                 Task::none()
             }
@@ -806,6 +820,7 @@ impl Cocuyo {
                         self.is_recording = true;
                         self.session_id += 1;
                         self.recording_fps_limit = self.config.capture_fps_limit;
+                    self.recording_resolution_scale = self.config.capture_resolution_scale;
                         close_task
                     }
                     PickerIntent::StartAmbient => {

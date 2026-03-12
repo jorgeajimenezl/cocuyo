@@ -23,6 +23,7 @@ pub enum Message {
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     MinimizeToTrayToggled(bool),
     CaptureFpsLimitChanged(f32),
+    CaptureResolutionScaleChanged(f32),
     ShowPerfOverlayToggled(bool),
 }
 
@@ -38,6 +39,7 @@ pub enum Event {
     WhiteColorTempChanged(u16),
     MinimizeToTrayChanged(bool),
     CaptureFpsLimitChanged(u32),
+    CaptureResolutionScaleChanged(u32),
     ShowPerfOverlayChanged(bool),
 }
 
@@ -55,6 +57,7 @@ pub struct Settings {
     white_color_temp: u16,
     minimize_to_tray: bool,
     capture_fps_limit: u32,
+    capture_resolution_scale: u32,
     show_perf_overlay: bool,
 }
 
@@ -104,6 +107,7 @@ impl Settings {
             white_color_temp: config.white_color_temp,
             minimize_to_tray: config.minimize_to_tray,
             capture_fps_limit: config.capture_fps_limit,
+            capture_resolution_scale: config.capture_resolution_scale,
             show_perf_overlay: config.show_perf_overlay,
         }
     }
@@ -153,6 +157,13 @@ impl Settings {
                 (
                     Task::none(),
                     Some(Event::CaptureFpsLimitChanged(val as u32)),
+                )
+            }
+            Message::CaptureResolutionScaleChanged(val) => {
+                self.capture_resolution_scale = val as u32;
+                (
+                    Task::none(),
+                    Some(Event::CaptureResolutionScaleChanged(val as u32)),
                 )
             }
             Message::ShowPerfOverlayToggled(val) => {
@@ -365,6 +376,25 @@ impl Settings {
                 )
                 .step(5.0),
                 text("Limit how many frames per second are processed. Lower values reduce CPU/GPU usage. 0 = unlimited.")
+                    .size(12)
+                    .color(theme::TEXT_DIM),
+            ]
+            .spacing(5),
+            column![
+                text(if self.capture_resolution_scale >= 100 {
+                    "Capture Resolution: Native".to_string()
+                } else {
+                    format!("Capture Resolution: {}%", self.capture_resolution_scale)
+                })
+                .size(14)
+                .color(theme::TEXT),
+                slider(
+                    25.0..=100.0,
+                    self.capture_resolution_scale as f32,
+                    Message::CaptureResolutionScaleChanged,
+                )
+                .step(25.0),
+                text("Downsample captured frames to reduce GPU/CPU usage. Lower values improve performance on older hardware. Changes take effect on next recording session.")
                     .size(12)
                     .color(theme::TEXT_DIM),
             ]
