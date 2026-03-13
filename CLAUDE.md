@@ -52,9 +52,13 @@ Always run `cargo build` and `cargo test` after making changes. Do not consider 
 - Windows 10+ with Windows Graphics Capture API
 - DirectX 11/12 capable GPU
 
+### macOS
+- macOS 13+ with ScreenCaptureKit
+- Metal-capable GPU
+
 ## Architecture Overview
 
-Cocuyo is a cross-platform screen capture application with ambient lighting support. On Linux it captures via PipeWire/Wayland; on Windows it uses the Windows Graphics Capture API. The UI is built with **iced** (v0.14) using the wgpu backend with custom window decorations (daemon mode, multi-window). Rust edition is **2024**.
+Cocuyo is a cross-platform screen capture application with ambient lighting support. On Linux it captures via PipeWire/Wayland; on Windows it uses the Windows Graphics Capture API; on macOS it uses ScreenCaptureKit. The UI is built with **iced** (v0.14, custom fork) using the wgpu backend with custom window decorations (daemon mode, multi-window). Rust edition is **2024**.
 
 ### Data Flow
 
@@ -76,6 +80,14 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
    - **CPU fallback**: Reads pixels from GPU to CPU memory, sent as `FrameData::Cpu`
 4. **Display** - `widget/video_shader.rs` imports shared texture via DX12 HAL or uploads CPU data
 
+#### macOS
+1. **Content Sharing Picker** - System content sharing picker for screen/window selection
+2. **ScreenCaptureKit** (`platform/macos/recording.rs`) - Uses `screencapturekit` crate for screen capture with configurable frame rate and resolution
+3. **Frame Processing** - IOSurface zero-copy path:
+   - **Zero-copy**: IOSurface sent as `FrameData::IOSurface`, imported into Metal texture via `metal_import.rs`
+   - **CPU fallback**: Pixel data read from IOSurface, sent as `FrameData::Cpu`
+4. **Display** - `widget/video_shader.rs` imports Metal texture via wgpu HAL or uploads CPU data
+
 #### Ambient Lighting
 1. User selects WiZ smart bulbs via `BulbSetup` screen
 2. Regions are auto-created per selected bulb, editable on the video preview via `widget/region_overlay.rs`
@@ -88,14 +100,16 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 
 - **`main.rs`** - Application entry point, loads config, sets wgpu adapter via env vars, initializes GStreamer/PipeWire (Linux), launches iced daemon
 - **`app.rs`** - `Cocuyo` application state, iced message handling, multi-window management (`Main`, `Settings`, `BulbSetup`, `CapturePicker`). Recording state, regions, bulb state, and config owned directly (no mutexes).
-- **`frame.rs`** - Platform-agnostic `FrameData` enum with `DmaBuf` (Linux), `D3DShared` (Windows), and `Cpu` variants
+- **`frame.rs`** - Platform-agnostic `FrameData` enum with `DmaBuf` (Linux), `IOSurface` (macOS), `D3DShared` (Windows), and `Cpu` variants
 - **`recording.rs`** - Platform-agnostic recording types (`RecordingCommand`, `RecordingEvent`) with conditional re-exports from platform modules
-- **`config.rs`** - Persistent app configuration via TOML (`~/.config/cocuyo/config.toml`). Stores preferred adapter, backend, saved bulbs, selected bulb MACs.
+- **`config.rs`** - Persistent app configuration via TOML (`~/.config/cocuyo/config.toml`). Stores preferred adapter, backend, saved bulbs, selected bulb MACs, capture settings (fps limit, resolution scale), ambient settings (update interval, brightness, color temp), and UI preferences (minimize to tray, perf overlay).
 - **`adapters.rs`** - GPU adapter enumeration and selection (`GpuAdapter`, `GpuAdapterSelection`)
 - **`ambient.rs`** - WiZ smart bulb discovery, color mapping, state save/restore, frame sampling dispatch
 - **`region.rs`** - Screen capture region definitions and coordinate transformations
 - **`theme.rs`** - Custom iced theme and styling
 - **`gpu_context.rs`** - Global `OnceLock` storing the wgpu `Device`/`Queue` for use outside the shader widget (set once from `VideoPipeline::new()`)
+- **`tray.rs`** - System tray icon and menu (Windows/macOS only; Linux stub). Menu items: Show/Hide, Start/Stop Ambient, Exit
+- **`perf_stats.rs`** - Performance metrics tracking with EMA smoothing (alpha=0.05): effective FPS, frame interval, sampling time, bulb dispatch duration. Fingerprinting for HUD cache invalidation
 
 #### Sampling Module (`sampling/`)
 - **`mod.rs`** - `SamplingStrategy` trait (with `supports_gpu()` opt-in), `BoxedStrategy` type-erased wrapper (for iced pick_list), `sample_region()` function, `sample_extremum()` unified max/min helper, strategy registry
@@ -113,6 +127,7 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 - **`video_shader.wgsl`** - WGSL shader for fullscreen video rendering with aspect ratio correction
 - **`title_bar.rs`** - Custom window title bar (drag, minimize, maximize, close)
 - **`region_overlay.rs`** - Interactive canvas overlay for drawing/editing capture regions on the preview
+- **`perf_hud.rs`** - Performance HUD overlay displaying FPS, sample time, and bulb dispatch metrics
 
 #### Screen Module (`screen/`)
 - **`main_window.rs`** - Main control window (preview, controls, region list, status bar)
@@ -134,12 +149,17 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 - **`dx12_import.rs`** - DX12 shared texture import into wgpu
 - **`shared_texture.rs`** - `SharedTexturePool` and `SharedTextureSlot` for GPU-GPU zero-copy frame delivery via shared D3D11 textures with keyed mutexes
 
+#### Platform: macOS (`platform/macos/`)
+- **`recording.rs`** - macOS recording subscription using `screencapturekit` crate. Configurable frame rate and resolution via `capture_resolution_scale`
+- **`metal_import.rs`** - IOSurface import into wgpu texture via Metal HAL (zero-copy)
+
 ### Threading Model
 
 - Main thread: iced event loop (daemon mode with multi-window)
 - Recording lifecycle driven by `iced::Subscription` — when `is_recording` is true, the subscription spawns a capture thread:
   - **Linux**: `std::thread::spawn` for PipeWire main loop
   - **Windows**: `CaptureHandler::start_free_threaded` for Windows Graphics Capture
+  - **macOS**: ScreenCaptureKit stream with configurable frame rate and resolution
 - Frame data sent via bounded `tokio::sync::mpsc::channel(2)` with backpressure (frames dropped when full)
 - Frames delivered to UI as `Message::RecordingEvent(Frame(Arc<FrameData>))` — no polling tick
 - Recording state updated via `Message::RecordingEvent(StateChanged(...))` — owned by UI, no mutexes
@@ -151,7 +171,7 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 
 ### Supported Video Formats
 
-RGB, RGBA, RGBx, BGRx, YUY2, I420 - all converted to RGBA via GStreamer (Linux)
+RGB, RGBA, RGBx, BGRx, YUY2, I420 - all converted to BGRA via GStreamer (Linux). CPU frame data is internally stored as BGRA across all platforms.
 
 ### DMA-BUF Zero-Copy Path (Linux)
 
@@ -170,6 +190,14 @@ For GPU-GPU frame delivery without CPU readback:
 3. Frame sent as `FrameData::D3DShared` with `Arc<SharedTextureSlot>`
 4. The shader widget imports the shared texture into wgpu via DX12 HAL (`dx12_import.rs`)
 5. Keyed mutex ensures GPU synchronization between D3D11 capture and D3D12/wgpu rendering
+
+### IOSurface Zero-Copy Path (macOS)
+
+For GPU-GPU frame delivery via Metal:
+1. ScreenCaptureKit produces IOSurface-backed frames in BGRA format
+2. Frame sent as `FrameData::IOSurface` with the IOSurface handle
+3. The shader widget imports the IOSurface into a wgpu texture via Metal HAL (`metal_import.rs`)
+4. Metal creates a texture backed by the IOSurface memory (zero-copy)
 
 #### Note:
 

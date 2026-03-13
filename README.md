@@ -8,13 +8,15 @@ Cocuyo captures your screen in real-time and drives WiZ smart bulbs to match the
 
 ## Features
 
-- **Cross-platform** — Linux (PipeWire/Wayland) and Windows (Graphics Capture API)
-- **Zero-copy GPU pipeline** — DMA-BUF on Linux, D3D11 shared textures on Windows
+- **Cross-platform** — Linux (PipeWire/Wayland), Windows (Graphics Capture API), and macOS (ScreenCaptureKit)
+- **Zero-copy GPU pipeline** — DMA-BUF on Linux, D3D11 shared textures on Windows, IOSurface/Metal on macOS
 - **Per-bulb screen regions** — assign and resize capture zones for each bulb
 - **Multiple sampling strategies** — Average, Max, Min, and Palette (histogram-based dominant color)
 - **GPU-accelerated sampling** — compute shaders for color extraction
 - **WiZ bulb discovery** — automatic network scan with state save/restore
 - **Live preview** — see the capture and region overlay before going ambient
+- **System tray** — minimize to tray with quick controls (Windows/macOS)
+- **Performance HUD** — real-time FPS, sampling, and dispatch metrics overlay
 
 ## Quick Start
 
@@ -35,6 +37,9 @@ cargo run --release
 ### Windows
 - Windows 10+ with DirectX 11/12
 
+### macOS
+- macOS 13+ with a Metal-capable GPU
+
 ### Linux
 - Wayland session with XDG Desktop Portal
 - PipeWire
@@ -44,7 +49,7 @@ cargo run --release
 ## Architecture
 
 ```
-Screen Capture ──► Frame (DMA-BUF / D3D Shared / CPU)
+Screen Capture ──► Frame (DMA-BUF / IOSurface / D3D Shared / CPU)
                         │
                         ├──► iced shader widget (preview)
                         │
