@@ -1,24 +1,20 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use tracing::debug;
 use windows::Win32::Foundation::HANDLE;
 
-/// Global flag: once DX12 shared import fails, fall back to CPU for all future frames.
-static D3D_SHARED_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
+use crate::frame::ImportGuard;
 
-/// Returns whether DX12 shared texture import is still considered viable.
+static IMPORT_GUARD: ImportGuard = ImportGuard::new();
+
 pub fn is_d3d_shared_import_available() -> bool {
-    !D3D_SHARED_IMPORT_FAILED.load(Ordering::Relaxed)
+    IMPORT_GUARD.is_available()
 }
 
-/// Mark DX12 shared import as failed permanently (until reset).
 pub fn mark_d3d_shared_import_failed() {
-    D3D_SHARED_IMPORT_FAILED.store(true, Ordering::Relaxed);
+    IMPORT_GUARD.mark_failed();
 }
 
-/// Reset the failure flag, allowing zero-copy import to be retried.
 pub fn reset_d3d_shared_import_failed() {
-    D3D_SHARED_IMPORT_FAILED.store(false, Ordering::Relaxed);
+    IMPORT_GUARD.reset();
 }
 
 #[derive(Debug)]

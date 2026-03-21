@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(target_os = "linux")]
 use drm_fourcc::DrmFourcc;
@@ -10,6 +11,28 @@ use screencapturekit::cm::IOSurface;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::shared_texture;
+
+/// Atomic flag for tracking whether a zero-copy import path is still viable.
+/// Once import fails, the path is disabled until explicitly reset.
+pub struct ImportGuard(AtomicBool);
+
+impl ImportGuard {
+    pub const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    pub fn is_available(&self) -> bool {
+        !self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn mark_failed(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn reset(&self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
 
 impl std::fmt::Debug for FrameData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -32,22 +32,12 @@ impl SamplingStrategy for Average {
         let mut b_sum: u64 = 0;
         let mut count: u64 = 0;
 
-        let mut py = y0;
-        while py < y1 {
-            let row_base = (py * width) as usize * 4;
-            let mut px = x0;
-            while px < x1 {
-                let idx = row_base + (px as usize) * 4;
-                if idx + 2 < data.len() {
-                    b_sum += data[idx] as u64;
-                    g_sum += data[idx + 1] as u64;
-                    r_sum += data[idx + 2] as u64;
-                    count += 1;
-                }
-                px += stride;
-            }
-            py += stride;
-        }
+        super::for_each_sampled_pixel(data, width, x0, y0, x1, y1, stride, |r, g, b| {
+            r_sum += r as u64;
+            g_sum += g as u64;
+            b_sum += b as u64;
+            count += 1;
+        });
 
         if count == 0 {
             return None;

@@ -2,17 +2,6 @@ use ash::vk;
 use drm_fourcc::DrmFourcc;
 use pipewire::spa;
 
-/// Supported video formats for capture and conversion.
-#[allow(dead_code)]
-pub const SUPPORTED_FORMATS: &[spa::param::video::VideoFormat] = &[
-    spa::param::video::VideoFormat::RGB,
-    spa::param::video::VideoFormat::RGBA,
-    spa::param::video::VideoFormat::RGBx,
-    spa::param::video::VideoFormat::BGRx,
-    spa::param::video::VideoFormat::YUY2,
-    spa::param::video::VideoFormat::I420,
-];
-
 /// Converts a PipeWire video format to a GStreamer format string.
 pub fn to_gst_format(format: spa::param::video::VideoFormat) -> Option<&'static str> {
     match format {
