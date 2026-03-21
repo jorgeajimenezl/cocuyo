@@ -194,7 +194,7 @@ impl Cocuyo {
                     self.capture_picker = None;
                     return Task::none();
                 }
-                if kind == Some(WindowKind::Settings) {
+                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::BulbSetup) {
                     self.flush_config();
                 }
                 if kind == Some(WindowKind::Main) {
@@ -861,10 +861,8 @@ impl Cocuyo {
     }
 
     fn sync_regions_to_bulbs(&mut self) {
-        {
-            let selected_macs = self.bulb_setup.selected_bulbs();
-            self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
-        }
+        let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
+        self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
 
         if let Some(sel) = self.selected_region {
             if !self.regions.iter().any(|r| r.id == sel) {
@@ -872,7 +870,6 @@ impl Cocuyo {
             }
         }
 
-        let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
         let num_total = selected_macs.len();
         for (i, mac) in selected_macs.iter().enumerate() {
             if self.regions.iter().any(|r| r.bulb_mac == *mac) {
@@ -934,7 +931,7 @@ impl Cocuyo {
     fn save_bulb_config(&mut self) {
         self.config.saved_bulbs = self.bulb_setup.discovered_bulbs().to_vec();
         self.config.selected_bulb_macs = self.bulb_setup.selected_bulbs().iter().cloned().collect();
-        self.config.save();
+        self.mark_config_dirty();
     }
 
     fn mark_config_dirty(&mut self) {

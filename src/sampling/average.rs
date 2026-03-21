@@ -4,9 +4,13 @@ use super::SamplingStrategy;
 #[derive(Debug)]
 pub struct Average;
 
+impl Average {
+    pub const ID: &'static str = "average";
+}
+
 impl SamplingStrategy for Average {
     fn id(&self) -> &'static str {
-        "average"
+        Self::ID
     }
 
     fn name(&self) -> &'static str {

@@ -27,6 +27,17 @@ pub struct ContainLayout {
 
 impl ContainLayout {
     pub fn compute(frame_w: u32, frame_h: u32, bounds: Rectangle) -> Self {
+        if frame_w == 0 || frame_h == 0 || bounds.width <= 0.0 || bounds.height <= 0.0 {
+            return Self {
+                scale_x: 1.0,
+                scale_y: 1.0,
+                rendered_w: 0.0,
+                rendered_h: 0.0,
+                offset_x: 0.0,
+                offset_y: 0.0,
+            };
+        }
+
         let frame_aspect = frame_w as f32 / frame_h as f32;
         let bounds_aspect = bounds.width / bounds.height;
 
