@@ -1,29 +1,24 @@
 use std::os::fd::RawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use ash::vk;
 use drm_fourcc::DrmFourcc;
 use tracing::debug;
 
 use super::formats;
+use crate::frame::ImportGuard;
 
-/// Global flag: once DMA-BUF import fails, stop trying for all subsequent frames.
-static DMABUF_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
+static IMPORT_GUARD: ImportGuard = ImportGuard::new();
 
-/// Returns whether DMA-BUF Vulkan import is still considered viable.
-/// Becomes false after the first import failure.
 pub fn is_dmabuf_import_available() -> bool {
-    !DMABUF_IMPORT_FAILED.load(Ordering::Relaxed)
+    IMPORT_GUARD.is_available()
 }
 
-/// Mark DMA-BUF import as failed, so the stream falls back to GStreamer.
 pub fn mark_dmabuf_import_failed() {
-    DMABUF_IMPORT_FAILED.store(true, Ordering::Relaxed);
+    IMPORT_GUARD.mark_failed()
 }
 
-/// Reset the DMA-BUF import failure flag, allowing zero-copy import to be retried.
 pub fn reset_dmabuf_import_failed() {
-    DMABUF_IMPORT_FAILED.store(false, Ordering::Relaxed);
+    IMPORT_GUARD.reset()
 }
 
 #[derive(Debug)]

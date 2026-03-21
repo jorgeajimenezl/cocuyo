@@ -1,32 +1,28 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use foreign_types::ForeignType;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
 use screencapturekit::cm::IOSurface;
 use tracing::debug;
 
+use crate::frame::ImportGuard;
+
 // Metal API constants
 const MTL_PIXEL_FORMAT_BGRA8_UNORM_SRGB: u64 = 81;
 const MTL_TEXTURE_USAGE_SHADER_READ_RENDER_TARGET: u64 = 0x01 | 0x04; // ShaderRead | RenderTarget
 const MTL_STORAGE_MODE_SHARED: u64 = 1;
 
-/// Global flag: once Metal IOSurface import fails, fall back to CPU for all future frames.
-static IOSURFACE_IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
+static IMPORT_GUARD: ImportGuard = ImportGuard::new();
 
-/// Returns whether Metal IOSurface import is still considered viable.
 pub fn is_iosurface_import_available() -> bool {
-    !IOSURFACE_IMPORT_FAILED.load(Ordering::Relaxed)
+    IMPORT_GUARD.is_available()
 }
 
-/// Mark IOSurface import as failed permanently (until reset).
 pub fn mark_iosurface_import_failed() {
-    IOSURFACE_IMPORT_FAILED.store(true, Ordering::Relaxed);
+    IMPORT_GUARD.mark_failed()
 }
 
-/// Reset the failure flag, allowing zero-copy import to be retried.
 pub fn reset_iosurface_import_failed() {
-    IOSURFACE_IMPORT_FAILED.store(false, Ordering::Relaxed);
+    IMPORT_GUARD.reset()
 }
 
 #[derive(Debug)]

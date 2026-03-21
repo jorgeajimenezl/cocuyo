@@ -87,36 +87,13 @@ fn detect_cuda_device() -> Option<CudaDevice> {
     gst::ElementFactory::find("cudadownload")?;
 
     let element = gst::ElementFactory::make("cudaconvert").build().ok()?;
-    let gpu_name = get_nvidia_gpu_name().unwrap_or_else(|| "NVIDIA GPU".to_string());
-
     drop(element);
-    info!(gpu = %gpu_name, "CUDA support detected");
+    info!("CUDA support detected");
 
     Some(CudaDevice {
         index: 0,
-        name: format!("{} (CUDA)", gpu_name),
+        name: "NVIDIA GPU (CUDA)".to_string(),
     })
-}
-
-fn get_nvidia_gpu_name() -> Option<String> {
-    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name()?.to_str()?;
-        if !name.starts_with("renderD") {
-            continue;
-        }
-
-        let vendor = std::fs::read_to_string(path.join("device/vendor"))
-            .ok()?
-            .trim()
-            .to_lowercase();
-
-        if vendor == "0x10de" {
-            return Some("NVIDIA GPU".to_string());
-        }
-    }
-    None
 }
 
 fn detect_opengl_available() -> bool {

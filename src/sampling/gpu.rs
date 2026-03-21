@@ -1,5 +1,6 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use tracing::info;
@@ -57,18 +58,22 @@ struct SamplingRequest {
 /// background thread's `recv()` to return `Err` and exit cleanly.
 pub struct SamplingWorker {
     request_tx: std::sync::mpsc::SyncSender<SamplingRequest>,
+    idle: Arc<AtomicBool>,
     _thread: std::thread::JoinHandle<()>,
 }
 
 impl SamplingWorker {
     pub fn spawn(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let (request_tx, request_rx) = std::sync::mpsc::sync_channel::<SamplingRequest>(1);
+        let idle = Arc::new(AtomicBool::new(true));
+        let idle_flag = idle.clone();
 
         let thread = std::thread::Builder::new()
             .name("gpu-sampler".to_string())
             .spawn(move || {
                 let mut sampler = GpuSampler::new(device, queue);
                 while let Ok(request) = request_rx.recv() {
+                    idle_flag.store(false, Ordering::Release);
                     let start = Instant::now();
                     let results = sampler.sample_regions(&request.frame, &request.regions);
                     let gpu_time_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -84,6 +89,7 @@ impl SamplingWorker {
                         }
                     };
                     let _ = request.result_tx.send(SamplingResult { colors, gpu_time_ms });
+                    idle_flag.store(true, Ordering::Release);
                 }
                 info!("GPU sampler worker thread exiting");
             })
@@ -91,8 +97,14 @@ impl SamplingWorker {
 
         Self {
             request_tx,
+            idle,
             _thread: thread,
         }
+    }
+
+    /// Returns true if the worker is not currently processing a request.
+    pub fn is_idle(&self) -> bool {
+        self.idle.load(Ordering::Acquire)
     }
 
     /// Try to submit a sampling request.
@@ -299,7 +311,7 @@ fn classify_regions(regions: &[RegionParams]) -> ClassifiedRegions {
         } else {
             let ps = gpu_slot;
             gpu_slot += 1;
-            if region.strategy.id() == "palette" {
+            if region.strategy.id() == super::Palette::ID {
                 palette_slots.push((ps, palette_slots.len(), i));
             } else {
                 avg_slots.push((ps, avg_slots.len(), i));
@@ -316,15 +328,8 @@ fn classify_regions(regions: &[RegionParams]) -> ClassifiedRegions {
 }
 
 fn clamp_region(rp: &RegionParams, width: u32, height: u32) -> Option<Params> {
-    let x0 = (rp.x as u32).min(width);
-    let y0 = (rp.y as u32).min(height);
-    let x1 = ((rp.x + rp.width) as u32).min(width);
-    let y1 = ((rp.y + rp.height) as u32).min(height);
-    if x0 >= x1 || y0 >= y1 {
-        None
-    } else {
-        Some(Params { x0, y0, x1, y1 })
-    }
+    let (x0, y0, x1, y1) = super::clamp_region_bounds(rp.x, rp.y, rp.width, rp.height, width, height)?;
+    Some(Params { x0, y0, x1, y1 })
 }
 
 /// Build padded params and collect valid slots for a set of slot assignments.

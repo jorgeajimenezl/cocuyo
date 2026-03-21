@@ -314,8 +314,6 @@ pub struct VideoPipeline {
     uniform_buffer: wgpu::Buffer,
     current_bind_group: Option<wgpu::BindGroup>,
     cached_texture: Option<CachedTexture>,
-    #[allow(dead_code)]
-    target_format: wgpu::TextureFormat,
 }
 
 #[repr(C)]
@@ -428,7 +426,6 @@ impl shader::Pipeline for VideoPipeline {
             uniform_buffer,
             current_bind_group: None,
             cached_texture: None,
-            target_format: format,
         }
     }
 }
@@ -640,21 +637,11 @@ impl VideoPipeline {
         frame_height: u32,
         bounds: Rectangle,
     ) {
-        // Compute aspect-ratio-correct scale (ContentFit::Contain)
-        let frame_aspect = frame_width as f32 / frame_height as f32;
-        let bounds_aspect = bounds.width / bounds.height;
-
-        let (scale_x, scale_y) = if frame_aspect > bounds_aspect {
-            // Frame is wider than bounds: fit to width
-            (1.0, bounds_aspect / frame_aspect)
-        } else {
-            // Frame is taller than bounds: fit to height
-            (frame_aspect / bounds_aspect, 1.0)
-        };
+        let layout = crate::region::ContainLayout::compute(frame_width, frame_height, bounds);
 
         let uniforms = Uniforms {
-            scale: [scale_x, scale_y],
-            offset: [(1.0 - scale_x) * 0.5, (1.0 - scale_y) * 0.5],
+            scale: [layout.scale_x, layout.scale_y],
+            offset: [(1.0 - layout.scale_x) * 0.5, (1.0 - layout.scale_y) * 0.5],
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));

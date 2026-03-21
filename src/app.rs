@@ -20,6 +20,18 @@ use crate::screen::settings;
 use crate::widget::Element;
 use crate::widget::region_overlay::RegionMessage;
 
+const MAIN_WINDOW_SIZE: Size = Size::new(1200.0, 750.0);
+const MAIN_WINDOW_MIN: Size = Size::new(800.0, 500.0);
+const SETTINGS_WINDOW_SIZE: Size = Size::new(500.0, 700.0);
+const SETTINGS_WINDOW_MIN: Size = Size::new(300.0, 200.0);
+const BULB_SETUP_WINDOW_SIZE: Size = Size::new(500.0, 400.0);
+const BULB_SETUP_WINDOW_MIN: Size = Size::new(350.0, 300.0);
+#[cfg(target_os = "windows")]
+const PICKER_WINDOW_SIZE: Size = Size::new(500.0, 500.0);
+#[cfg(target_os = "windows")]
+const PICKER_WINDOW_MIN: Size = Size::new(350.0, 300.0);
+const DEFAULT_FRAME_SIZE: (f32, f32) = (1920.0, 1080.0);
+
 #[cfg(target_os = "windows")]
 use {
     crate::platform::windows::capture_target::{CaptureTarget, PickerIntent},
@@ -103,6 +115,7 @@ pub struct Cocuyo {
 
     // Performance stats
     perf_stats: crate::perf_stats::PerfStats,
+    config_dirty: bool,
 
     tray: &'static crate::tray::TrayState,
     tray_hide_requested: bool,
@@ -135,6 +148,7 @@ impl Cocuyo {
             selected_region: None,
             sampling_worker: None,
             perf_stats: crate::perf_stats::PerfStats::new(),
+            config_dirty: false,
             tray,
             tray_hide_requested: false,
             settings: settings::Settings::new(&config),
@@ -148,8 +162,8 @@ impl Cocuyo {
 
         let task = app.open_window(
             WindowKind::Main,
-            Size::new(1200.0, 750.0),
-            Size::new(800.0, 500.0),
+            MAIN_WINDOW_SIZE,
+            MAIN_WINDOW_MIN,
             None,
         );
 
@@ -180,6 +194,9 @@ impl Cocuyo {
                     self.capture_picker = None;
                     return Task::none();
                 }
+                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::BulbSetup) {
+                    self.flush_config();
+                }
                 if kind == Some(WindowKind::Main) {
                     #[cfg(not(target_os = "linux"))]
                     if self.config.minimize_to_tray || self.tray_hide_requested {
@@ -188,19 +205,7 @@ impl Cocuyo {
                         self.tray.update_menu_text(false, self.is_ambient_active);
                         return Task::none();
                     }
-                    // Exit normally: stop recording, restore bulbs
-                    if self.is_ambient_active || self.is_recording {
-                        if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                            let _ = cmd_tx.try_send(RecordingCommand::Stop);
-                        }
-                    }
-                    return if let Some(states) = self.saved_bulb_states.take() {
-                        Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                            Message::ExitApp
-                        })
-                    } else {
-                        iced::exit()
-                    };
+                    return self.graceful_shutdown();
                 }
                 Task::none()
             }
@@ -210,8 +215,8 @@ impl Cocuyo {
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::OpenSettings(parent) => self.open_window(
                 WindowKind::Settings,
-                Size::new(500.0, 700.0),
-                Size::new(300.0, 200.0),
+                SETTINGS_WINDOW_SIZE,
+                SETTINGS_WINDOW_MIN,
                 Some(parent),
             ),
             #[cfg(target_os = "windows")]
@@ -219,8 +224,8 @@ impl Cocuyo {
                 self.capture_picker = Some(capture_picker::CapturePicker::new(intent));
                 self.open_window(
                     WindowKind::CapturePicker,
-                    Size::new(500.0, 500.0),
-                    Size::new(350.0, 300.0),
+                    PICKER_WINDOW_SIZE,
+                    PICKER_WINDOW_MIN,
                     parent,
                 )
             }
@@ -228,19 +233,13 @@ impl Cocuyo {
                 #[cfg(target_os = "linux")]
                 {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
-                    self.is_recording = true;
-                    self.session_id += 1;
-                    self.recording_fps_limit = self.config.capture_fps_limit;
-                    self.recording_resolution_scale = self.config.capture_resolution_scale;
+                    self.begin_recording();
                     Task::none()
                 }
                 #[cfg(target_os = "macos")]
                 {
                     crate::platform::macos::metal_import::reset_iosurface_import_failed();
-                    self.is_recording = true;
-                    self.session_id += 1;
-                    self.recording_fps_limit = self.config.capture_fps_limit;
-                    self.recording_resolution_scale = self.config.capture_resolution_scale;
+                    self.begin_recording();
                     Task::none()
                 }
                 #[cfg(target_os = "windows")]
@@ -262,8 +261,8 @@ impl Cocuyo {
             }
             Message::OpenBulbSetup(parent) => self.open_window(
                 WindowKind::BulbSetup,
-                Size::new(500.0, 400.0),
-                Size::new(350.0, 300.0),
+                BULB_SETUP_WINDOW_SIZE,
+                BULB_SETUP_WINDOW_MIN,
                 Some(parent),
             ),
             Message::Settings(msg) => {
@@ -312,8 +311,8 @@ impl Cocuyo {
                             self.tray.update_menu_text(true, self.is_ambient_active);
                             self.open_window(
                                 WindowKind::Main,
-                                Size::new(1200.0, 750.0),
-                                Size::new(800.0, 500.0),
+                                MAIN_WINDOW_SIZE,
+                                MAIN_WINDOW_MIN,
                                 None,
                             )
                         }
@@ -325,25 +324,14 @@ impl Cocuyo {
                             Task::done(Message::StartAmbient)
                         }
                     }
-                    TrayAction::Exit => {
-                        // Graceful shutdown: stop recording, restore bulbs, then exit
-                        if self.is_ambient_active || self.is_recording {
-                            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                                let _ = cmd_tx.try_send(RecordingCommand::Stop);
-                            }
-                        }
-                        if let Some(states) = self.saved_bulb_states.take() {
-                            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
-                                Message::ExitApp
-                            })
-                        } else {
-                            iced::exit()
-                        }
-                    }
+                    TrayAction::Exit => self.graceful_shutdown(),
                 }
             }
             Message::Noop => Task::none(),
-            Message::ExitApp => iced::exit(),
+            Message::ExitApp => {
+                self.flush_config();
+                iced::exit()
+            }
             Message::StartAmbient => {
                 if !self.bulb_setup.has_selected_bulbs() {
                     return Task::none();
@@ -390,10 +378,7 @@ impl Cocuyo {
                     crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     #[cfg(target_os = "windows")]
                     crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
-                    self.is_recording = true;
-                    self.session_id += 1;
-                    self.recording_fps_limit = self.config.capture_fps_limit;
-                    self.recording_resolution_scale = self.config.capture_resolution_scale;
+                    self.begin_recording();
                 }
                 Task::none()
             }
@@ -466,31 +451,33 @@ impl Cocuyo {
                                 // not here, to avoid throttle drift when GPU is slow.
                                 if let Some(ref worker) = self.sampling_worker {
                                     use crate::sampling::gpu::{RegionParams, SendResult};
-                                    let params: Vec<RegionParams> = self
-                                        .regions
-                                        .iter()
-                                        .map(|r| RegionParams {
-                                            region_id: r.id,
-                                            x: r.x,
-                                            y: r.y,
-                                            width: r.width,
-                                            height: r.height,
-                                            strategy: r.strategy.clone(),
-                                        })
-                                        .collect();
+                                    if worker.is_idle() {
+                                        let params: Vec<RegionParams> = self
+                                            .regions
+                                            .iter()
+                                            .map(|r| RegionParams {
+                                                region_id: r.id,
+                                                x: r.x,
+                                                y: r.y,
+                                                width: r.width,
+                                                height: r.height,
+                                                strategy: r.strategy.clone(),
+                                            })
+                                            .collect();
 
-                                    match worker.try_send(
-                                        frame.clone(),
-                                        params,
-                                        Message::GpuSamplingComplete,
-                                    ) {
-                                        SendResult::Sent(task) => return task,
-                                        SendResult::Busy => {} // worker busy, skip
-                                        SendResult::Dead => {
-                                            tracing::warn!(
-                                                "GPU sampling worker died, falling back to CPU"
-                                            );
-                                            self.sampling_worker = None;
+                                        match worker.try_send(
+                                            frame.clone(),
+                                            params,
+                                            Message::GpuSamplingComplete,
+                                        ) {
+                                            SendResult::Sent(task) => return task,
+                                            SendResult::Busy => {} // race: became busy
+                                            SendResult::Dead => {
+                                                tracing::warn!(
+                                                    "GPU sampling worker died, falling back to CPU"
+                                                );
+                                                self.sampling_worker = None;
+                                            }
                                         }
                                     }
                                 }
@@ -514,20 +501,7 @@ impl Cocuyo {
                                     }
                                     self.perf_stats.record_sampling_complete();
 
-                                    if let Some(targets) = crate::ambient::build_bulb_targets(
-                                        &self.regions,
-                                        self.bulb_setup.discovered_bulbs(),
-                                        self.config.min_brightness_percent,
-                                        self.config.white_color_temp,
-                                    ) {
-                                        let dispatch_start = Instant::now();
-                                        return Task::perform(
-                                            crate::ambient::dispatch_bulb_colors(targets),
-                                            move |()| Message::BulbDispatchComplete(
-                                                dispatch_start.elapsed().as_secs_f64() * 1000.0,
-                                            ),
-                                        );
-                                    }
+                                    return self.dispatch_to_bulbs();
                                 }
                             }
                         }
@@ -547,22 +521,7 @@ impl Cocuyo {
                         region.sampled_color = *color;
                     }
                 }
-                if let Some(targets) = crate::ambient::build_bulb_targets(
-                    &self.regions,
-                    self.bulb_setup.discovered_bulbs(),
-                    self.config.min_brightness_percent,
-                    self.config.white_color_temp,
-                ) {
-                    let dispatch_start = Instant::now();
-                    Task::perform(
-                        crate::ambient::dispatch_bulb_colors(targets),
-                        move |()| Message::BulbDispatchComplete(
-                            dispatch_start.elapsed().as_secs_f64() * 1000.0,
-                        ),
-                    )
-                } else {
-                    Task::none()
-                }
+                self.dispatch_to_bulbs()
             }
             Message::BulbDispatchComplete(elapsed_ms) => {
                 self.perf_stats.record_bulb_dispatch(elapsed_ms);
@@ -728,7 +687,7 @@ impl Cocuyo {
             }
             settings::Event::ForceCpuSamplingChanged(val) => {
                 self.config.force_cpu_sampling = val;
-                self.config.save();
+                self.mark_config_dirty();
                 if val {
                     self.sampling_worker = None;
                 }
@@ -736,37 +695,37 @@ impl Cocuyo {
             }
             settings::Event::BulbUpdateIntervalChanged(ms) => {
                 self.config.bulb_update_interval_ms = ms;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::MinBrightnessChanged(pct) => {
                 self.config.min_brightness_percent = pct;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::WhiteColorTempChanged(temp) => {
                 self.config.white_color_temp = temp;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::MinimizeToTrayChanged(val) => {
                 self.config.minimize_to_tray = val;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::CaptureFpsLimitChanged(fps) => {
                 self.config.capture_fps_limit = fps;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::CaptureResolutionScaleChanged(scale) => {
                 self.config.capture_resolution_scale = scale;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::ShowPerfOverlayChanged(val) => {
                 self.config.show_perf_overlay = val;
-                self.config.save();
+                self.mark_config_dirty();
                 Task::none()
             }
         }
@@ -796,7 +755,6 @@ impl Cocuyo {
             }
             bulb_setup::BulbSetupEvent::SelectionChanged => {
                 self.sync_regions_to_bulbs();
-                self.save_bulb_config();
                 Task::none()
             }
             bulb_setup::BulbSetupEvent::BulbsDiscovered => {
@@ -817,10 +775,7 @@ impl Cocuyo {
                 match intent {
                     PickerIntent::StartRecording => {
                         crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
-                        self.is_recording = true;
-                        self.session_id += 1;
-                        self.recording_fps_limit = self.config.capture_fps_limit;
-                    self.recording_resolution_scale = self.config.capture_resolution_scale;
+                        self.begin_recording();
                         close_task
                     }
                     PickerIntent::StartAmbient => {
@@ -861,9 +816,52 @@ impl Cocuyo {
 
     // --- Shared helpers ---
 
-    fn sync_regions_to_bulbs(&mut self) {
-        let selected_macs = self.bulb_setup.selected_bulbs_vec();
+    fn begin_recording(&mut self) {
+        self.is_recording = true;
+        self.session_id += 1;
+        self.recording_fps_limit = self.config.capture_fps_limit;
+        self.recording_resolution_scale = self.config.capture_resolution_scale;
+    }
 
+    fn graceful_shutdown(&mut self) -> Task<Message> {
+        self.flush_config();
+        if self.is_ambient_active || self.is_recording {
+            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
+                let _ = cmd_tx.try_send(RecordingCommand::Stop);
+            }
+        }
+        if let Some(states) = self.saved_bulb_states.take() {
+            Task::perform(crate::ambient::restore_bulb_states(states), |()| {
+                Message::ExitApp
+            })
+        } else {
+            iced::exit()
+        }
+    }
+
+    fn dispatch_to_bulbs(&self) -> Task<Message> {
+        if let Some(targets) = crate::ambient::build_bulb_targets(
+            &self.regions,
+            self.bulb_setup.discovered_bulbs(),
+            self.config.min_brightness_percent,
+            self.config.white_color_temp,
+        ) {
+            let dispatch_start = Instant::now();
+            Task::perform(
+                crate::ambient::dispatch_bulb_colors(targets),
+                move |()| {
+                    Message::BulbDispatchComplete(
+                        dispatch_start.elapsed().as_secs_f64() * 1000.0,
+                    )
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    fn sync_regions_to_bulbs(&mut self) {
+        let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
         self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
 
         if let Some(sel) = self.selected_region {
@@ -882,7 +880,7 @@ impl Cocuyo {
                 .current_frame
                 .as_ref()
                 .map(|f| (f.width() as f32, f.height() as f32))
-                .unwrap_or((1920.0, 1080.0));
+                .unwrap_or(DEFAULT_FRAME_SIZE);
 
             let default_w = (frame_w / (num_total as f32 + 1.0)).min(frame_w * 0.3);
             let default_h = frame_h * 0.4;
@@ -932,7 +930,18 @@ impl Cocuyo {
 
     fn save_bulb_config(&mut self) {
         self.config.saved_bulbs = self.bulb_setup.discovered_bulbs().to_vec();
-        self.config.selected_bulb_macs = self.bulb_setup.selected_bulbs_vec();
-        self.config.save();
+        self.config.selected_bulb_macs = self.bulb_setup.selected_bulbs().iter().cloned().collect();
+        self.mark_config_dirty();
+    }
+
+    fn mark_config_dirty(&mut self) {
+        self.config_dirty = true;
+    }
+
+    fn flush_config(&mut self) {
+        if self.config_dirty {
+            self.config.save();
+            self.config_dirty = false;
+        }
     }
 }

@@ -185,10 +185,6 @@ impl BulbSetupState {
         !self.selected_bulbs.is_empty()
     }
 
-    pub fn selected_bulbs_vec(&self) -> Vec<String> {
-        self.selected_bulbs.iter().cloned().collect()
-    }
-
     pub fn selected_bulb_infos(&self) -> Vec<BulbInfo> {
         self.discovered_bulbs
             .iter()

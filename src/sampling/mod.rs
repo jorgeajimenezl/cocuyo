@@ -72,6 +72,36 @@ pub(crate) fn sample_extremum<const IS_MAX: bool>(
     let mut best_lum: u32 = if IS_MAX { 0 } else { u32::MAX };
     let mut found = false;
 
+    for_each_sampled_pixel(data, width, x0, y0, x1, y1, stride, |r, g, b| {
+        let lum = luminance_u32(r, g, b);
+        let better = if IS_MAX {
+            lum > best_lum
+        } else {
+            lum < best_lum
+        };
+        if better || !found {
+            best_lum = lum;
+            best_rgb = (r, g, b);
+            found = true;
+        }
+    });
+
+    if found { Some(best_rgb) } else { None }
+}
+
+/// Iterate over sampled pixels in a BGRA buffer within the given bounds,
+/// stepping by `stride` in both dimensions. Calls `f(r, g, b)` for each pixel.
+#[inline]
+pub(crate) fn for_each_sampled_pixel(
+    data: &[u8],
+    width: u32,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+    stride: u32,
+    mut f: impl FnMut(u8, u8, u8),
+) {
     let mut py = y0;
     while py < y1 {
         let row_base = (py * width) as usize * 4;
@@ -79,25 +109,15 @@ pub(crate) fn sample_extremum<const IS_MAX: bool>(
         while px < x1 {
             let idx = row_base + (px as usize) * 4;
             if idx + 2 < data.len() {
-                let (r, g, b) = (data[idx + 2], data[idx + 1], data[idx]);
-                let lum = luminance_u32(r, g, b);
-                let better = if IS_MAX {
-                    lum > best_lum
-                } else {
-                    lum < best_lum
-                };
-                if better || !found {
-                    best_lum = lum;
-                    best_rgb = (r, g, b);
-                    found = true;
-                }
+                let b = data[idx];
+                let g = data[idx + 1];
+                let r = data[idx + 2];
+                f(r, g, b);
             }
             px += stride;
         }
         py += stride;
     }
-
-    if found { Some(best_rgb) } else { None }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +186,7 @@ impl Default for BoxedStrategy {
 ///
 /// To add a new strategy, create a type implementing [`SamplingStrategy`] and
 /// append it here.
-pub fn all_strategies() -> Vec<BoxedStrategy> {
+pub fn all_strategies() -> &'static [BoxedStrategy] {
     use std::sync::LazyLock;
     static ALL: LazyLock<Vec<BoxedStrategy>> = LazyLock::new(|| {
         vec![
@@ -176,12 +196,31 @@ pub fn all_strategies() -> Vec<BoxedStrategy> {
             BoxedStrategy::new(Palette),
         ]
     });
-    ALL.clone()
+    &ALL
 }
 
 // ---------------------------------------------------------------------------
 // sample_region – shared bounds / stride logic
 // ---------------------------------------------------------------------------
+
+const TARGET_SAMPLE_PIXELS: f64 = 1000.0;
+
+/// Clamp a floating-point region to pixel bounds within a frame.
+/// Returns `None` if the clamped region is empty.
+pub(crate) fn clamp_region_bounds(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    frame_w: u32,
+    frame_h: u32,
+) -> Option<(u32, u32, u32, u32)> {
+    let x0 = (x as u32).min(frame_w);
+    let y0 = (y as u32).min(frame_h);
+    let x1 = ((x + w) as u32).min(frame_w);
+    let y1 = ((y + h) as u32).min(frame_h);
+    if x0 >= x1 || y0 >= y1 { None } else { Some((x0, y0, x1, y1)) }
+}
 
 /// Sample a rectangular region of a frame using the given strategy.
 ///
@@ -199,21 +238,13 @@ pub fn sample_region(
     let width = frame.width();
     let height = frame.height();
 
-    let x0 = (x as u32).min(width);
-    let y0 = (y as u32).min(height);
-    let x1 = ((x + w) as u32).min(width);
-    let y1 = ((y + h) as u32).min(height);
-
-    if x0 >= x1 || y0 >= y1 {
-        return None;
-    }
+    let (x0, y0, x1, y1) = clamp_region_bounds(x, y, w, h, width, height)?;
 
     let region_w = x1 - x0;
     let region_h = y1 - y0;
     let total_pixels = (region_w as u64) * (region_h as u64);
 
-    // Determine stride to sample ~1000 pixels max
-    let stride = ((total_pixels as f64 / 1000.0).sqrt().ceil() as u32).max(1);
+    let stride = ((total_pixels as f64 / TARGET_SAMPLE_PIXELS).sqrt().ceil() as u32).max(1);
 
     strategy.sample(data, width, x0, y0, x1, y1, stride)
 }

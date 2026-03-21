@@ -7,6 +7,10 @@ const NUM_BINS: usize = 512;
 #[derive(Debug)]
 pub struct Palette;
 
+impl Palette {
+    pub const ID: &'static str = "palette";
+}
+
 #[derive(Clone, Copy, Default)]
 struct Bin {
     r_sum: u64,
@@ -36,7 +40,7 @@ pub(super) fn extract_dominant_from_histogram(bins: &[HistogramBin]) -> Option<(
 
 impl SamplingStrategy for Palette {
     fn id(&self) -> &'static str {
-        "palette"
+        Self::ID
     }
 
     fn name(&self) -> &'static str {
@@ -59,26 +63,13 @@ impl SamplingStrategy for Palette {
     ) -> Option<(u8, u8, u8)> {
         let mut bins = [Bin::default(); NUM_BINS];
 
-        let mut py = y0;
-        while py < y1 {
-            let row_base = (py * width) as usize * 4;
-            let mut px = x0;
-            while px < x1 {
-                let idx = row_base + (px as usize) * 4;
-                if idx + 2 < data.len() {
-                    let b = data[idx];
-                    let g = data[idx + 1];
-                    let r = data[idx + 2];
-                    let bin = &mut bins[bin_index(r, g, b)];
-                    bin.r_sum += r as u64;
-                    bin.g_sum += g as u64;
-                    bin.b_sum += b as u64;
-                    bin.count += 1;
-                }
-                px += stride;
-            }
-            py += stride;
-        }
+        super::for_each_sampled_pixel(data, width, x0, y0, x1, y1, stride, |r, g, b| {
+            let bin = &mut bins[bin_index(r, g, b)];
+            bin.r_sum += r as u64;
+            bin.g_sum += g as u64;
+            bin.b_sum += b as u64;
+            bin.count += 1;
+        });
 
         let best = bins.iter().max_by_key(|b| b.count)?;
         if best.count == 0 {
