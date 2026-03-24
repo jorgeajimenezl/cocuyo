@@ -78,6 +78,15 @@ pub unsafe fn import_dmabuf_texture(
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
     let import_fd = nix::unistd::dup(fd).map_err(DmaBufImportError::FdDupFailed)?;
 
+    // Include the non-sRGB equivalent in view_formats so wgpu allows
+    // creating views with different sRGB-ness (needed for color-correct
+    // rendering when the surface format doesn't match the texture format).
+    let view_formats: Vec<wgpu::TextureFormat> = match wgpu_format {
+        wgpu::TextureFormat::Bgra8UnormSrgb => vec![wgpu::TextureFormat::Bgra8Unorm],
+        wgpu::TextureFormat::Rgba8UnormSrgb => vec![wgpu::TextureFormat::Rgba8Unorm],
+        _ => vec![],
+    };
+
     // Access the Vulkan HAL device to perform raw Vulkan operations.
     // We create the hal texture inside this block so we can drop the HAL guard
     // before calling create_texture_from_hal (which also needs the device lock).
@@ -257,7 +266,6 @@ pub unsafe fn import_dmabuf_texture(
             cleanup_device.free_memory(memory, None);
         });
 
-        // Build the HAL texture descriptor
         let hal_desc = wgpu_hal::TextureDescriptor {
             label: Some("dmabuf_imported"),
             size: wgpu::Extent3d {
@@ -271,7 +279,7 @@ pub unsafe fn import_dmabuf_texture(
             format: wgpu_format,
             usage: wgpu::TextureUses::RESOURCE | wgpu::TextureUses::COPY_SRC,
             memory_flags: wgpu_hal::MemoryFlags::empty(),
-            view_formats: vec![],
+            view_formats: view_formats.clone(),
         };
 
         // Wrap the VkImage into a wgpu_hal texture
@@ -292,7 +300,7 @@ pub unsafe fn import_dmabuf_texture(
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &view_formats,
     };
 
     let wgpu_texture =

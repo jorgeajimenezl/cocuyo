@@ -141,7 +141,7 @@ pub unsafe fn import_iosurface_texture(
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &[wgpu::TextureFormat::Bgra8Unorm],
     };
 
     let wgpu_texture = unsafe {
