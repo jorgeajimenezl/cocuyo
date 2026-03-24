@@ -81,11 +81,16 @@ pub unsafe fn import_dmabuf_texture(
     // Include the non-sRGB equivalent in view_formats so wgpu allows
     // creating views with different sRGB-ness (needed for color-correct
     // rendering when the surface format doesn't match the texture format).
-    let view_formats: Vec<wgpu::TextureFormat> = match wgpu_format {
-        wgpu::TextureFormat::Bgra8UnormSrgb => vec![wgpu::TextureFormat::Bgra8Unorm],
-        wgpu::TextureFormat::Rgba8UnormSrgb => vec![wgpu::TextureFormat::Rgba8Unorm],
-        _ => vec![],
+    // Use a stack-allocated Option + array to avoid heap allocation on
+    // the hot per-frame import path.
+    let alt_format: Option<wgpu::TextureFormat> = match wgpu_format {
+        wgpu::TextureFormat::Bgra8UnormSrgb => Some(wgpu::TextureFormat::Bgra8Unorm),
+        wgpu::TextureFormat::Rgba8UnormSrgb => Some(wgpu::TextureFormat::Rgba8Unorm),
+        _ => None,
     };
+    let view_formats_arr = alt_format.map(|f| [f]);
+    let view_formats_slice: &[wgpu::TextureFormat] =
+        view_formats_arr.as_ref().map_or(&[], |a| a.as_slice());
 
     // Access the Vulkan HAL device to perform raw Vulkan operations.
     // We create the hal texture inside this block so we can drop the HAL guard
@@ -279,7 +284,7 @@ pub unsafe fn import_dmabuf_texture(
             format: wgpu_format,
             usage: wgpu::TextureUses::RESOURCE | wgpu::TextureUses::COPY_SRC,
             memory_flags: wgpu_hal::MemoryFlags::empty(),
-            view_formats: view_formats.clone(),
+            view_formats: view_formats_slice.to_vec(),
         };
 
         // Wrap the VkImage into a wgpu_hal texture
@@ -300,7 +305,7 @@ pub unsafe fn import_dmabuf_texture(
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &view_formats,
+        view_formats: view_formats_slice,
     };
 
     let wgpu_texture =

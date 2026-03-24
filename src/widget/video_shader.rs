@@ -432,24 +432,6 @@ impl shader::Pipeline for VideoPipeline {
     }
 }
 
-/// Adjust a texture format's sRGB-ness to match the render target.
-fn adjust_srgb(format: wgpu::TextureFormat, target_is_srgb: bool) -> wgpu::TextureFormat {
-    if target_is_srgb {
-        // Ensure sRGB variant
-        match format {
-            wgpu::TextureFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8UnormSrgb,
-            wgpu::TextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8UnormSrgb,
-            other => other,
-        }
-    } else {
-        // Ensure non-sRGB variant
-        match format {
-            wgpu::TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8Unorm,
-            wgpu::TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8Unorm,
-            other => other,
-        }
-    }
-}
 
 impl VideoPipeline {
     fn get_or_create_texture(
@@ -510,7 +492,7 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -550,7 +532,7 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -588,7 +570,7 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -629,7 +611,7 @@ impl VideoPipeline {
             return;
         }
 
-        let format = adjust_srgb(wgpu::TextureFormat::Bgra8UnormSrgb, self.surface_format.is_srgb());
+        let format = crate::texture_format::adjust_srgb(wgpu::TextureFormat::Bgra8UnormSrgb, self.surface_format.is_srgb());
         let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(
