@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use ashpd::desktop::{
     PersistMode,
-    screencast::{CursorMode, Screencast, SourceType, Stream as ScreencastStream},
+    screencast::{
+        CursorMode, Screencast, SelectSourcesOptions, SourceType, Stream as ScreencastStream,
+    },
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
@@ -19,36 +21,36 @@ pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
     pub frame_sender: mpsc::Sender<Arc<FrameData>>,
     pub gst_converter: Option<gst_pipeline::GstVideoConverter>,
-    pub mainloop: pw::main_loop::MainLoop,
+    pub mainloop: pw::main_loop::MainLoopRc,
     pub selected_backend: GpuBackend,
 }
 
 pub async fn open_portal() -> ashpd::Result<(
     ScreencastStream,
     OwnedFd,
-    ashpd::desktop::Session<'static, Screencast<'static>>,
+    ashpd::desktop::Session<Screencast>,
 )> {
     let proxy = Screencast::new().await?;
-    let session = proxy.create_session().await?;
+    let session = proxy.create_session(Default::default()).await?;
     proxy
         .select_sources(
             &session,
-            CursorMode::Hidden,
-            (SourceType::Monitor | SourceType::Window).into(),
-            false,
-            None,
-            PersistMode::DoNot,
+            SelectSourcesOptions::default()
+                .set_cursor_mode(CursorMode::Hidden)
+                .set_sources(SourceType::Monitor | SourceType::Window)
+                .set_multiple(false)
+                .set_persist_mode(PersistMode::DoNot),
         )
         .await?;
 
-    let response = proxy.start(&session, None).await?.response()?;
+    let response = proxy.start(&session, None, Default::default()).await?.response()?;
     let stream = response
         .streams()
         .first()
         .expect("no stream found / selected")
         .to_owned();
 
-    let fd = proxy.open_pipe_wire_remote(&session).await?;
+    let fd = proxy.open_pipe_wire_remote(&session, Default::default()).await?;
 
     Ok((stream, fd, session))
 }
@@ -59,9 +61,9 @@ pub fn start_streaming(
     frame_sender: mpsc::Sender<Arc<FrameData>>,
     selected_backend: GpuBackend,
 ) -> Result<(), pw::Error> {
-    let mainloop = pw::main_loop::MainLoop::new(None)?;
-    let context = pw::context::Context::new(&mainloop)?;
-    let core = context.connect_fd(fd, None)?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None)?;
+    let context = pw::context::ContextRc::new(&mainloop, None)?;
+    let core = context.connect_fd_rc(fd, None)?;
 
     let data = UserData {
         format: Default::default(),
@@ -71,8 +73,8 @@ pub fn start_streaming(
         selected_backend,
     };
 
-    let stream = pw::stream::Stream::new(
-        &core,
+    let stream = pw::stream::StreamRc::new(
+        core,
         "video-capture",
         properties! {
             *pw::keys::MEDIA_TYPE => "Video",
@@ -128,7 +130,7 @@ pub fn start_streaming(
 }
 
 fn on_param_changed(
-    stream: &pw::stream::StreamRef,
+    stream: &pw::stream::Stream,
     user_data: &mut UserData,
     id: u32,
     param: Option<&spa::pod::Pod>,
@@ -194,7 +196,7 @@ fn on_param_changed(
     }
 }
 
-fn on_process(stream: &pw::stream::StreamRef, user_data: &mut UserData) {
+fn on_process(stream: &pw::stream::Stream, user_data: &mut UserData) {
     let Some(mut buffer) = stream.dequeue_buffer() else {
         warn!("Out of buffers");
         return;

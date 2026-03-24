@@ -29,7 +29,7 @@ tray-icon = "0.19"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = "0.38"
-ashpd = { version = "0.12.2", default-features = true, features = [ "pipewire", "wayland" ] }
+ashpd = { version = "0.13", default-features = true, features = [ "pipewire", "wayland", "screencast" ] }
 drm-fourcc = "2.2"
 gstreamer = "0.23"
 gstreamer-allocators = { version = "0.23", features = ["v1_16"] }
@@ -38,7 +38,7 @@ gstreamer-video = "0.23"
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "235d4ed77d36e9db99ac117ce23fcf5332d90314", features = ["wayland"] }
 nix = { version = "0.29", features = ["fs", "mman", "ioctl"] }
 wgpu-hal = { version = "27", features = ["vulkan"] }
-pipewire = { version = "0.8", features = ["v0_3_77"] }
+pipewire = { version = "0.9", features = ["v0_3_77"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = { git = "https://github.com/jorgeajimenezl/windows-capture.git", rev = "2191b793f74052f6353db901394cc230cb08d6e1" }
