@@ -77,12 +77,9 @@ pub unsafe fn import_dmabuf_texture(
     // Dup the fd so Vulkan can take ownership of the copy without affecting the caller's fd.
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
     let import_fd = nix::unistd::dup(fd).map_err(DmaBufImportError::FdDupFailed)?;
-    
-    let alt_format: Option<wgpu::TextureFormat> = match wgpu_format {
-        wgpu::TextureFormat::Bgra8UnormSrgb => Some(wgpu::TextureFormat::Bgra8Unorm),
-        wgpu::TextureFormat::Rgba8UnormSrgb => Some(wgpu::TextureFormat::Rgba8Unorm),
-        _ => None,
-    };
+
+    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let alt_format = (non_srgb != wgpu_format).then_some(non_srgb);
     let view_formats_arr = alt_format.map(|f| [f]);
     let view_formats_slice: &[wgpu::TextureFormat] =
         view_formats_arr.as_ref().map_or(&[], |a| a.as_slice());

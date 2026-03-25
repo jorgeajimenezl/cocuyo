@@ -95,6 +95,11 @@ pub unsafe fn import_shared_texture(
     };
     // HAL guard dropped — device lock released.
 
+    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let alt_view_arr = (non_srgb != wgpu_format).then_some([non_srgb]);
+    let alt_view_slice: &[wgpu::TextureFormat] =
+        alt_view_arr.as_ref().map_or(&[], |a| a.as_slice());
+
     let wgpu_desc = wgpu::TextureDescriptor {
         label: Some("d3d_shared_imported"),
         size,
@@ -103,7 +108,7 @@ pub unsafe fn import_shared_texture(
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[wgpu::TextureFormat::Bgra8Unorm],
+        view_formats: alt_view_slice,
     };
 
     let wgpu_texture =
