@@ -77,12 +77,7 @@ pub unsafe fn import_dmabuf_texture(
     // Dup the fd so Vulkan can take ownership of the copy without affecting the caller's fd.
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
     let import_fd = nix::unistd::dup(fd).map_err(DmaBufImportError::FdDupFailed)?;
-
-    // Include the non-sRGB equivalent in view_formats so wgpu allows
-    // creating views with different sRGB-ness (needed for color-correct
-    // rendering when the surface format doesn't match the texture format).
-    // Use a stack-allocated Option + array to avoid heap allocation on
-    // the hot per-frame import path.
+    
     let alt_format: Option<wgpu::TextureFormat> = match wgpu_format {
         wgpu::TextureFormat::Bgra8UnormSrgb => Some(wgpu::TextureFormat::Bgra8Unorm),
         wgpu::TextureFormat::Rgba8UnormSrgb => Some(wgpu::TextureFormat::Rgba8Unorm),
