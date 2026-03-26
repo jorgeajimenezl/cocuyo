@@ -314,6 +314,7 @@ pub struct VideoPipeline {
     uniform_buffer: wgpu::Buffer,
     current_bind_group: Option<wgpu::BindGroup>,
     cached_texture: Option<CachedTexture>,
+    surface_format: wgpu::TextureFormat,
 }
 
 #[repr(C)]
@@ -426,9 +427,11 @@ impl shader::Pipeline for VideoPipeline {
             uniform_buffer,
             current_bind_group: None,
             cached_texture: None,
+            surface_format: format,
         }
     }
 }
+
 
 impl VideoPipeline {
     fn get_or_create_texture(
@@ -488,8 +491,12 @@ impl VideoPipeline {
         };
 
         match result {
-            Ok((texture, _wgpu_format)) => {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((texture, wgpu_format)) => {
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(view_format),
+                    ..Default::default()
+                });
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
@@ -524,8 +531,12 @@ impl VideoPipeline {
         let result = unsafe { dx12_import::import_shared_texture(device, handle, width, height) };
 
         match result {
-            Ok((texture, _wgpu_format)) => {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((texture, wgpu_format)) => {
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(view_format),
+                    ..Default::default()
+                });
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
@@ -558,8 +569,12 @@ impl VideoPipeline {
         });
 
         match result {
-            Ok((texture, _wgpu_format)) => {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Ok((texture, wgpu_format)) => {
+                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(view_format),
+                    ..Default::default()
+                });
                 self.update_bind_group(device, queue, &view, width, height, bounds);
             }
             Err(e) => {
@@ -596,7 +611,7 @@ impl VideoPipeline {
             return;
         }
 
-        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let format = crate::texture_format::adjust_srgb(wgpu::TextureFormat::Bgra8UnormSrgb, self.surface_format.is_srgb());
         let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(

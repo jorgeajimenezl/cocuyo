@@ -946,7 +946,7 @@ impl GpuSampler {
         };
 
         if needs_recreate {
-            let non_srgb = non_srgb_equivalent(format);
+            let non_srgb = crate::texture_format::non_srgb_equivalent(format);
             let mut view_formats = vec![];
             if non_srgb != format {
                 view_formats.push(non_srgb);
@@ -980,18 +980,9 @@ fn create_non_srgb_view(
     texture: &wgpu::Texture,
     original_format: wgpu::TextureFormat,
 ) -> wgpu::TextureView {
-    let view_format = non_srgb_equivalent(original_format);
+    let view_format = crate::texture_format::non_srgb_equivalent(original_format);
     texture.create_view(&wgpu::TextureViewDescriptor {
         format: Some(view_format),
         ..Default::default()
     })
-}
-
-/// Map an sRGB format to its non-sRGB equivalent so `textureLoad` returns raw values.
-fn non_srgb_equivalent(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
-    match format {
-        wgpu::TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8Unorm,
-        wgpu::TextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8Unorm,
-        other => other,
-    }
 }

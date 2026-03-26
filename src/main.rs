@@ -14,6 +14,7 @@ mod recording;
 mod region;
 mod sampling;
 mod screen;
+mod texture_format;
 mod theme;
 mod tray;
 mod widget;

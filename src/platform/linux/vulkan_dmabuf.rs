@@ -78,6 +78,12 @@ pub unsafe fn import_dmabuf_texture(
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
     let import_fd = nix::unistd::dup(fd).map_err(DmaBufImportError::FdDupFailed)?;
 
+    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let alt_format = (non_srgb != wgpu_format).then_some(non_srgb);
+    let view_formats_arr = alt_format.map(|f| [f]);
+    let view_formats_slice: &[wgpu::TextureFormat] =
+        view_formats_arr.as_ref().map_or(&[], |a| a.as_slice());
+
     // Access the Vulkan HAL device to perform raw Vulkan operations.
     // We create the hal texture inside this block so we can drop the HAL guard
     // before calling create_texture_from_hal (which also needs the device lock).
@@ -257,7 +263,6 @@ pub unsafe fn import_dmabuf_texture(
             cleanup_device.free_memory(memory, None);
         });
 
-        // Build the HAL texture descriptor
         let hal_desc = wgpu_hal::TextureDescriptor {
             label: Some("dmabuf_imported"),
             size: wgpu::Extent3d {
@@ -271,7 +276,7 @@ pub unsafe fn import_dmabuf_texture(
             format: wgpu_format,
             usage: wgpu::TextureUses::RESOURCE | wgpu::TextureUses::COPY_SRC,
             memory_flags: wgpu_hal::MemoryFlags::empty(),
-            view_formats: vec![],
+            view_formats: view_formats_slice.to_vec(),
         };
 
         // Wrap the VkImage into a wgpu_hal texture
@@ -292,7 +297,7 @@ pub unsafe fn import_dmabuf_texture(
         dimension: wgpu::TextureDimension::D2,
         format: wgpu_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: view_formats_slice,
     };
 
     let wgpu_texture =
