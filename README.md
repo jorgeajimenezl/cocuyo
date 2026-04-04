@@ -1,5 +1,7 @@
 # Cocuyo
 
+[![CI](https://github.com/jorgeajimenezl/cocuyo/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/jorgeajimenezl/cocuyo/actions/workflows/build_and_test.yml)
+
 **Ambient lighting for your screen using WiZ smart bulbs.**
 
 Cocuyo captures your screen in real-time and drives WiZ smart bulbs to match the colors on display — turning your room into an immersive ambient light setup.
