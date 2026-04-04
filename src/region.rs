@@ -124,3 +124,109 @@ pub fn frame_to_widget(
 
     Rectangle::new(iced::Point::new(x, y), iced::Size::new(w, h))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
+        Rectangle::new(iced::Point::new(x, y), iced::Size::new(w, h))
+    }
+
+    fn make_region(x: f32, y: f32, w: f32, h: f32) -> Region {
+        Region {
+            id: 0,
+            x,
+            y,
+            width: w,
+            height: h,
+            bulb_mac: String::new(),
+            sampled_color: None,
+            strategy: BoxedStrategy::default(),
+        }
+    }
+
+    // -- ContainLayout::compute --
+
+    #[test]
+    fn wider_frame_letterboxed() {
+        // 16:9 frame in a square widget → letterboxed (offset_y > 0, offset_x == 0)
+        let layout = ContainLayout::compute(1920, 1080, rect(0.0, 0.0, 800.0, 800.0));
+        assert!(layout.offset_x.abs() < 1e-3, "no horizontal offset for wider frame");
+        assert!(layout.offset_y > 1.0, "should have vertical offset (letterbox)");
+        assert!((layout.rendered_w - 800.0).abs() < 1e-3, "full width used");
+        assert!(layout.rendered_h < 800.0, "height smaller than bounds");
+    }
+
+    #[test]
+    fn taller_frame_pillarboxed() {
+        // 9:16 frame in a square widget → pillarboxed (offset_x > 0, offset_y == 0)
+        let layout = ContainLayout::compute(1080, 1920, rect(0.0, 0.0, 800.0, 800.0));
+        assert!(layout.offset_x > 1.0, "should have horizontal offset (pillarbox)");
+        assert!(layout.offset_y.abs() < 1e-3, "no vertical offset for taller frame");
+        assert!(layout.rendered_w < 800.0, "width smaller than bounds");
+        assert!((layout.rendered_h - 800.0).abs() < 1e-3, "full height used");
+    }
+
+    #[test]
+    fn zero_frame_returns_zero_rendered() {
+        let layout = ContainLayout::compute(0, 1080, rect(0.0, 0.0, 800.0, 600.0));
+        assert_eq!(layout.rendered_w, 0.0);
+        assert_eq!(layout.rendered_h, 0.0);
+    }
+
+    // -- Coordinate transforms --
+
+    #[test]
+    fn widget_to_frame_center() {
+        let bounds = rect(0.0, 0.0, 800.0, 600.0);
+        // 800x600 frame in 800x600 widget → exact fit, no offset
+        let result = widget_to_frame(400.0, 300.0, bounds, 800, 600);
+        let (fx, fy) = result.expect("center should be inside frame");
+        assert!((fx - 400.0).abs() < 1.0);
+        assert!((fy - 300.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn widget_to_frame_in_letterbox_returns_none() {
+        // 16:9 frame in square widget → top/bottom are letterbox
+        let bounds = rect(0.0, 0.0, 800.0, 800.0);
+        let layout = ContainLayout::compute(1920, 1080, bounds);
+        // Click in the top letterbox area (y < offset_y)
+        let result = widget_to_frame(400.0, layout.offset_y - 5.0, bounds, 1920, 1080);
+        assert!(result.is_none(), "point in letterbox should return None");
+    }
+
+    #[test]
+    fn widget_to_frame_unclamped_allows_out_of_bounds() {
+        let bounds = rect(0.0, 0.0, 800.0, 800.0);
+        // Point clearly outside the rendered area
+        let (fx, fy) = widget_to_frame_unclamped(-100.0, -100.0, bounds, 1920, 1080);
+        // Should return values (negative) without returning None
+        assert!(fx < 0.0 || fy < 0.0, "unclamped should allow out-of-bounds coords");
+    }
+
+    #[test]
+    fn frame_to_widget_round_trip() {
+        let bounds = rect(0.0, 0.0, 800.0, 600.0);
+        let fw: u32 = 1920;
+        let fh: u32 = 1080;
+
+        // Region covering center quarter of the frame
+        let region = make_region(480.0, 270.0, 960.0, 540.0);
+        let widget_rect = frame_to_widget(&region, bounds, fw, fh);
+
+        // Convert the top-left corner of the widget rect back to frame space
+        let (fx, fy) = widget_to_frame(
+            widget_rect.x,
+            widget_rect.y,
+            bounds,
+            fw,
+            fh,
+        )
+        .expect("widget rect corner should map back to frame");
+
+        assert!((fx - region.x).abs() < 2.0, "x round-trip: got {fx}, expected {}", region.x);
+        assert!((fy - region.y).abs() < 2.0, "y round-trip: got {fy}, expected {}", region.y);
+    }
+}

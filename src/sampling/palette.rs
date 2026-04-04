@@ -83,3 +83,36 @@ impl SamplingStrategy for Palette {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::gpu::HistogramBin;
+
+    #[test]
+    fn extract_dominant_picks_highest_count() {
+        let mut bins = vec![
+            HistogramBin { r_sum: 0, g_sum: 0, b_sum: 0, count: 0 };
+            NUM_BINS
+        ];
+        // Put 10 red-ish pixels in bin 0
+        bins[0] = HistogramBin { r_sum: 2000, g_sum: 100, b_sum: 50, count: 10 };
+        // Put 3 blue-ish pixels in bin 7
+        bins[7] = HistogramBin { r_sum: 30, g_sum: 60, b_sum: 750, count: 3 };
+
+        let (r, g, b) = extract_dominant_from_histogram(&bins).unwrap();
+        // Should pick bin 0 (count=10): avg = (200, 10, 5)
+        assert_eq!(r, 200);
+        assert_eq!(g, 10);
+        assert_eq!(b, 5);
+    }
+
+    #[test]
+    fn extract_dominant_all_zero_returns_none() {
+        let bins = vec![
+            HistogramBin { r_sum: 0, g_sum: 0, b_sum: 0, count: 0 };
+            NUM_BINS
+        ];
+        assert!(extract_dominant_from_histogram(&bins).is_none());
+    }
+}

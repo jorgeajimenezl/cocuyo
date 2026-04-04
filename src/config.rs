@@ -114,3 +114,61 @@ impl AppConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_deserialize_round_trip() {
+        let original = AppConfig::default();
+        let toml_str = toml::to_string(&original).expect("serialize");
+        let restored: AppConfig = toml::from_str(&toml_str).expect("deserialize");
+
+        assert_eq!(restored.bulb_update_interval_ms, original.bulb_update_interval_ms);
+        assert_eq!(restored.min_brightness_percent, original.min_brightness_percent);
+        assert_eq!(restored.white_color_temp, original.white_color_temp);
+        assert_eq!(restored.minimize_to_tray, original.minimize_to_tray);
+        assert_eq!(restored.capture_fps_limit, original.capture_fps_limit);
+        assert_eq!(restored.capture_resolution_scale, original.capture_resolution_scale);
+        assert_eq!(restored.force_cpu_sampling, original.force_cpu_sampling);
+        assert_eq!(restored.show_perf_overlay, original.show_perf_overlay);
+        assert_eq!(restored.preferred_adapter, original.preferred_adapter);
+        assert_eq!(restored.preferred_backend, original.preferred_backend);
+    }
+
+    #[test]
+    fn partial_toml_uses_defaults() {
+        // Simulates an old config file that only has one field
+        let toml_str = r#"force_cpu_sampling = true"#;
+        let config: AppConfig = toml::from_str(toml_str).expect("partial parse");
+
+        assert!(config.force_cpu_sampling);
+        // All other fields should have their defaults
+        assert_eq!(config.bulb_update_interval_ms, 150);
+        assert_eq!(config.min_brightness_percent, 10);
+        assert_eq!(config.white_color_temp, 6500);
+        assert_eq!(config.capture_resolution_scale, 100);
+        assert!(config.minimize_to_tray);
+    }
+
+    #[test]
+    fn saved_bulbs_round_trip() {
+        let mut config = AppConfig::default();
+        config.saved_bulbs.push(BulbInfo {
+            mac: "AA:BB:CC:DD:EE:FF".to_string(),
+            ip: "192.168.1.42".parse().unwrap(),
+            name: Some("Living Room".to_string()),
+        });
+        config.selected_bulb_macs.push("AA:BB:CC:DD:EE:FF".to_string());
+
+        let toml_str = toml::to_string(&config).expect("serialize");
+        let restored: AppConfig = toml::from_str(&toml_str).expect("deserialize");
+
+        assert_eq!(restored.saved_bulbs.len(), 1);
+        assert_eq!(restored.saved_bulbs[0].mac, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(restored.saved_bulbs[0].ip.to_string(), "192.168.1.42");
+        assert_eq!(restored.saved_bulbs[0].name.as_deref(), Some("Living Room"));
+        assert_eq!(restored.selected_bulb_macs, vec!["AA:BB:CC:DD:EE:FF"]);
+    }
+}
