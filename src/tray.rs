@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "linux"))]
+#[cfg(feature = "tray")]
 mod imp {
     use std::pin::Pin;
     use std::sync::OnceLock;
@@ -175,7 +175,7 @@ mod imp {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(feature = "tray"))]
 mod imp {
     use std::pin::Pin;
 

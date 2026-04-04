@@ -20,7 +20,7 @@ pub enum Message {
     BulbUpdateIntervalChanged(f32),
     MinBrightnessChanged(f32),
     WhiteColorTempChanged(f32),
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
     MinimizeToTrayToggled(bool),
     CaptureFpsLimitChanged(f32),
     CaptureResolutionScaleChanged(f32),
@@ -231,7 +231,7 @@ impl Settings {
         let mut col = iced::widget::Column::new().spacing(10);
         col = col.push(text("General").size(18).color(theme::TEXT));
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(feature = "tray")]
         {
             col = col.push(
                 toggler(self.minimize_to_tray)

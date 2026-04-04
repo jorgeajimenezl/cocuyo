@@ -83,7 +83,7 @@ pub enum Message {
 
     BulbDispatchComplete(f64),
 
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
     TrayEvent(crate::tray::TrayAction),
 
     ExitApp,
@@ -198,7 +198,7 @@ impl Cocuyo {
                     self.flush_config();
                 }
                 if kind == Some(WindowKind::Main) {
-                    #[cfg(not(target_os = "linux"))]
+                    #[cfg(feature = "tray")]
                     if self.config.minimize_to_tray || self.tray_hide_requested {
                         self.tray_hide_requested = false;
                         // Hide to tray — don't stop recording/ambient, don't exit
@@ -622,7 +622,7 @@ impl Cocuyo {
             subs.push(self.build_recording_subscription());
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(feature = "tray")]
         subs.push(
             Subscription::run_with((), crate::tray::tray_subscription).map(Message::TrayEvent),
         );
