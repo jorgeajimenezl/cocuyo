@@ -22,7 +22,7 @@ pub struct SavedBulbState {
 
 /// A color command for a WiZ bulb. WiZ requires at least one RGB channel at 0xFF,
 /// and all-white (255, 255, 255) must be sent as a color temperature instead.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BulbColor {
     /// Saturated RGB with at least one channel at 255, never all three.
     Rgb(u8, u8, u8),
@@ -249,4 +249,100 @@ pub async fn restore_bulb_states(states: Vec<SavedBulbState>) {
         .collect();
     futures::future::join_all(futs).await;
     tracing::info!("Bulb state restoration complete");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::region::Region;
+    use crate::sampling::BoxedStrategy;
+
+    fn make_region(mac: &str, color: Option<(u8, u8, u8)>) -> Region {
+        Region {
+            id: 0,
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+            bulb_mac: mac.to_string(),
+            sampled_color: color,
+            strategy: BoxedStrategy::default(),
+        }
+    }
+
+    fn make_bulb(mac: &str) -> BulbInfo {
+        BulbInfo {
+            mac: mac.to_string(),
+            ip: "192.168.1.100".parse().unwrap(),
+            name: None,
+        }
+    }
+
+    // -- map_to_bulb_color --
+
+    #[test]
+    fn black_pixel_returns_white_min_brightness() {
+        let (color, brightness) = map_to_bulb_color(0, 0, 0, 10, 6500);
+        assert_eq!(color, BulbColor::White(6500));
+        assert_eq!(brightness, 10);
+    }
+
+    #[test]
+    fn pure_red_normalizes_to_255() {
+        let (color, _brightness) = map_to_bulb_color(128, 0, 0, 10, 6500);
+        assert_eq!(color, BulbColor::Rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn white_pixel_returns_white_temp() {
+        let (color, brightness) = map_to_bulb_color(255, 255, 255, 10, 6500);
+        assert_eq!(color, BulbColor::White(6500));
+        assert_eq!(brightness, 100);
+    }
+
+    #[test]
+    fn near_white_returns_white() {
+        // All channels equal → normalizes to (255, 255, 255) → White
+        let (color, _) = map_to_bulb_color(200, 200, 200, 10, 4200);
+        assert_eq!(color, BulbColor::White(4200));
+    }
+
+    #[test]
+    fn mixed_color_preserves_ratios() {
+        // (100, 50, 25) → max=100, scale=2.55 → (255, 128, 64) approximately
+        let (color, _) = map_to_bulb_color(100, 50, 25, 10, 6500);
+        match color {
+            BulbColor::Rgb(r, g, b) => {
+                assert_eq!(r, 255);
+                // Check ratios are approximately maintained (50/100 ≈ g/255)
+                assert!((g as f32 / 255.0 - 0.5).abs() < 0.02, "g ratio: {g}");
+                assert!((b as f32 / 255.0 - 0.25).abs() < 0.02, "b ratio: {b}");
+            }
+            other => panic!("expected Rgb, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn brightness_clamps_to_min() {
+        // Very dim pixel: max channel = 5 → brightness = 5*100/255 ≈ 1 → clamped to min (20)
+        let (_, brightness) = map_to_bulb_color(5, 2, 1, 20, 6500);
+        assert_eq!(brightness, 20);
+    }
+
+    // -- build_bulb_targets --
+
+    #[test]
+    fn empty_regions_returns_none() {
+        let result = build_bulb_targets(&[], &[make_bulb("AA:BB")], 10, 6500);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn matching_region_produces_target() {
+        let regions = [make_region("AA:BB", Some((255, 0, 0)))];
+        let bulbs = [make_bulb("AA:BB")];
+        let targets = build_bulb_targets(&regions, &bulbs, 10, 6500).expect("should have targets");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].0, "192.168.1.100".parse::<IpAddr>().unwrap());
+    }
 }

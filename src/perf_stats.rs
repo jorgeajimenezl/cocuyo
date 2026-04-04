@@ -140,3 +140,56 @@ impl PerfStats {
         h.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ema_first_sample_sets_value() {
+        let mut ema = Ema::new(0.05);
+        ema.update(42.0);
+        assert_eq!(ema.get(), 42.0);
+        assert!(ema.initialized);
+    }
+
+    #[test]
+    fn ema_subsequent_samples_smooth() {
+        let mut ema = Ema::new(0.05);
+        ema.update(100.0); // first: sets directly
+        ema.update(200.0); // second: 0.05 * 200 + 0.95 * 100 = 105
+        let expected = 0.05 * 200.0 + 0.95 * 100.0;
+        assert!((ema.get() - expected).abs() < 1e-10, "got {}, expected {expected}", ema.get());
+    }
+
+    #[test]
+    fn reset_clears_all() {
+        let mut stats = PerfStats::new();
+        stats.record_sampling_time(16.0);
+        stats.record_bulb_dispatch(5.0);
+        assert!(stats.has_sampling_data());
+        assert!(stats.has_bulb_data());
+
+        stats.reset();
+        assert!(!stats.has_sampling_data());
+        assert!(!stats.has_bulb_data());
+        assert!(!stats.has_frame_data());
+        assert_eq!(stats.sampling_time_ms(), 0.0);
+        assert_eq!(stats.bulb_dispatch_ms(), 0.0);
+    }
+
+    #[test]
+    fn fingerprint_changes_with_metrics() {
+        let mut stats = PerfStats::new();
+        let fp1 = stats.fingerprint();
+
+        stats.record_sampling_time(50.0);
+        let fp2 = stats.fingerprint();
+
+        stats.record_bulb_dispatch(100.0);
+        let fp3 = stats.fingerprint();
+
+        // At least one change should produce a different fingerprint
+        assert!(fp1 != fp2 || fp2 != fp3, "fingerprint should change when metrics change");
+    }
+}
