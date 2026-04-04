@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -64,6 +66,18 @@ jobs:
           mkdir -p staging
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} staging/
           cd staging && tar czf ../${{ matrix.artifact }}.tar.gz *
+
+      - name: Attest build provenance (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ matrix.artifact }}.tar.gz
+
+      - name: Attest build provenance (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ matrix.artifact }}.zip
 
       - name: Upload release asset (Linux)
         if: runner.os == 'Linux'
