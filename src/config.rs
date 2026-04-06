@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub show_perf_overlay: bool,
     #[serde(default = "default_capture_resolution_scale")]
     pub capture_resolution_scale: u32,
+    #[serde(default = "default_smooth_transitions")]
+    pub smooth_transitions: bool,
 }
 
 fn default_minimize_to_tray() -> bool {
@@ -54,6 +56,10 @@ fn default_capture_resolution_scale() -> u32 {
     100
 }
 
+fn default_smooth_transitions() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -69,6 +75,7 @@ impl Default for AppConfig {
             capture_fps_limit: default_capture_fps_limit(),
             show_perf_overlay: false,
             capture_resolution_scale: default_capture_resolution_scale(),
+            smooth_transitions: default_smooth_transitions(),
         }
     }
 }
@@ -135,6 +142,7 @@ mod tests {
         assert_eq!(restored.show_perf_overlay, original.show_perf_overlay);
         assert_eq!(restored.preferred_adapter, original.preferred_adapter);
         assert_eq!(restored.preferred_backend, original.preferred_backend);
+        assert_eq!(restored.smooth_transitions, original.smooth_transitions);
     }
 
     #[test]
