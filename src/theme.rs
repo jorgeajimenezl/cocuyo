@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use iced::widget::{button, container, pick_list, rule, theme};
+use iced::widget::{button, container, pick_list, rule, text_input, theme};
 use iced::{Background, Border, Color, Shadow, Theme, border::Radius, color};
 
 use crate::app::Cocuyo;
@@ -218,6 +218,25 @@ pub fn styled_pick_list(_theme: &Theme, status: pick_list::Status) -> pick_list:
         handle_color: TEXT,
         background: Background::Color(BG_SECONDARY),
         border: rounded_border(border_color, 6.0),
+    }
+}
+
+// ── TextInput ───────────────────────────────────────────────
+
+pub fn styled_text_input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let border_color = match status {
+        text_input::Status::Active => BORDER,
+        text_input::Status::Hovered | text_input::Status::Focused { .. } => ACCENT,
+        text_input::Status::Disabled => BORDER,
+    };
+
+    text_input::Style {
+        background: Background::Color(BG_SECONDARY),
+        border: rounded_border(border_color, 6.0),
+        icon: TEXT_DIM,
+        placeholder: TEXT_DIM,
+        value: TEXT,
+        selection: ACCENT_DIM,
     }
 }
 

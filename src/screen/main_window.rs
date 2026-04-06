@@ -5,6 +5,7 @@ use iced::window;
 use iced::{Center, Color, Fill, Length};
 
 use crate::app::{Message, RecordingState};
+use crate::config::Profile;
 use crate::frame::FrameData;
 use crate::perf_stats::PerfStats;
 use crate::region::Region;
@@ -27,7 +28,24 @@ pub fn view<'a>(
     selected_region: Option<usize>,
     perf_stats: &'a PerfStats,
     show_perf_overlay: bool,
+    profiles: &[Profile],
+    active_profile_name: Option<&str>,
 ) -> Element<'a, Message> {
+    // Profile dropdown for the menu bar
+    let profile_names: Vec<String> = profiles.iter().map(|p| p.name.clone()).collect();
+    let profile_picker: Element<'_, Message> = if profile_names.is_empty() {
+        text("No profiles").size(12).color(theme::TEXT_DIM).into()
+    } else {
+        pick_list(
+            profile_names,
+            active_profile_name.map(String::from),
+            Message::LoadProfile,
+        )
+        .text_size(12)
+        .style(theme::styled_pick_list)
+        .into()
+    };
+
     let menu_bar = container(
         row![
             button("Bulbs")
@@ -36,9 +54,15 @@ pub fn view<'a>(
             button("Settings")
                 .on_press(Message::OpenSettings(window_id))
                 .style(theme::styled_button),
+            button("Profiles")
+                .on_press(Message::OpenProfileDialog(window_id))
+                .style(theme::styled_button),
+            iced::widget::space().width(Fill),
+            profile_picker,
         ]
         .spacing(5)
-        .padding(5),
+        .padding(5)
+        .align_y(Center),
     )
     .width(Fill)
     .style(theme::menu_bar_container);

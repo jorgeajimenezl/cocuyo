@@ -154,6 +154,10 @@ impl BoxedStrategy {
     pub fn id(&self) -> &'static str {
         self.0.id()
     }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        all_strategies().iter().find(|s| s.id() == id).cloned()
+    }
 }
 
 impl fmt::Debug for BoxedStrategy {

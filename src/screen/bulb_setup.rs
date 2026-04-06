@@ -185,6 +185,13 @@ impl BulbSetupState {
         !self.selected_bulbs.is_empty()
     }
 
+    pub fn set_selected_bulbs(&mut self, macs: impl IntoIterator<Item = String>) {
+        self.selected_bulbs = macs
+            .into_iter()
+            .filter(|m| self.discovered_bulbs.iter().any(|b| b.mac == *m))
+            .collect();
+    }
+
     pub fn selected_bulb_infos(&self) -> Vec<BulbInfo> {
         self.discovered_bulbs
             .iter()
