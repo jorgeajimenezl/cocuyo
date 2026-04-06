@@ -219,21 +219,23 @@ impl ColorSmoother {
             1.0 // first frame: snap
         };
 
-        let smoothed = if let Some(cur) = self.state.get(mac) {
-            (
+        let smoothed = if let Some(cur) = self.state.get_mut(mac) {
+            let next = (
                 cur.0 + (tf.0 - cur.0) * alpha,
                 cur.1 + (tf.1 - cur.1) * alpha,
                 cur.2 + (tf.2 - cur.2) * alpha,
-            )
+            );
+            *cur = next;
+            next
         } else {
+            self.state.insert(mac.to_owned(), tf);
             tf // first sample for this bulb: snap
         };
 
-        self.state.insert(mac.to_string(), smoothed);
         (
-            smoothed.0.round() as u8,
-            smoothed.1.round() as u8,
-            smoothed.2.round() as u8,
+            smoothed.0.round().clamp(0.0, 255.0) as u8,
+            smoothed.1.round().clamp(0.0, 255.0) as u8,
+            smoothed.2.round().clamp(0.0, 255.0) as u8,
         )
     }
 
@@ -537,9 +539,8 @@ mod tests {
     fn smoother_interpolates_toward_target() {
         let mut s = ColorSmoother::new();
         s.smooth("AA:BB", (0, 0, 0));
-        s.mark_updated();
-        // Sleep briefly so elapsed time produces a non-zero alpha
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Simulate 10ms elapsed by setting last_update in the past
+        s.last_update = Some(Instant::now() - Duration::from_millis(10));
         let result = s.smooth("AA:BB", (255, 255, 255));
         // Should move toward white but not reach it
         assert!(result.0 > 0 && result.0 < 255, "r={}", result.0);
@@ -551,18 +552,17 @@ mod tests {
     fn smoother_converges_over_many_steps() {
         let mut s = ColorSmoother::new();
         s.smooth("AA:BB", (0, 0, 0));
-        s.mark_updated();
-        // Simulate many updates toward white
+        // Simulate 50 updates at 150ms intervals (deterministic, no sleeping)
         for _ in 0..50 {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            s.last_update = Some(Instant::now() - Duration::from_millis(150));
             s.smooth("AA:BB", (255, 255, 255));
-            s.mark_updated();
         }
+        s.last_update = Some(Instant::now() - Duration::from_millis(150));
         let result = s.smooth("AA:BB", (255, 255, 255));
-        // After 50 steps at 20ms each (~1s total) should be close to target
-        assert!(result.0 >= 230, "r={}", result.0);
-        assert!(result.1 >= 230, "g={}", result.1);
-        assert!(result.2 >= 230, "b={}", result.2);
+        // After 50 steps at reference interval should be very close to target
+        assert!(result.0 >= 250, "r={}", result.0);
+        assert!(result.1 >= 250, "g={}", result.1);
+        assert!(result.2 >= 250, "b={}", result.2);
     }
 
     #[test]
