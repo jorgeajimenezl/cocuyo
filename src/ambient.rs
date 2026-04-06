@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -61,6 +62,26 @@ pub fn map_to_bulb_color(
     }
 }
 
+/// Per-channel threshold below which a color change is considered noise.
+const COLOR_CHANGE_THRESHOLD: u8 = 4;
+
+/// Returns `true` if the new bulb command differs meaningfully from the old one.
+fn color_changed(old: &(BulbColor, u8), new: &(BulbColor, u8)) -> bool {
+    let threshold = COLOR_CHANGE_THRESHOLD;
+    if old.1.abs_diff(new.1) > threshold {
+        return true;
+    }
+    match (&old.0, &new.0) {
+        (BulbColor::Rgb(r1, g1, b1), BulbColor::Rgb(r2, g2, b2)) => {
+            r1.abs_diff(*r2) > threshold
+                || g1.abs_diff(*g2) > threshold
+                || b1.abs_diff(*b2) > threshold
+        }
+        (BulbColor::White(t1), BulbColor::White(t2)) => t1 != t2,
+        _ => true, // variant changed (e.g. Rgb ↔ White)
+    }
+}
+
 /// Send mapped colors to WiZ bulbs concurrently.
 async fn send_colors_to_bulbs(targets: Vec<(IpAddr, BulbColor, u8)>) {
     let futs: Vec<_> = targets
@@ -115,15 +136,20 @@ pub async fn discover_bulbs() -> Vec<BulbInfo> {
 }
 
 /// Build bulb color targets from pre-computed `sampled_color` on each region.
-/// This avoids re-sampling the frame when colors have already been computed
-/// (e.g. via GPU sampling).
+/// Filters out bulbs whose color hasn't meaningfully changed since the last dispatch.
+///
+/// Returns `None` if no bulbs need updating. On `Some`, returns the dispatch targets
+/// and a list of `(mac, color, brightness)` entries the caller should insert into
+/// `last_sent` after a successful dispatch.
 pub fn build_bulb_targets(
     regions: &[crate::region::Region],
     bulbs: &[BulbInfo],
     min_brightness: u8,
     white_temp: u16,
-) -> Option<Vec<(IpAddr, BulbColor, u8)>> {
+    last_sent: &HashMap<String, (BulbColor, u8)>,
+) -> Option<(Vec<(IpAddr, BulbColor, u8)>, Vec<(String, BulbColor, u8)>)> {
     let mut targets = Vec::new();
+    let mut new_entries = Vec::new();
 
     for region in regions {
         let mac = &region.bulb_mac;
@@ -134,13 +160,21 @@ pub fn build_bulb_targets(
             continue;
         };
         let (color, brightness) = map_to_bulb_color(r, g, b, min_brightness, white_temp);
+
+        if let Some(prev) = last_sent.get(mac) {
+            if !color_changed(prev, &(color.clone(), brightness)) {
+                continue;
+            }
+        }
+
+        new_entries.push((mac.clone(), color.clone(), brightness));
         targets.push((bulb.ip, color, brightness));
     }
 
     if targets.is_empty() {
         None
     } else {
-        Some(targets)
+        Some((targets, new_entries))
     }
 }
 
@@ -329,11 +363,60 @@ mod tests {
         assert_eq!(brightness, 20);
     }
 
+    // -- color_changed --
+
+    #[test]
+    fn identical_rgb_is_not_changed() {
+        let a = (BulbColor::Rgb(255, 100, 50), 80u8);
+        assert!(!color_changed(&a, &a));
+    }
+
+    #[test]
+    fn small_rgb_delta_is_not_changed() {
+        let a = (BulbColor::Rgb(255, 100, 50), 80u8);
+        let b = (BulbColor::Rgb(255, 103, 47), 82u8);
+        assert!(!color_changed(&a, &b));
+    }
+
+    #[test]
+    fn large_rgb_delta_is_changed() {
+        let a = (BulbColor::Rgb(255, 100, 50), 80u8);
+        let b = (BulbColor::Rgb(255, 100, 60), 80u8);
+        assert!(color_changed(&a, &b));
+    }
+
+    #[test]
+    fn brightness_delta_triggers_change() {
+        let a = (BulbColor::Rgb(255, 100, 50), 80u8);
+        let b = (BulbColor::Rgb(255, 100, 50), 90u8);
+        assert!(color_changed(&a, &b));
+    }
+
+    #[test]
+    fn variant_switch_is_changed() {
+        let a = (BulbColor::Rgb(255, 255, 200), 80u8);
+        let b = (BulbColor::White(6500), 80u8);
+        assert!(color_changed(&a, &b));
+    }
+
+    #[test]
+    fn identical_white_is_not_changed() {
+        let a = (BulbColor::White(6500), 50u8);
+        assert!(!color_changed(&a, &a));
+    }
+
+    #[test]
+    fn white_temp_change_is_changed() {
+        let a = (BulbColor::White(6500), 50u8);
+        let b = (BulbColor::White(4200), 50u8);
+        assert!(color_changed(&a, &b));
+    }
+
     // -- build_bulb_targets --
 
     #[test]
     fn empty_regions_returns_none() {
-        let result = build_bulb_targets(&[], &[make_bulb("AA:BB")], 10, 6500);
+        let result = build_bulb_targets(&[], &[make_bulb("AA:BB")], 10, 6500, &HashMap::new());
         assert!(result.is_none());
     }
 
@@ -341,8 +424,37 @@ mod tests {
     fn matching_region_produces_target() {
         let regions = [make_region("AA:BB", Some((255, 0, 0)))];
         let bulbs = [make_bulb("AA:BB")];
-        let targets = build_bulb_targets(&regions, &bulbs, 10, 6500).expect("should have targets");
+        let (targets, _) =
+            build_bulb_targets(&regions, &bulbs, 10, 6500, &HashMap::new()).expect("should have targets");
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0, "192.168.1.100".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn unchanged_color_is_filtered_out() {
+        let regions = [make_region("AA:BB", Some((255, 0, 0)))];
+        let bulbs = [make_bulb("AA:BB")];
+        // First call to populate cache entries
+        let (_, new_entries) =
+            build_bulb_targets(&regions, &bulbs, 10, 6500, &HashMap::new()).unwrap();
+        let mut cache: HashMap<String, (BulbColor, u8)> = HashMap::new();
+        for (mac, color, brightness) in new_entries {
+            cache.insert(mac, (color, brightness));
+        }
+        // Second call with same colors should return None (all filtered)
+        let result = build_bulb_targets(&regions, &bulbs, 10, 6500, &cache);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn changed_color_passes_through() {
+        let bulbs = [make_bulb("AA:BB")];
+        // Populate cache with red
+        let mut cache: HashMap<String, (BulbColor, u8)> = HashMap::new();
+        cache.insert("AA:BB".to_string(), (BulbColor::Rgb(255, 0, 0), 100));
+        // Now region has green
+        let regions = [make_region("AA:BB", Some((0, 255, 0)))];
+        let result = build_bulb_targets(&regions, &bulbs, 10, 6500, &cache);
+        assert!(result.is_some());
     }
 }

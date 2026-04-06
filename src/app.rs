@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -105,6 +105,7 @@ pub struct Cocuyo {
     bulb_setup: bulb_setup::BulbSetupState,
     is_ambient_active: bool,
     last_bulb_update: Option<Instant>,
+    last_sent_colors: HashMap<String, (crate::ambient::BulbColor, u8)>,
     saved_bulb_states: Option<Vec<SavedBulbState>>,
     regions: Vec<Region>,
     next_region_id: usize,
@@ -143,6 +144,7 @@ impl Cocuyo {
             bulb_setup: bulb_setup::BulbSetupState::new(&config),
             is_ambient_active: false,
             last_bulb_update: None,
+            last_sent_colors: HashMap::new(),
             saved_bulb_states: None,
             regions: Vec::new(),
             next_region_id: 1,
@@ -368,6 +370,7 @@ impl Cocuyo {
                 };
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
+                self.last_sent_colors.clear();
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
@@ -393,6 +396,7 @@ impl Cocuyo {
                 self.perf_stats.reset();
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
+                self.last_sent_colors.clear();
                 self.sampling_worker = None;
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), false);
@@ -418,6 +422,7 @@ impl Cocuyo {
                             self.perf_stats.reset();
                             self.is_recording = false;
                             self.is_ambient_active = false;
+                            self.last_sent_colors.clear();
                             self.recording_cmd_tx = None;
                             self.current_frame = None;
                             self.tray.update_menu_text(
@@ -846,13 +851,17 @@ impl Cocuyo {
         }
     }
 
-    fn dispatch_to_bulbs(&self) -> Task<Message> {
-        if let Some(targets) = crate::ambient::build_bulb_targets(
+    fn dispatch_to_bulbs(&mut self) -> Task<Message> {
+        if let Some((targets, new_entries)) = crate::ambient::build_bulb_targets(
             &self.regions,
             self.bulb_setup.discovered_bulbs(),
             self.config.min_brightness_percent,
             self.config.white_color_temp,
+            &self.last_sent_colors,
         ) {
+            for (mac, color, brightness) in new_entries {
+                self.last_sent_colors.insert(mac, (color, brightness));
+            }
             let dispatch_start = Instant::now();
             Task::perform(
                 crate::ambient::dispatch_bulb_colors(targets),
