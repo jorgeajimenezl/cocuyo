@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::IsTerminal;
+
 use tracing::info;
 
 mod adapters;
@@ -30,14 +32,16 @@ fn main() -> iced::Result {
         .ok();
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into())
-                .add_directive("wgpu_hal=warn".parse().unwrap())
-                .add_directive("iced_winit=warn".parse().unwrap()),
-        )
-        .init();
+    if std::io::stderr().is_terminal() {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::INFO.into())
+                    .add_directive("wgpu_hal=warn".parse().unwrap())
+                    .add_directive("iced_winit=warn".parse().unwrap()),
+            )
+            .init();
+    }
 
     let app_config = config::AppConfig::load();
     if let Some(ref adapter) = app_config.preferred_adapter {
