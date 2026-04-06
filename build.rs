@@ -45,11 +45,11 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let out = Path::new(&out_dir);
 
-    let square_svg = Path::new("assets/icon-square.svg");
-    let tray_svg = Path::new("assets/icon.svg");
+    let square_svg = Path::new("assets/icons/icon-square.svg");
+    let tray_svg = Path::new("assets/icons/icon.svg");
 
-    println!("cargo:rerun-if-changed=assets/icon-square.svg");
-    println!("cargo:rerun-if-changed=assets/icon.svg");
+    println!("cargo:rerun-if-changed=assets/icons/icon-square.svg");
+    println!("cargo:rerun-if-changed=assets/icons/icon.svg");
 
     // Window icon (256x256 raw RGBA for iced window::icon::from_rgba)
     let pixmap = render_svg(tray_svg, 256);
