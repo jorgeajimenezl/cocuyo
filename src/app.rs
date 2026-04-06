@@ -117,6 +117,7 @@ pub struct Cocuyo {
     perf_stats: crate::perf_stats::PerfStats,
     config_dirty: bool,
 
+    window_icon: Option<window::Icon>,
     tray: &'static crate::tray::TrayState,
     tray_hide_requested: bool,
 
@@ -149,6 +150,12 @@ impl Cocuyo {
             sampling_worker: None,
             perf_stats: crate::perf_stats::PerfStats::new(),
             config_dirty: false,
+            window_icon: window::icon::from_rgba(
+                include_bytes!(concat!(env!("OUT_DIR"), "/icon-window-256.rgba")).to_vec(),
+                256,
+                256,
+            )
+            .ok(),
             tray,
             tray_hide_requested: false,
             settings: settings::Settings::new(&config),
@@ -918,6 +925,7 @@ impl Cocuyo {
             decorations: false,
             transparent: true,
             parent,
+            icon: self.window_icon.clone(),
             #[cfg(target_os = "windows")]
             platform_specific: PlatformSpecific {
                 corner_preference: CornerPreference::Round,

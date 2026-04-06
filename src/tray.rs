@@ -33,29 +33,8 @@ mod imp {
     }
 
     fn generate_icon() -> Icon {
-        let size: u32 = 32;
-        let mut rgba = vec![0u8; (size * size * 4) as usize];
-        let center = size as f32 / 2.0;
-        let radius = center - 1.0;
-
-        for y in 0..size {
-            for x in 0..size {
-                let dx = x as f32 - center;
-                let dy = y as f32 - center;
-                let dist = (dx * dx + dy * dy).sqrt();
-                let idx = ((y * size + x) * 4) as usize;
-
-                if dist <= radius {
-                    // Amber/yellow color for firefly theme
-                    rgba[idx] = 255; // R
-                    rgba[idx + 1] = 191; // G
-                    rgba[idx + 2] = 0; // B
-                    rgba[idx + 3] = 255; // A
-                }
-            }
-        }
-
-        Icon::from_rgba(rgba, size, size).expect("Failed to create tray icon")
+        let rgba = include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-32.rgba"));
+        Icon::from_rgba(rgba.to_vec(), 32, 32).expect("Failed to create tray icon")
     }
 
     /// Creates the tray icon on the main thread and leaks it as `&'static`.

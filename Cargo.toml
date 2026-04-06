@@ -52,6 +52,9 @@ windows = { version = "0.58", features = [
 ] }
 wgpu-hal = { version = "27", features = ["dx12"] }
 
+[build-dependencies]
+resvg = "0.45"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "1.5.3", features = ["async", "macos_14_0"] }
 wgpu-hal = { version = "27", features = ["metal"] }
