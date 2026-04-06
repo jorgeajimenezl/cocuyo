@@ -91,11 +91,28 @@ jobs:
           cp cocuyo.icns "$APP/Resources/"
           cd staging && tar czf ../${{ matrix.artifact }}.tar.gz Cocuyo.app
 
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "Cocuyo" \
+            --window-size 600 400 \
+            --icon "Cocuyo.app" 150 200 \
+            --app-drop-link 450 200 \
+            "${{ matrix.artifact }}.dmg" staging/Cocuyo.app
+
       - name: Attest build provenance (Linux/macOS)
         if: runner.os != 'Windows'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ matrix.artifact }}.tar.gz
+
+      - name: Attest build provenance (macOS DMG)
+        if: runner.os == 'macOS'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ matrix.artifact }}.dmg
 
       - name: Attest build provenance (Windows)
         if: runner.os == 'Windows'
@@ -120,4 +137,6 @@ jobs:
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}.tar.gz" --clobber
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}.tar.gz" --clobber
+          gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}.dmg" --clobber
