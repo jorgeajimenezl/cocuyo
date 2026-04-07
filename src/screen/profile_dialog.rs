@@ -47,6 +47,7 @@ impl ProfileDialog {
                 if name.is_empty() {
                     return (Task::none(), None);
                 }
+                self.name_input = name.clone();
                 if !self.profiles.contains(&name) {
                     self.profiles.push(name.clone());
                 }

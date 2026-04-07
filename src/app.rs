@@ -103,6 +103,7 @@ pub struct Cocuyo {
 
     // Recording state
     current_frame: Option<Arc<FrameData>>,
+    last_frame_size: Option<(u32, u32)>,
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
@@ -149,6 +150,7 @@ impl Cocuyo {
         let mut app = Self {
             windows: BTreeMap::new(),
             current_frame: None,
+            last_frame_size: None,
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
@@ -495,6 +497,7 @@ impl Cocuyo {
                         }
 
                         self.perf_stats.record_frame_arrival();
+                        self.last_frame_size = Some((frame.width(), frame.height()));
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
@@ -778,16 +781,19 @@ impl Cocuyo {
             }
             settings::Event::BulbUpdateIntervalChanged(ms) => {
                 self.config.bulb_update_interval_ms = ms;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::MinBrightnessChanged(pct) => {
                 self.config.min_brightness_percent = pct;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::WhiteColorTempChanged(temp) => {
                 self.config.white_color_temp = temp;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
@@ -846,6 +852,7 @@ impl Cocuyo {
             }
             bulb_setup::BulbSetupEvent::SelectionChanged => {
                 self.sync_regions_to_bulbs();
+                self.active_profile_name = None;
                 Task::none()
             }
             bulb_setup::BulbSetupEvent::BulbsDiscovered => {
@@ -910,12 +917,17 @@ impl Cocuyo {
         }
     }
 
-    fn save_profile(&mut self, name: &str) {
-        let (frame_w, frame_h) = self
-            .current_frame
+    fn current_or_last_frame_size(&self) -> (f32, f32) {
+        self.current_frame
             .as_ref()
-            .map(|f| (f.width() as f32, f.height() as f32))
-            .unwrap_or(DEFAULT_FRAME_SIZE);
+            .map(|f| (f.width(), f.height()))
+            .or(self.last_frame_size)
+            .map(|(w, h)| (w as f32, h as f32))
+            .unwrap_or(DEFAULT_FRAME_SIZE)
+    }
+
+    fn save_profile(&mut self, name: &str) {
+        let (frame_w, frame_h) = self.current_or_last_frame_size();
 
         let profile = crate::config::Profile {
             name: name.to_string(),
@@ -966,11 +978,7 @@ impl Cocuyo {
         // filtered out above so we don't end up with orphan regions targeting
         // bulbs that aren't selected/known.
         let active_macs = self.bulb_setup.selected_bulbs().clone();
-        let (frame_w, frame_h) = self
-            .current_frame
-            .as_ref()
-            .map(|f| (f.width() as f32, f.height() as f32))
-            .unwrap_or(DEFAULT_FRAME_SIZE);
+        let (frame_w, frame_h) = self.current_or_last_frame_size();
 
         self.regions.clear();
         for pr in profile.regions.iter().filter(|r| active_macs.contains(&r.bulb_mac)) {
