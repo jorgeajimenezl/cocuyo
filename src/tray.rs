@@ -33,7 +33,14 @@ mod imp {
     }
 
     fn generate_icon() -> Icon {
-        let rgba = include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-32.rgba"));
+        // On macOS we prefer a symbolic (monochrome) icon so the
+        // OS can tint it to match the active light/dark theme. On other
+        // platforms we keep the colorful icon.
+        #[cfg(target_os = "macos")]
+        let rgba: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-symbolic-32.rgba"));
+        #[cfg(not(target_os = "macos"))]
+        let rgba: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-32.rgba"));
         Icon::from_rgba(rgba.to_vec(), 32, 32).expect("Failed to create tray icon")
     }
 
@@ -68,13 +75,18 @@ mod imp {
 
         let icon = generate_icon();
 
-        let tray_icon = TrayIconBuilder::new()
+        let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("Cocuyo")
             .with_icon(icon)
-            .with_menu_on_left_click(false)
-            .build()
-            .expect("Failed to create tray icon");
+            .with_menu_on_left_click(false);
+
+        // Mark the icon as a template image on macOS so the system tints it
+        // automatically for the menu bar (light/dark mode).
+        #[cfg(target_os = "macos")]
+        let builder = builder.with_icon_as_template(true);
+
+        let tray_icon = builder.build().expect("Failed to create tray icon");
 
         let state = TrayState {
             _tray_icon: tray_icon,

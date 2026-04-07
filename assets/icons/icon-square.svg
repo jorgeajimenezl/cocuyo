@@ -18,13 +18,13 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="0.5698242"
-     inkscape:cx="-63.17738"
-     inkscape:cy="427.32478"
-     inkscape:window-width="3440"
-     inkscape:window-height="1369"
-     inkscape:window-x="-8"
-     inkscape:window-y="-8"
+     inkscape:zoom="0.2849121"
+     inkscape:cx="-191.28707"
+     inkscape:cy="342.21081"
+     inkscape:window-width="1920"
+     inkscape:window-height="991"
+     inkscape:window-x="-9"
+     inkscape:window-y="-9"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg18" />
   <defs
@@ -89,7 +89,8 @@
       <stop
          offset="0"
          stop-color="#EAF2FF"
-         id="stop1-9" />
+         id="stop1-9"
+         style="stop-color:#5a4b81;stop-opacity:1;" />
       <stop
          offset="1"
          stop-color="#D8E2F5"

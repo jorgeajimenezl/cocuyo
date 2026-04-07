@@ -47,9 +47,11 @@ fn main() {
 
     let square_svg = Path::new("assets/icons/icon-square.svg");
     let tray_svg = Path::new("assets/icons/icon.svg");
+    let symbolic_svg = Path::new("assets/icons/icon-symbolic.svg");
 
     println!("cargo:rerun-if-changed=assets/icons/icon-square.svg");
     println!("cargo:rerun-if-changed=assets/icons/icon.svg");
+    println!("cargo:rerun-if-changed=assets/icons/icon-symbolic.svg");
 
     // Window icon (256x256 raw RGBA for iced window::icon::from_rgba)
     let pixmap = render_svg(tray_svg, 256);
@@ -61,9 +63,14 @@ fn main() {
         save_png(&pixmap, &out.join(format!("icon-square-{size}.png")));
     }
 
-    // Tray icon (32x32 raw RGBA)
+    // Tray icon (32x32 raw RGBA) — colorful, used on Linux
     let pixmap = render_svg(tray_svg, 32);
     save_raw_rgba(&pixmap, &out.join("icon-tray-32.rgba"));
+
+    // Symbolic tray icon (32x32 raw RGBA) — monochrome, used on macOS (template)
+    // where it adapts to the system theme.
+    let pixmap = render_svg(symbolic_svg, 32);
+    save_raw_rgba(&pixmap, &out.join("icon-tray-symbolic-32.rgba"));
 
     // Windows executable icon (.ico embedded via resource file)
     #[cfg(target_os = "windows")]
