@@ -25,6 +25,7 @@ pub enum Message {
     CaptureFpsLimitChanged(f32),
     CaptureResolutionScaleChanged(f32),
     ShowPerfOverlayToggled(bool),
+    SmoothTransitionsToggled(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ pub enum Event {
     CaptureFpsLimitChanged(u32),
     CaptureResolutionScaleChanged(u32),
     ShowPerfOverlayChanged(bool),
+    SmoothTransitionsChanged(bool),
 }
 
 pub struct Settings {
@@ -59,6 +61,7 @@ pub struct Settings {
     capture_fps_limit: u32,
     capture_resolution_scale: u32,
     show_perf_overlay: bool,
+    smooth_transitions: bool,
 }
 
 impl Settings {
@@ -109,6 +112,7 @@ impl Settings {
             capture_fps_limit: config.capture_fps_limit,
             capture_resolution_scale: config.capture_resolution_scale,
             show_perf_overlay: config.show_perf_overlay,
+            smooth_transitions: config.smooth_transitions,
         }
     }
 
@@ -169,6 +173,10 @@ impl Settings {
             Message::ShowPerfOverlayToggled(val) => {
                 self.show_perf_overlay = val;
                 (Task::none(), Some(Event::ShowPerfOverlayChanged(val)))
+            }
+            Message::SmoothTransitionsToggled(val) => {
+                self.smooth_transitions = val;
+                (Task::none(), Some(Event::SmoothTransitionsChanged(val)))
             }
         }
     }
@@ -465,6 +473,14 @@ impl Settings {
                     .color(theme::TEXT_DIM),
             ]
             .spacing(5),
+            toggler(self.smooth_transitions)
+                .label("Smooth Color Transitions")
+                .on_toggle(Message::SmoothTransitionsToggled),
+            text(
+                "Interpolate between sampled colors over time to reduce flickering and jarring changes on the bulbs.",
+            )
+            .size(12)
+            .color(theme::TEXT_DIM),
         ]
         .spacing(15)
     }
