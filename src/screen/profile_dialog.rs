@@ -25,14 +25,16 @@ pub struct ProfileDialog {
     name_input: String,
     profiles: Vec<String>,
     active_profile: Option<String>,
+    can_save: bool,
 }
 
 impl ProfileDialog {
-    pub fn new(profiles: &[Profile], active_profile: Option<&str>) -> Self {
+    pub fn new(profiles: &[Profile], active_profile: Option<&str>, can_save: bool) -> Self {
         Self {
             name_input: active_profile.unwrap_or("").to_string(),
             profiles: profiles.iter().map(|p| p.name.clone()).collect(),
             active_profile: active_profile.map(String::from),
+            can_save,
         }
     }
 
@@ -43,11 +45,13 @@ impl ProfileDialog {
                 (Task::none(), None)
             }
             Message::Save => {
+                if !self.can_save {
+                    return (Task::none(), None);
+                }
                 let name = self.name_input.trim().to_string();
                 if name.is_empty() {
                     return (Task::none(), None);
                 }
-                self.name_input = name.clone();
                 if !self.profiles.contains(&name) {
                     self.profiles.push(name.clone());
                 }
@@ -77,7 +81,7 @@ impl ProfileDialog {
             .size(14)
             .style(theme::styled_text_input);
 
-        let save_enabled = !self.name_input.trim().is_empty();
+        let save_enabled = self.can_save && !self.name_input.trim().is_empty();
         let save_btn = if save_enabled {
             button("Save Current Layout")
                 .on_press(Message::Save)
@@ -86,11 +90,21 @@ impl ProfileDialog {
             button("Save Current Layout").style(theme::styled_button)
         };
 
-        let save_section = column![
-            text("Save Profile").size(16).color(theme::TEXT),
+        let hint: Element<'_> = if self.can_save {
             text("Save the current region layout, bulb selection, and ambient settings.")
                 .size(12)
-                .color(theme::TEXT_DIM),
+                .color(theme::TEXT_DIM)
+                .into()
+        } else {
+            text("Start capture at least once before saving — region coordinates need a frame size.")
+                .size(12)
+                .color(theme::TEXT_DIM)
+                .into()
+        };
+
+        let save_section = column![
+            text("Save Profile").size(16).color(theme::TEXT),
+            hint,
             name_input,
             save_btn,
         ]

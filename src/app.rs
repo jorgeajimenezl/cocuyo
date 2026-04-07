@@ -302,10 +302,12 @@ impl Cocuyo {
             ),
             Message::OpenProfileDialog(parent) => {
                 if self.find_window_id(WindowKind::ProfileDialog).is_none() {
+                    let can_save = self.last_frame_size.is_some();
                     self.profile_dialog = Some(
                         crate::screen::profile_dialog::ProfileDialog::new(
                             &self.config.profiles,
                             self.active_profile_name.as_deref(),
+                            can_save,
                         ),
                     );
                 }
@@ -497,10 +499,7 @@ impl Cocuyo {
                         }
 
                         self.perf_stats.record_frame_arrival();
-                        let size = (frame.width(), frame.height());
-                        if self.last_frame_size != Some(size) {
-                            self.last_frame_size = Some(size);
-                        }
+                        self.last_frame_size = Some((frame.width(), frame.height()));
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
@@ -627,7 +626,7 @@ impl Cocuyo {
             }
 
             // Profiles (from menu bar pick_list)
-            Message::LoadProfile(name) => self.load_profile(&name)
+            Message::LoadProfile(name) => self.load_profile(&name),
         }
     }
 
@@ -930,6 +929,13 @@ impl Cocuyo {
     }
 
     fn save_profile(&mut self, name: &str) {
+        // Belt-and-suspenders: the dialog disables Save when no frame has been
+        // seen, but guard here too so coordinates can't be normalized against
+        // DEFAULT_FRAME_SIZE and silently corrupt the profile.
+        if self.last_frame_size.is_none() {
+            tracing::warn!("Refusing to save profile {name:?}: no frame captured yet");
+            return;
+        }
         let (frame_w, frame_h) = self.current_or_last_frame_size();
 
         let profile = crate::config::Profile {
@@ -969,17 +975,16 @@ impl Cocuyo {
         self.config.min_brightness_percent = profile.min_brightness_percent;
         self.config.white_color_temp = profile.white_color_temp;
 
-        // set_selected_bulbs drops MACs that aren't currently discovered, so
-        // filter regions by what actually stuck to avoid orphan regions.
+        // Keep all profile MACs even if not currently discovered, so a profile
+        // loaded before discovery (or with an offline bulb) is preserved.
         self.bulb_setup
             .set_selected_bulbs(profile.selected_bulb_macs.iter().cloned());
         self.save_bulb_config();
 
-        let active_macs = self.bulb_setup.selected_bulbs().clone();
         let (frame_w, frame_h) = self.current_or_last_frame_size();
 
         self.regions.clear();
-        for pr in profile.regions.iter().filter(|r| active_macs.contains(&r.bulb_mac)) {
+        for pr in profile.regions.iter() {
             let region = pr.to_region(self.next_region_id, frame_w, frame_h);
             self.next_region_id += 1;
             self.regions.push(region);
@@ -988,7 +993,7 @@ impl Cocuyo {
 
         self.active_profile_name = Some(name.to_string());
 
-        self.settings = settings::Settings::new(&self.config);
+        self.settings.sync_ambient_from_config(&self.config);
         // Profile switches from the menu pick_list never trigger a window
         // close, so flush now instead of waiting for the usual save points.
         self.mark_config_dirty();
@@ -1049,6 +1054,7 @@ impl Cocuyo {
                         Some(self.color_smoother.smooth(&region.bulb_mac, rgb));
                 }
             }
+            self.color_smoother.mark_updated();
             Some(snap)
         } else {
             None
