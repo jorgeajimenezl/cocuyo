@@ -356,16 +356,17 @@ impl Settings {
         column![
             text("Video Processing").size(18).color(theme::TEXT),
             pick_list(
-                available_backends.as_slice(),
                 selected_backend,
-                |backend: GpuBackend| {
-                    let idx = available_backends
-                        .iter()
-                        .position(|b| b == &backend)
-                        .unwrap_or(0);
-                    Message::BackendSelected(idx)
-                },
+                available_backends.as_slice(),
+                |b: &GpuBackend| b.to_string(),
             )
+            .on_select(|backend: GpuBackend| {
+                let idx = available_backends
+                    .iter()
+                    .position(|b| b == &backend)
+                    .unwrap_or(0);
+                Message::BackendSelected(idx)
+            })
             .style(theme::styled_pick_list)
             .width(Fill),
             text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")

@@ -74,8 +74,7 @@ pub unsafe fn import_iosurface_texture(
             None => return Err(MetalImportError::MetalHalNotAvailable),
         };
 
-        let metal_device_mutex = hal_guard.raw_device();
-        let metal_device = metal_device_mutex.lock();
+        let metal_device = hal_guard.raw_device();
 
         // Get raw pointer to the MTLDevice ObjC object
         let device_ptr = metal_device.as_ptr() as *mut AnyObject;
