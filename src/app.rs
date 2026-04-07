@@ -114,6 +114,9 @@ pub struct Cocuyo {
     // GPU sampling worker
     sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
 
+    // Color smoother for transitions
+    color_smoother: crate::ambient::ColorSmoother,
+
     // Performance stats
     perf_stats: crate::perf_stats::PerfStats,
     config_dirty: bool,
@@ -150,6 +153,7 @@ impl Cocuyo {
             next_region_id: 1,
             selected_region: None,
             sampling_worker: None,
+            color_smoother: crate::ambient::ColorSmoother::new(),
             perf_stats: crate::perf_stats::PerfStats::new(),
             config_dirty: false,
             window_icon: window::icon::from_rgba(
@@ -371,6 +375,7 @@ impl Cocuyo {
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 self.last_sent_colors.clear();
+                self.color_smoother.clear();
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
@@ -397,6 +402,7 @@ impl Cocuyo {
                 self.is_ambient_active = false;
                 self.last_bulb_update = None;
                 self.last_sent_colors.clear();
+                self.color_smoother.clear();
                 self.sampling_worker = None;
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), false);
@@ -423,6 +429,7 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.last_sent_colors.clear();
+                            self.color_smoother.clear();
                             self.recording_cmd_tx = None;
                             self.current_frame = None;
                             self.tray.update_menu_text(
@@ -740,6 +747,14 @@ impl Cocuyo {
                 self.mark_config_dirty();
                 Task::none()
             }
+            settings::Event::SmoothTransitionsChanged(val) => {
+                self.config.smooth_transitions = val;
+                if !val {
+                    self.color_smoother.clear();
+                }
+                self.mark_config_dirty();
+                Task::none()
+            }
         }
     }
 
@@ -852,6 +867,17 @@ impl Cocuyo {
     }
 
     fn dispatch_to_bulbs(&mut self) -> Task<Message> {
+        // Apply color smoothing if enabled
+        if self.config.smooth_transitions {
+            for region in &mut self.regions {
+                if let Some(rgb) = region.sampled_color {
+                    region.sampled_color =
+                        Some(self.color_smoother.smooth(&region.bulb_mac, rgb));
+                }
+            }
+            self.color_smoother.mark_updated();
+        }
+
         if let Some((targets, new_entries)) = crate::ambient::build_bulb_targets(
             &self.regions,
             self.bulb_setup.discovered_bulbs(),

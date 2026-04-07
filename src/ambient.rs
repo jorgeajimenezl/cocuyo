@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -181,6 +181,74 @@ pub fn build_bulb_targets(
 /// Dispatch sampled colors to bulbs. Returns a future suitable for `Task::perform`.
 pub async fn dispatch_bulb_colors(targets: Vec<(IpAddr, BulbColor, u8)>) {
     send_colors_to_bulbs(targets).await;
+}
+
+/// Per-bulb exponential moving average smoother for sampled colors.
+///
+/// Interpolates between the current smoothed color and the new sample each
+/// dispatch cycle, reducing flickering and jarring transitions on the bulbs.
+/// The smoothing factor (alpha) controls responsiveness: lower = smoother but
+/// slower to react, higher = more responsive but less smooth.
+const SMOOTH_ALPHA: f32 = 0.35;
+
+pub struct ColorSmoother {
+    state: HashMap<String, (f32, f32, f32)>,
+    last_update: Option<Instant>,
+}
+
+impl ColorSmoother {
+    pub fn new() -> Self {
+        Self {
+            state: HashMap::new(),
+            last_update: None,
+        }
+    }
+
+    /// Apply smoothing to a region's sampled color. Returns the smoothed RGB.
+    /// If this is the first sample for a bulb, snaps directly to the target.
+    pub fn smooth(&mut self, mac: &str, target: (u8, u8, u8)) -> (u8, u8, u8) {
+        let tf = (target.0 as f32, target.1 as f32, target.2 as f32);
+
+        // Scale alpha by time since last update to keep smoothing consistent
+        // regardless of update interval. At 150ms intervals alpha ≈ SMOOTH_ALPHA.
+        let alpha = if let Some(last) = self.last_update {
+            let dt = last.elapsed().as_secs_f32();
+            // Normalize to 150ms reference interval
+            (1.0 - (1.0 - SMOOTH_ALPHA).powf(dt / 0.15)).clamp(0.0, 1.0)
+        } else {
+            1.0 // first frame: snap
+        };
+
+        let smoothed = if let Some(cur) = self.state.get_mut(mac) {
+            let next = (
+                cur.0 + (tf.0 - cur.0) * alpha,
+                cur.1 + (tf.1 - cur.1) * alpha,
+                cur.2 + (tf.2 - cur.2) * alpha,
+            );
+            *cur = next;
+            next
+        } else {
+            self.state.insert(mac.to_owned(), tf);
+            tf // first sample for this bulb: snap
+        };
+
+        (
+            smoothed.0.round().clamp(0.0, 255.0) as u8,
+            smoothed.1.round().clamp(0.0, 255.0) as u8,
+            smoothed.2.round().clamp(0.0, 255.0) as u8,
+        )
+    }
+
+    /// Call after each dispatch cycle to update the timestamp.
+    pub fn mark_updated(&mut self) {
+        self.last_update = Some(Instant::now());
+    }
+
+    /// Clear all smoother state (e.g. when ambient stops).
+    pub fn clear(&mut self) {
+        self.state.clear();
+        self.last_update = None;
+    }
 }
 
 /// Query each selected bulb's current state. Skips bulbs that fail.
@@ -456,5 +524,64 @@ mod tests {
         let regions = [make_region("AA:BB", Some((0, 255, 0)))];
         let result = build_bulb_targets(&regions, &bulbs, 10, 6500, &cache);
         assert!(result.is_some());
+    }
+
+    // -- ColorSmoother --
+
+    #[test]
+    fn smoother_first_sample_snaps_to_target() {
+        let mut s = ColorSmoother::new();
+        let result = s.smooth("AA:BB", (200, 100, 50));
+        assert_eq!(result, (200, 100, 50));
+    }
+
+    #[test]
+    fn smoother_interpolates_toward_target() {
+        let mut s = ColorSmoother::new();
+        s.smooth("AA:BB", (0, 0, 0));
+        // Simulate 10ms elapsed by setting last_update in the past
+        s.last_update = Some(Instant::now() - Duration::from_millis(10));
+        let result = s.smooth("AA:BB", (255, 255, 255));
+        // Should move toward white but not reach it
+        assert!(result.0 > 0 && result.0 < 255, "r={}", result.0);
+        assert!(result.1 > 0 && result.1 < 255, "g={}", result.1);
+        assert!(result.2 > 0 && result.2 < 255, "b={}", result.2);
+    }
+
+    #[test]
+    fn smoother_converges_over_many_steps() {
+        let mut s = ColorSmoother::new();
+        s.smooth("AA:BB", (0, 0, 0));
+        // Simulate 50 updates at 150ms intervals (deterministic, no sleeping)
+        for _ in 0..50 {
+            s.last_update = Some(Instant::now() - Duration::from_millis(150));
+            s.smooth("AA:BB", (255, 255, 255));
+        }
+        s.last_update = Some(Instant::now() - Duration::from_millis(150));
+        let result = s.smooth("AA:BB", (255, 255, 255));
+        // After 50 steps at reference interval should be very close to target
+        assert!(result.0 >= 250, "r={}", result.0);
+        assert!(result.1 >= 250, "g={}", result.1);
+        assert!(result.2 >= 250, "b={}", result.2);
+    }
+
+    #[test]
+    fn smoother_clear_resets_state() {
+        let mut s = ColorSmoother::new();
+        s.smooth("AA:BB", (100, 100, 100));
+        s.mark_updated();
+        s.clear();
+        // After clear, next sample should snap
+        let result = s.smooth("AA:BB", (200, 50, 0));
+        assert_eq!(result, (200, 50, 0));
+    }
+
+    #[test]
+    fn smoother_tracks_bulbs_independently() {
+        let mut s = ColorSmoother::new();
+        let a = s.smooth("AA", (255, 0, 0));
+        let b = s.smooth("BB", (0, 0, 255));
+        assert_eq!(a, (255, 0, 0));
+        assert_eq!(b, (0, 0, 255));
     }
 }
