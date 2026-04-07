@@ -8,8 +8,8 @@ use screencapturekit::async_api::AsyncSCStream;
 use screencapturekit::content_sharing_picker::{
     SCContentSharingPickerConfiguration, SCContentSharingPickerMode, SCPickerOutcome,
 };
-use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::configuration::SCStreamConfiguration;
+use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::output_type::SCStreamOutputType;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -19,7 +19,12 @@ use crate::frame::FrameData;
 use crate::recording::{RecordingCommand, RecordingEvent};
 
 /// Copy BGRA pixel data, stripping row padding if present.
-pub fn strip_stride_padding(src: &[u8], width: usize, height: usize, bytes_per_row: usize) -> Vec<u8> {
+pub fn strip_stride_padding(
+    src: &[u8],
+    width: usize,
+    height: usize,
+    bytes_per_row: usize,
+) -> Vec<u8> {
     let stride = width * 4;
     if bytes_per_row == stride {
         let total = stride * height;
@@ -43,9 +48,7 @@ pub fn strip_stride_padding(src: &[u8], width: usize, height: usize, bytes_per_r
 /// Tries the zero-copy IOSurface path first (sends the IOSurface directly to
 /// the shader widget, which imports it as a Metal texture in `prepare()`).
 /// Falls back to CPU BGRA copy when IOSurface is unavailable.
-fn build_frame(
-    pixel_buffer: &screencapturekit::CVPixelBuffer,
-) -> Option<Arc<FrameData>> {
+fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<FrameData>> {
     // Zero-copy path: send the IOSurface to the shader widget.
     // The widget imports it as a Metal texture in prepare(), wrapped in
     // autoreleasepool to avoid Cocoa run-loop re-entrancy.

@@ -1,5 +1,5 @@
-use iced::widget::{rule, scrollable};
 use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, tooltip};
+use iced::widget::{rule, scrollable};
 use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
@@ -267,9 +267,11 @@ impl Settings {
                 .on_toggle(Message::ShowPerfOverlayToggled),
         );
         col = col.push(
-            text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
-                .size(12)
-                .color(theme::TEXT_DIM),
+            text(
+                "Show capture FPS, sampling time, and bulb dispatch latency on the video preview.",
+            )
+            .size(12)
+            .color(theme::TEXT_DIM),
         );
 
         col
@@ -319,10 +321,11 @@ impl Settings {
             ]
             .spacing(5),
             pick_list(
-                adapter_options,
                 Some(&self.selected_adapter),
-                Message::AdapterSelected,
+                adapter_options,
+                |a: &GpuAdapterSelection| a.to_string(),
             )
+            .on_select(Message::AdapterSelected)
             .style(theme::styled_pick_list)
             .width(Fill),
             text(active_label).size(12).color(theme::TEXT_DIM),
@@ -355,16 +358,17 @@ impl Settings {
         column![
             text("Video Processing").size(18).color(theme::TEXT),
             pick_list(
-                available_backends.as_slice(),
                 selected_backend,
-                |backend: GpuBackend| {
-                    let idx = available_backends
-                        .iter()
-                        .position(|b| b == &backend)
-                        .unwrap_or(0);
-                    Message::BackendSelected(idx)
-                },
+                available_backends.as_slice(),
+                |b: &GpuBackend| b.to_string(),
             )
+            .on_select(|backend: GpuBackend| {
+                let idx = available_backends
+                    .iter()
+                    .position(|b| b == &backend)
+                    .unwrap_or(0);
+                Message::BackendSelected(idx)
+            })
             .style(theme::styled_pick_list)
             .width(Fill),
             text("Select the GPU backend for video format conversion. Changes take effect on the next recording session.")

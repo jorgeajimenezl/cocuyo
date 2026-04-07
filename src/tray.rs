@@ -37,8 +37,7 @@ mod imp {
         // OS can tint it to match the active light/dark theme. On other
         // platforms we keep the colorful icon.
         #[cfg(target_os = "macos")]
-        let rgba: &[u8] =
-            include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-symbolic-32.rgba"));
+        let rgba: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-symbolic-32.rgba"));
         #[cfg(not(target_os = "macos"))]
         let rgba: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-tray-32.rgba"));
         Icon::from_rgba(rgba.to_vec(), 32, 32).expect("Failed to create tray icon")

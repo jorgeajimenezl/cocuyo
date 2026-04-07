@@ -37,10 +37,11 @@ pub fn view<'a>(
         text("No profiles").size(12).color(theme::TEXT_DIM).into()
     } else {
         pick_list(
-            profile_names,
             active_profile_name.map(String::from),
-            Message::LoadProfile,
+            profile_names,
+            |s: &String| s.clone(),
         )
+        .on_select(Message::LoadProfile)
         .text_size(12)
         .style(theme::styled_pick_list)
         .into()
@@ -70,8 +71,10 @@ pub fn view<'a>(
     // Left panel: video preview + region overlay + perf HUD
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video: Element<'a, Message> =
-                shader(VideoScene::new(Some(f))).width(Fill).height(Fill).into();
+            let video: Element<'a, Message> = shader(VideoScene::new(Some(f)))
+                .width(Fill)
+                .height(Fill)
+                .into();
 
             let mut layers: Vec<Element<'a, Message>> = vec![video];
 
@@ -206,10 +209,11 @@ pub fn view<'a>(
 
                 let region_id = r.id;
                 let strategy_picker = pick_list(
-                    sampling::all_strategies(),
                     Some(r.strategy.clone()),
-                    move |s| Message::RegionStrategyChanged(region_id, s),
+                    sampling::all_strategies(),
+                    |s: &sampling::BoxedStrategy| s.to_string(),
                 )
+                .on_select(move |s| Message::RegionStrategyChanged(region_id, s))
                 .text_size(11)
                 .style(theme::styled_pick_list);
 

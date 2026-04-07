@@ -4,7 +4,7 @@ version = "0.5.2"
 edition = "2024"
 
 [features]
-default = ["tray"]
+default = []
 tray = ["dep:tray-icon"]
 
 [profile.release]
@@ -15,16 +15,16 @@ panic = "abort"
 strip = "symbols"
 
 [dependencies]
-iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "235d4ed77d36e9db99ac117ce23fcf5332d90314", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
-wgpu = "27"
-wgpu-types = { version = "27", features = ["serde"] }
-tokio = { version = "1.41", features = [ "rt-multi-thread", "macros" ] }
+iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "99c17020435a8c9b3fae855644e740fd82871518", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
+wgpu = { version = "28", default-features = false, features = ["std", "wgsl"] }
+wgpu-types = { version = "28", default-features = false, features = ["serde"] }
+tokio = { version = "1.41", default-features = false, features = [ "rt-multi-thread", "macros", "sync", "time" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 wiz-lights-rs = "0.2"
 futures = "0.3.31"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 toml = "1.0.3"
 dirs = "6.0.0"
 tray-icon = { version = "0.19", optional = true }
@@ -37,20 +37,20 @@ gstreamer = "0.23"
 gstreamer-allocators = { version = "0.23", features = ["v1_16"] }
 gstreamer-app = "0.23"
 gstreamer-video = "0.23"
-iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "235d4ed77d36e9db99ac117ce23fcf5332d90314", features = ["wayland"] }
-nix = { version = "0.29", features = ["fs", "mman", "ioctl"] }
-wgpu-hal = { version = "27", features = ["vulkan"] }
+iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "99c17020435a8c9b3fae855644e740fd82871518", features = ["wayland"] }
+nix = { version = "0.29", default-features = false, features = ["fs", "mman", "ioctl"] }
+wgpu-hal = { version = "28", default-features = false, features = ["vulkan"] }
 pipewire = { version = "0.9", features = ["v0_3_77"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = { git = "https://github.com/jorgeajimenezl/windows-capture.git", rev = "2191b793f74052f6353db901394cc230cb08d6e1" }
-windows = { version = "0.58", features = [
+windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common", "Win32_Foundation",
     "Win32_System_Console",
 ] }
-wgpu-hal = { version = "27", features = ["dx12"] }
+wgpu-hal = { version = "28", default-features = false, features = ["dx12"] }
 
 [build-dependencies]
 resvg = "0.45"
@@ -61,7 +61,7 @@ winresource = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "1.5.3", features = ["async", "macos_14_0"] }
-wgpu-hal = { version = "27", features = ["metal"] }
-metal = "0.32"
+wgpu-hal = { version = "28", default-features = false, features = ["metal"] }
+metal = "0.33"
 objc2 = "0.6.4"
 foreign-types = "0.5"

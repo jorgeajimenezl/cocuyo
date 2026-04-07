@@ -176,29 +176,27 @@ impl FrameData {
                 surface,
                 width,
                 height,
-            } => {
-                match surface.lock_read_only() {
-                    Ok(guard) => {
-                        let bpr = surface.bytes_per_row();
-                        let src = guard.as_slice();
-                        let bgra = crate::platform::macos::recording::strip_stride_padding(
-                            src,
-                            *width as usize,
-                            *height as usize,
-                            bpr,
-                        );
-                        Some(Arc::new(FrameData::Cpu {
-                            data: Arc::new(bgra),
-                            width: *width,
-                            height: *height,
-                        }))
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to lock IOSurface for CPU readback");
-                        None
-                    }
+            } => match surface.lock_read_only() {
+                Ok(guard) => {
+                    let bpr = surface.bytes_per_row();
+                    let src = guard.as_slice();
+                    let bgra = crate::platform::macos::recording::strip_stride_padding(
+                        src,
+                        *width as usize,
+                        *height as usize,
+                        bpr,
+                    );
+                    Some(Arc::new(FrameData::Cpu {
+                        data: Arc::new(bgra),
+                        width: *width,
+                        height: *height,
+                    }))
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to lock IOSurface for CPU readback");
+                    None
+                }
+            },
             #[cfg(target_os = "windows")]
             FrameData::D3DShared {
                 frame,

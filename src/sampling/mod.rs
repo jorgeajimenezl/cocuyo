@@ -223,7 +223,11 @@ pub(crate) fn clamp_region_bounds(
     let y0 = (y as u32).min(frame_h);
     let x1 = ((x + w) as u32).min(frame_w);
     let y1 = ((y + h) as u32).min(frame_h);
-    if x0 >= x1 || y0 >= y1 { None } else { Some((x0, y0, x1, y1)) }
+    if x0 >= x1 || y0 >= y1 {
+        None
+    } else {
+        Some((x0, y0, x1, y1))
+    }
 }
 
 /// Sample a rectangular region of a frame using the given strategy.

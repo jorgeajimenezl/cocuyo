@@ -37,20 +37,21 @@ pub fn enumerate_adapters() -> Vec<GpuAdapter> {
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let backends = wgpu::Backends::PRIMARY;
 
-    let adapters: Vec<GpuAdapter> = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
-    })
-    .enumerate_adapters(backends)
-    .into_iter()
-    .map(|adapter| {
-        let info = adapter.get_info();
-        GpuAdapter {
-            name: info.name,
-            backend: info.backend,
-        }
-    })
-    .collect();
+    });
+    let adapters: Vec<GpuAdapter> =
+        futures::executor::block_on(instance.enumerate_adapters(backends))
+            .into_iter()
+            .map(|adapter| {
+                let info = adapter.get_info();
+                GpuAdapter {
+                    name: info.name,
+                    backend: info.backend,
+                }
+            })
+            .collect();
 
     adapters
 }

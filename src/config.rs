@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
-use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 use crate::region::Region;
 use crate::sampling::BoxedStrategy;
+use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRegion {
@@ -190,12 +190,21 @@ mod tests {
         let toml_str = toml::to_string(&original).expect("serialize");
         let restored: AppConfig = toml::from_str(&toml_str).expect("deserialize");
 
-        assert_eq!(restored.bulb_update_interval_ms, original.bulb_update_interval_ms);
-        assert_eq!(restored.min_brightness_percent, original.min_brightness_percent);
+        assert_eq!(
+            restored.bulb_update_interval_ms,
+            original.bulb_update_interval_ms
+        );
+        assert_eq!(
+            restored.min_brightness_percent,
+            original.min_brightness_percent
+        );
         assert_eq!(restored.white_color_temp, original.white_color_temp);
         assert_eq!(restored.minimize_to_tray, original.minimize_to_tray);
         assert_eq!(restored.capture_fps_limit, original.capture_fps_limit);
-        assert_eq!(restored.capture_resolution_scale, original.capture_resolution_scale);
+        assert_eq!(
+            restored.capture_resolution_scale,
+            original.capture_resolution_scale
+        );
         assert_eq!(restored.force_cpu_sampling, original.force_cpu_sampling);
         assert_eq!(restored.show_perf_overlay, original.show_perf_overlay);
         assert_eq!(restored.preferred_adapter, original.preferred_adapter);
@@ -227,7 +236,9 @@ mod tests {
             ip: "192.168.1.42".parse().unwrap(),
             name: Some("Living Room".to_string()),
         });
-        config.selected_bulb_macs.push("AA:BB:CC:DD:EE:FF".to_string());
+        config
+            .selected_bulb_macs
+            .push("AA:BB:CC:DD:EE:FF".to_string());
 
         let toml_str = toml::to_string(&config).expect("serialize");
         let restored: AppConfig = toml::from_str(&toml_str).expect("deserialize");

@@ -280,7 +280,15 @@ pub unsafe fn import_dmabuf_texture(
         };
 
         // Wrap the VkImage into a wgpu_hal texture
-        unsafe { hal_guard.texture_from_raw(vk_image, &hal_desc, Some(drop_callback)) }
+        // TextureMemory::External: memory is managed by our drop_callback, not by wgpu-hal
+        unsafe {
+            hal_guard.texture_from_raw(
+                vk_image,
+                &hal_desc,
+                Some(drop_callback),
+                wgpu_hal::vulkan::TextureMemory::External,
+            )
+        }
     };
     // HAL guard is dropped here, releasing the device lock
 

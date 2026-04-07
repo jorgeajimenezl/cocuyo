@@ -188,12 +188,7 @@ impl Cocuyo {
         };
         app.sync_regions_to_bulbs();
 
-        let task = app.open_window(
-            WindowKind::Main,
-            MAIN_WINDOW_SIZE,
-            MAIN_WINDOW_MIN,
-            None,
-        );
+        let task = app.open_window(WindowKind::Main, MAIN_WINDOW_SIZE, MAIN_WINDOW_MIN, None);
 
         (app, task)
     }
@@ -303,13 +298,11 @@ impl Cocuyo {
             Message::OpenProfileDialog(parent) => {
                 if self.find_window_id(WindowKind::ProfileDialog).is_none() {
                     let can_save = self.last_frame_size.is_some();
-                    self.profile_dialog = Some(
-                        crate::screen::profile_dialog::ProfileDialog::new(
-                            &self.config.profiles,
-                            self.active_profile_name.as_deref(),
-                            can_save,
-                        ),
-                    );
+                    self.profile_dialog = Some(crate::screen::profile_dialog::ProfileDialog::new(
+                        &self.config.profiles,
+                        self.active_profile_name.as_deref(),
+                        can_save,
+                    ));
                 }
                 self.open_window(
                     WindowKind::ProfileDialog,
@@ -945,12 +938,7 @@ impl Cocuyo {
                 .iter()
                 .map(|r| crate::config::ProfileRegion::from_region(r, frame_w, frame_h))
                 .collect(),
-            selected_bulb_macs: self
-                .bulb_setup
-                .selected_bulbs()
-                .iter()
-                .cloned()
-                .collect(),
+            selected_bulb_macs: self.bulb_setup.selected_bulbs().iter().cloned().collect(),
             bulb_update_interval_ms: self.config.bulb_update_interval_ms,
             min_brightness_percent: self.config.min_brightness_percent,
             white_color_temp: self.config.white_color_temp,
@@ -967,7 +955,13 @@ impl Cocuyo {
     }
 
     fn load_profile(&mut self, name: &str) -> Task<Message> {
-        let Some(profile) = self.config.profiles.iter().find(|p| p.name == name).cloned() else {
+        let Some(profile) = self
+            .config
+            .profiles
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+        else {
             return Task::none();
         };
 
@@ -1050,8 +1044,7 @@ impl Cocuyo {
             let snap: Vec<_> = self.regions.iter().map(|r| r.sampled_color).collect();
             for region in &mut self.regions {
                 if let Some(rgb) = region.sampled_color {
-                    region.sampled_color =
-                        Some(self.color_smoother.smooth(&region.bulb_mac, rgb));
+                    region.sampled_color = Some(self.color_smoother.smooth(&region.bulb_mac, rgb));
                 }
             }
             self.color_smoother.mark_updated();
@@ -1079,14 +1072,9 @@ impl Cocuyo {
                 self.last_sent_colors.insert(mac, (color, brightness));
             }
             let dispatch_start = Instant::now();
-            Task::perform(
-                crate::ambient::dispatch_bulb_colors(targets),
-                move |()| {
-                    Message::BulbDispatchComplete(
-                        dispatch_start.elapsed().as_secs_f64() * 1000.0,
-                    )
-                },
-            )
+            Task::perform(crate::ambient::dispatch_bulb_colors(targets), move |()| {
+                Message::BulbDispatchComplete(dispatch_start.elapsed().as_secs_f64() * 1000.0)
+            })
         } else {
             Task::none()
         }
@@ -1095,7 +1083,8 @@ impl Cocuyo {
     fn sync_regions_to_bulbs(&mut self) {
         let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
         self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
-        self.color_smoother.retain(|mac| selected_macs.iter().any(|m| m == mac));
+        self.color_smoother
+            .retain(|mac| selected_macs.iter().any(|m| m == mac));
 
         if let Some(sel) = self.selected_region {
             if !self.regions.iter().any(|r| r.id == sel) {

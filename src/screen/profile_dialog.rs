@@ -96,10 +96,12 @@ impl ProfileDialog {
                 .color(theme::TEXT_DIM)
                 .into()
         } else {
-            text("Start capture at least once before saving — region coordinates need a frame size.")
-                .size(12)
-                .color(theme::TEXT_DIM)
-                .into()
+            text(
+                "Start capture at least once before saving — region coordinates need a frame size.",
+            )
+            .size(12)
+            .color(theme::TEXT_DIM)
+            .into()
         };
 
         let save_section = column![
@@ -124,7 +126,11 @@ impl ProfileDialog {
                 .iter()
                 .map(|name| {
                     let is_active = self.active_profile.as_deref() == Some(name);
-                    let label_color = if is_active { theme::ACCENT } else { theme::TEXT };
+                    let label_color = if is_active {
+                        theme::ACCENT
+                    } else {
+                        theme::TEXT
+                    };
 
                     let load_name = name.clone();
                     let delete_name = name.clone();
@@ -144,11 +150,7 @@ impl ProfileDialog {
                     .align_y(iced::Center);
 
                     if is_active {
-                        item_row = item_row.push(
-                            text("(active)")
-                                .size(11)
-                                .color(theme::TEXT_DIM),
-                        );
+                        item_row = item_row.push(text("(active)").size(11).color(theme::TEXT_DIM));
                     }
 
                     item_row.into()

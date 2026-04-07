@@ -248,14 +248,7 @@ impl shader::Primitive for VideoPrimitive {
                 height,
                 bounds,
             } => {
-                pipeline.prepare_iosurface(
-                    device,
-                    queue,
-                    surface,
-                    *width,
-                    *height,
-                    *bounds,
-                );
+                pipeline.prepare_iosurface(device, queue, surface, *width, *height, *bounds);
             }
             #[cfg(target_os = "windows")]
             VideoPrimitive::D3DShared {
@@ -374,7 +367,7 @@ impl shader::Pipeline for VideoPipeline {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("video_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -402,7 +395,7 @@ impl shader::Pipeline for VideoPipeline {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -431,7 +424,6 @@ impl shader::Pipeline for VideoPipeline {
         }
     }
 }
-
 
 impl VideoPipeline {
     fn get_or_create_texture(
@@ -492,7 +484,8 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format =
+                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -532,7 +525,8 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format =
+                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -570,7 +564,8 @@ impl VideoPipeline {
 
         match result {
             Ok((texture, wgpu_format)) => {
-                let view_format = crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format =
+                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -611,7 +606,10 @@ impl VideoPipeline {
             return;
         }
 
-        let format = crate::texture_format::adjust_srgb(wgpu::TextureFormat::Bgra8UnormSrgb, self.surface_format.is_srgb());
+        let format = crate::texture_format::adjust_srgb(
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            self.surface_format.is_srgb(),
+        );
         let texture = self.get_or_create_texture(device, width, height, format);
 
         queue.write_texture(
@@ -705,6 +703,7 @@ impl VideoPipeline {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         render_pass.set_scissor_rect(
