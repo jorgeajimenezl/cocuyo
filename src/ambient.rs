@@ -239,6 +239,11 @@ impl ColorSmoother {
         )
     }
 
+    /// Drop entries for bulbs no longer in use so state doesn't grow unbounded.
+    pub fn retain<F: FnMut(&str) -> bool>(&mut self, mut keep: F) {
+        self.state.retain(|k, _| keep(k));
+    }
+
     /// Call after each dispatch cycle to update the timestamp.
     pub fn mark_updated(&mut self) {
         self.last_update = Some(Instant::now());

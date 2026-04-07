@@ -185,6 +185,13 @@ impl BulbSetupState {
         !self.selected_bulbs.is_empty()
     }
 
+    /// Replace the selected bulb set. MACs that are not currently discovered
+    /// are kept anyway so a profile loaded before discovery completes (or with
+    /// an offline bulb) is preserved as-is.
+    pub fn set_selected_bulbs(&mut self, macs: impl IntoIterator<Item = String>) {
+        self.selected_bulbs = macs.into_iter().collect();
+    }
+
     pub fn selected_bulb_infos(&self) -> Vec<BulbInfo> {
         self.discovered_bulbs
             .iter()

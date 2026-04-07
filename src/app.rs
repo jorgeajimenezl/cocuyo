@@ -26,6 +26,8 @@ const SETTINGS_WINDOW_SIZE: Size = Size::new(500.0, 700.0);
 const SETTINGS_WINDOW_MIN: Size = Size::new(300.0, 200.0);
 const BULB_SETUP_WINDOW_SIZE: Size = Size::new(500.0, 400.0);
 const BULB_SETUP_WINDOW_MIN: Size = Size::new(350.0, 300.0);
+const PROFILE_DIALOG_SIZE: Size = Size::new(450.0, 400.0);
+const PROFILE_DIALOG_MIN: Size = Size::new(350.0, 300.0);
 #[cfg(target_os = "windows")]
 const PICKER_WINDOW_SIZE: Size = Size::new(500.0, 500.0);
 #[cfg(target_os = "windows")]
@@ -73,6 +75,11 @@ pub enum Message {
     RegionUpdate(RegionMessage),
     RegionStrategyChanged(usize, BoxedStrategy),
 
+    // Profiles
+    OpenProfileDialog(window::Id),
+    ProfileDialog(crate::screen::profile_dialog::Message),
+    LoadProfile(String),
+
     // Delegated screens
     Settings(settings::Message),
     BulbSetup(bulb_setup::Message),
@@ -96,6 +103,7 @@ pub struct Cocuyo {
 
     // Recording state
     current_frame: Option<Arc<FrameData>>,
+    last_frame_size: Option<(u32, u32)>,
     recording_state: RecordingState,
     is_recording: bool,
     session_id: u64,
@@ -125,6 +133,10 @@ pub struct Cocuyo {
     tray: &'static crate::tray::TrayState,
     tray_hide_requested: bool,
 
+    // Profiles
+    active_profile_name: Option<String>,
+    profile_dialog: Option<crate::screen::profile_dialog::ProfileDialog>,
+
     // Screen state
     settings: settings::Settings,
     #[cfg(target_os = "windows")]
@@ -138,6 +150,7 @@ impl Cocuyo {
         let mut app = Self {
             windows: BTreeMap::new(),
             current_frame: None,
+            last_frame_size: None,
             recording_state: RecordingState::Idle,
             is_recording: false,
             session_id: 0,
@@ -152,6 +165,8 @@ impl Cocuyo {
             regions: Vec::new(),
             next_region_id: 1,
             selected_region: None,
+            active_profile_name: None,
+            profile_dialog: None,
             sampling_worker: None,
             color_smoother: crate::ambient::ColorSmoother::new(),
             perf_stats: crate::perf_stats::PerfStats::new(),
@@ -188,6 +203,7 @@ impl Cocuyo {
             Some(WindowKind::Main) => "Cocuyo".to_string(),
             Some(WindowKind::Settings) => "Cocuyo - Settings".to_string(),
             Some(WindowKind::BulbSetup) => "Cocuyo - Bulb Setup".to_string(),
+            Some(WindowKind::ProfileDialog) => "Cocuyo - Profiles".to_string(),
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => "Cocuyo - Select Target".to_string(),
             None => String::new(),
@@ -207,7 +223,13 @@ impl Cocuyo {
                     self.capture_picker = None;
                     return Task::none();
                 }
-                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::BulbSetup) {
+                if kind == Some(WindowKind::ProfileDialog) {
+                    self.profile_dialog = None;
+                }
+                if kind == Some(WindowKind::Settings)
+                    || kind == Some(WindowKind::BulbSetup)
+                    || kind == Some(WindowKind::ProfileDialog)
+                {
                     self.flush_config();
                 }
                 if kind == Some(WindowKind::Main) {
@@ -278,6 +300,37 @@ impl Cocuyo {
                 BULB_SETUP_WINDOW_MIN,
                 Some(parent),
             ),
+            Message::OpenProfileDialog(parent) => {
+                if self.find_window_id(WindowKind::ProfileDialog).is_none() {
+                    let can_save = self.last_frame_size.is_some();
+                    self.profile_dialog = Some(
+                        crate::screen::profile_dialog::ProfileDialog::new(
+                            &self.config.profiles,
+                            self.active_profile_name.as_deref(),
+                            can_save,
+                        ),
+                    );
+                }
+                self.open_window(
+                    WindowKind::ProfileDialog,
+                    PROFILE_DIALOG_SIZE,
+                    PROFILE_DIALOG_MIN,
+                    Some(parent),
+                )
+            }
+            Message::ProfileDialog(msg) => {
+                let Some(dialog) = self.profile_dialog.as_mut() else {
+                    return Task::none();
+                };
+                let (task, event) = dialog.update(msg);
+                let task = task.map(Message::ProfileDialog);
+                if let Some(event) = event {
+                    let event_task = self.handle_profile_dialog_event(event);
+                    Task::batch([task, event_task])
+                } else {
+                    task
+                }
+            }
             Message::Settings(msg) => {
                 let (task, event) = self.settings.update(msg);
                 let task = task.map(Message::Settings);
@@ -446,6 +499,7 @@ impl Cocuyo {
                         }
 
                         self.perf_stats.record_frame_arrival();
+                        self.last_frame_size = Some((frame.width(), frame.height()));
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
@@ -550,6 +604,7 @@ impl Cocuyo {
                 if let Some(region) = self.regions.iter_mut().find(|r| r.id == id) {
                     region.strategy = strategy;
                 }
+                self.active_profile_name = None;
                 Task::none()
             }
             Message::RegionUpdate(msg) => {
@@ -561,6 +616,7 @@ impl Cocuyo {
                             existing.width = w;
                             existing.height = h;
                         }
+                        self.active_profile_name = None;
                     }
                     RegionMessage::Selected(id) => {
                         self.selected_region = id;
@@ -568,6 +624,9 @@ impl Cocuyo {
                 }
                 Task::none()
             }
+
+            // Profiles (from menu bar pick_list)
+            Message::LoadProfile(name) => self.load_profile(&name),
         }
     }
 
@@ -579,6 +638,7 @@ impl Cocuyo {
             Some(WindowKind::Main) => "Cocuyo",
             Some(WindowKind::Settings) => "Settings",
             Some(WindowKind::BulbSetup) => "Bulb Setup",
+            Some(WindowKind::ProfileDialog) => "Profiles",
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => "Select Capture Target",
             None => "",
@@ -599,10 +659,19 @@ impl Cocuyo {
                     self.selected_region,
                     &self.perf_stats,
                     self.config.show_perf_overlay,
+                    &self.config.profiles,
+                    self.active_profile_name.as_deref(),
                 )
             }
             Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
             Some(WindowKind::BulbSetup) => self.bulb_setup.view().map(Message::BulbSetup),
+            Some(WindowKind::ProfileDialog) => {
+                if let Some(ref dialog) = self.profile_dialog {
+                    dialog.view().map(Message::ProfileDialog)
+                } else {
+                    iced::widget::space().into()
+                }
+            }
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => {
                 if let Some(ref picker) = self.capture_picker {
@@ -714,16 +783,19 @@ impl Cocuyo {
             }
             settings::Event::BulbUpdateIntervalChanged(ms) => {
                 self.config.bulb_update_interval_ms = ms;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::MinBrightnessChanged(pct) => {
                 self.config.min_brightness_percent = pct;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
             settings::Event::WhiteColorTempChanged(temp) => {
                 self.config.white_color_temp = temp;
+                self.active_profile_name = None;
                 self.mark_config_dirty();
                 Task::none()
             }
@@ -782,6 +854,7 @@ impl Cocuyo {
             }
             bulb_setup::BulbSetupEvent::SelectionChanged => {
                 self.sync_regions_to_bulbs();
+                self.active_profile_name = None;
                 Task::none()
             }
             bulb_setup::BulbSetupEvent::BulbsDiscovered => {
@@ -822,6 +895,110 @@ impl Cocuyo {
                 self.close_window_by_kind(WindowKind::CapturePicker)
             }
         }
+    }
+
+    fn handle_profile_dialog_event(
+        &mut self,
+        event: crate::screen::profile_dialog::ProfileDialogEvent,
+    ) -> Task<Message> {
+        use crate::screen::profile_dialog::ProfileDialogEvent;
+        match event {
+            ProfileDialogEvent::Save(name) => {
+                self.save_profile(&name);
+                Task::none()
+            }
+            ProfileDialogEvent::Load(name) => self.load_profile(&name),
+            ProfileDialogEvent::Delete(name) => {
+                self.config.profiles.retain(|p| p.name != name);
+                if self.active_profile_name.as_deref() == Some(&name) {
+                    self.active_profile_name = None;
+                }
+                self.mark_config_dirty();
+                Task::none()
+            }
+        }
+    }
+
+    fn current_or_last_frame_size(&self) -> (f32, f32) {
+        self.current_frame
+            .as_ref()
+            .map(|f| (f.width(), f.height()))
+            .or(self.last_frame_size)
+            .map(|(w, h)| (w as f32, h as f32))
+            .unwrap_or(DEFAULT_FRAME_SIZE)
+    }
+
+    fn save_profile(&mut self, name: &str) {
+        // Belt-and-suspenders: the dialog disables Save when no frame has been
+        // seen, but guard here too so coordinates can't be normalized against
+        // DEFAULT_FRAME_SIZE and silently corrupt the profile.
+        if self.last_frame_size.is_none() {
+            tracing::warn!("Refusing to save profile {name:?}: no frame captured yet");
+            return;
+        }
+        let (frame_w, frame_h) = self.current_or_last_frame_size();
+
+        let profile = crate::config::Profile {
+            name: name.to_string(),
+            regions: self
+                .regions
+                .iter()
+                .map(|r| crate::config::ProfileRegion::from_region(r, frame_w, frame_h))
+                .collect(),
+            selected_bulb_macs: self
+                .bulb_setup
+                .selected_bulbs()
+                .iter()
+                .cloned()
+                .collect(),
+            bulb_update_interval_ms: self.config.bulb_update_interval_ms,
+            min_brightness_percent: self.config.min_brightness_percent,
+            white_color_temp: self.config.white_color_temp,
+        };
+
+        if let Some(existing) = self.config.profiles.iter_mut().find(|p| p.name == name) {
+            *existing = profile;
+        } else {
+            self.config.profiles.push(profile);
+        }
+
+        self.active_profile_name = Some(name.to_string());
+        self.mark_config_dirty();
+    }
+
+    fn load_profile(&mut self, name: &str) -> Task<Message> {
+        let Some(profile) = self.config.profiles.iter().find(|p| p.name == name).cloned() else {
+            return Task::none();
+        };
+
+        self.config.bulb_update_interval_ms = profile.bulb_update_interval_ms;
+        self.config.min_brightness_percent = profile.min_brightness_percent;
+        self.config.white_color_temp = profile.white_color_temp;
+
+        // Keep all profile MACs even if not currently discovered, so a profile
+        // loaded before discovery (or with an offline bulb) is preserved.
+        self.bulb_setup
+            .set_selected_bulbs(profile.selected_bulb_macs.iter().cloned());
+        self.save_bulb_config();
+
+        let (frame_w, frame_h) = self.current_or_last_frame_size();
+
+        self.regions.clear();
+        for pr in profile.regions.iter() {
+            let region = pr.to_region(self.next_region_id, frame_w, frame_h);
+            self.next_region_id += 1;
+            self.regions.push(region);
+        }
+        self.selected_region = None;
+
+        self.active_profile_name = Some(name.to_string());
+
+        self.settings.sync_ambient_from_config(&self.config);
+        // Profile switches from the menu pick_list never trigger a window
+        // close, so flush now instead of waiting for the usual save points.
+        self.mark_config_dirty();
+        self.flush_config();
+        Task::none()
     }
 
     // --- Window helpers ---
@@ -867,8 +1044,10 @@ impl Cocuyo {
     }
 
     fn dispatch_to_bulbs(&mut self) -> Task<Message> {
-        // Apply color smoothing if enabled
-        if self.config.smooth_transitions {
+        // Preview overlay reads sampled_color as ground truth, so restore it
+        // after smoothing for the build call.
+        let originals: Option<Vec<Option<(u8, u8, u8)>>> = if self.config.smooth_transitions {
+            let snap: Vec<_> = self.regions.iter().map(|r| r.sampled_color).collect();
             for region in &mut self.regions {
                 if let Some(rgb) = region.sampled_color {
                     region.sampled_color =
@@ -876,15 +1055,26 @@ impl Cocuyo {
                 }
             }
             self.color_smoother.mark_updated();
-        }
+            Some(snap)
+        } else {
+            None
+        };
 
-        if let Some((targets, new_entries)) = crate::ambient::build_bulb_targets(
+        let result = crate::ambient::build_bulb_targets(
             &self.regions,
             self.bulb_setup.discovered_bulbs(),
             self.config.min_brightness_percent,
             self.config.white_color_temp,
             &self.last_sent_colors,
-        ) {
+        );
+
+        if let Some(orig) = originals {
+            for (region, o) in self.regions.iter_mut().zip(orig) {
+                region.sampled_color = o;
+            }
+        }
+
+        if let Some((targets, new_entries)) = result {
             for (mac, color, brightness) in new_entries {
                 self.last_sent_colors.insert(mac, (color, brightness));
             }
@@ -905,6 +1095,7 @@ impl Cocuyo {
     fn sync_regions_to_bulbs(&mut self) {
         let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
         self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
+        self.color_smoother.retain(|mac| selected_macs.iter().any(|m| m == mac));
 
         if let Some(sel) = self.selected_region {
             if !self.regions.iter().any(|r| r.id == sel) {

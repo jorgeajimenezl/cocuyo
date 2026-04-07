@@ -65,6 +65,14 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Sync the ambient-related fields from the config (used after a profile
+    /// load so we don't drop transient UI state by recreating the whole struct).
+    pub fn sync_ambient_from_config(&mut self, config: &AppConfig) {
+        self.bulb_update_interval_ms = config.bulb_update_interval_ms;
+        self.min_brightness_percent = config.min_brightness_percent;
+        self.white_color_temp = config.white_color_temp;
+    }
+
     pub fn new(config: &AppConfig) -> Self {
         #[cfg(target_os = "linux")]
         let (available_backends, selected_backend_index) = {
