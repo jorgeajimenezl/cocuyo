@@ -16,7 +16,7 @@ strip = "symbols"
 
 [dependencies]
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "a951b6337edef00affbc25362b1df843d7cb661c", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
-wgpu = "28"
+wgpu = { version = "28", default-features = false }
 wgpu-types = { version = "28", default-features = false, features = ["serde"] }
 tokio = { version = "1.41", default-features = false, features = [ "rt-multi-thread", "macros" ] }
 tracing = "0.1"
@@ -39,7 +39,7 @@ gstreamer-app = "0.23"
 gstreamer-video = "0.23"
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "a951b6337edef00affbc25362b1df843d7cb661c", features = ["wayland"] }
 nix = { version = "0.29", default-features = false, features = ["fs", "mman", "ioctl"] }
-wgpu-hal = { version = "28", features = ["vulkan"] }
+wgpu-hal = { version = "28", default-features = false, features = ["vulkan"] }
 pipewire = { version = "0.9", features = ["v0_3_77"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -50,7 +50,7 @@ windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dxgi_Common", "Win32_Foundation",
     "Win32_System_Console",
 ] }
-wgpu-hal = { version = "28", features = ["dx12"] }
+wgpu-hal = { version = "28", default-features = false, features = ["dx12"] }
 
 [build-dependencies]
 resvg = "0.45"
@@ -61,7 +61,7 @@ winresource = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "1.5.3", features = ["async", "macos_14_0"] }
-wgpu-hal = { version = "28", features = ["metal"] }
-metal = "0.32"
+wgpu-hal = { version = "28", default-features = false, features = ["metal"] }
+metal = "0.33"
 objc2 = "0.6.4"
 foreign-types = "0.5"
