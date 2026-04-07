@@ -319,10 +319,11 @@ impl Settings {
             ]
             .spacing(5),
             pick_list(
-                adapter_options,
                 Some(&self.selected_adapter),
-                Message::AdapterSelected,
+                adapter_options,
+                |a: &GpuAdapterSelection| a.to_string(),
             )
+            .on_select(Message::AdapterSelected)
             .style(theme::styled_pick_list)
             .width(Fill),
             text(active_label).size(12).color(theme::TEXT_DIM),

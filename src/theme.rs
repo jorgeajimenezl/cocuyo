@@ -26,7 +26,7 @@ pub const HUD_TEXT: Color = Color::from_rgba8(0xfe, 0xcd, 0xb2, 0.9);
 static THEME: LazyLock<Theme> = LazyLock::new(|| {
     Theme::custom(
         "Cocuyo".to_string(),
-        iced::theme::Palette {
+        iced::theme::palette::Seed {
             background: BG,
             text: TEXT,
             primary: ACCENT,
@@ -208,7 +208,7 @@ pub fn styled_rule(_theme: &Theme) -> rule::Style {
 
 pub fn styled_pick_list(_theme: &Theme, status: pick_list::Status) -> pick_list::Style {
     let border_color = match status {
-        pick_list::Status::Active => BORDER,
+        pick_list::Status::Active | pick_list::Status::Disabled => BORDER,
         pick_list::Status::Hovered | pick_list::Status::Opened { .. } => ACCENT,
     };
 
