@@ -38,7 +38,13 @@ impl ProfileRegion {
             height: self.nh * frame_h,
             bulb_mac: self.bulb_mac.clone(),
             sampled_color: None,
-            strategy: BoxedStrategy::from_id(&self.strategy_id).unwrap_or_default(),
+            strategy: BoxedStrategy::from_id(&self.strategy_id).unwrap_or_else(|| {
+                warn!(
+                    strategy_id = %self.strategy_id,
+                    "Unknown sampling strategy in profile; falling back to default"
+                );
+                BoxedStrategy::default()
+            }),
         }
     }
 }

@@ -220,7 +220,10 @@ impl Cocuyo {
                 if kind == Some(WindowKind::ProfileDialog) {
                     self.profile_dialog = None;
                 }
-                if kind == Some(WindowKind::Settings) || kind == Some(WindowKind::BulbSetup) {
+                if kind == Some(WindowKind::Settings)
+                    || kind == Some(WindowKind::BulbSetup)
+                    || kind == Some(WindowKind::ProfileDialog)
+                {
                     self.flush_config();
                 }
                 if kind == Some(WindowKind::Main) {
@@ -935,9 +938,10 @@ impl Cocuyo {
         self.config.min_brightness_percent = profile.min_brightness_percent;
         self.config.white_color_temp = profile.white_color_temp;
 
-        // Update selected bulbs
+        // Update selected bulbs (and sync to config for persistence)
         self.bulb_setup
             .set_selected_bulbs(profile.selected_bulb_macs.iter().cloned());
+        self.save_bulb_config();
 
         // Rebuild regions from profile
         let (frame_w, frame_h) = self
