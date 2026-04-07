@@ -16,9 +16,9 @@ strip = "symbols"
 
 [dependencies]
 iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "99c17020435a8c9b3fae855644e740fd82871518", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
-wgpu = { version = "28", default-features = false }
+wgpu = { version = "28", default-features = false, features = ["std", "wgsl"] }
 wgpu-types = { version = "28", default-features = false, features = ["serde"] }
-tokio = { version = "1.41", default-features = false, features = [ "rt-multi-thread", "macros" ] }
+tokio = { version = "1.41", default-features = false, features = [ "rt-multi-thread", "macros", "sync", "time" ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bytemuck = { version = "1.25.0", features = ["derive"] }
