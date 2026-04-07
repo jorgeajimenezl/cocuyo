@@ -299,12 +299,14 @@ impl Cocuyo {
                 Some(parent),
             ),
             Message::OpenProfileDialog(parent) => {
-                self.profile_dialog = Some(
-                    crate::screen::profile_dialog::ProfileDialog::new(
-                        &self.config.profiles,
-                        self.active_profile_name.as_deref(),
-                    ),
-                );
+                if self.find_window_id(WindowKind::ProfileDialog).is_none() {
+                    self.profile_dialog = Some(
+                        crate::screen::profile_dialog::ProfileDialog::new(
+                            &self.config.profiles,
+                            self.active_profile_name.as_deref(),
+                        ),
+                    );
+                }
                 self.open_window(
                     WindowKind::ProfileDialog,
                     PROFILE_DIALOG_SIZE,
@@ -953,12 +955,17 @@ impl Cocuyo {
         self.config.min_brightness_percent = profile.min_brightness_percent;
         self.config.white_color_temp = profile.white_color_temp;
 
-        // Update selected bulbs (and sync to config for persistence)
+        // Update selected bulbs (and sync to config for persistence).
+        // Note: set_selected_bulbs filters to currently discovered bulbs, so
+        // a profile MAC that isn't known will be silently dropped here.
         self.bulb_setup
             .set_selected_bulbs(profile.selected_bulb_macs.iter().cloned());
         self.save_bulb_config();
 
-        // Rebuild regions from profile
+        // Rebuild regions from profile, skipping any whose bulb_mac was
+        // filtered out above so we don't end up with orphan regions targeting
+        // bulbs that aren't selected/known.
+        let active_macs = self.bulb_setup.selected_bulbs().clone();
         let (frame_w, frame_h) = self
             .current_frame
             .as_ref()
@@ -966,7 +973,7 @@ impl Cocuyo {
             .unwrap_or(DEFAULT_FRAME_SIZE);
 
         self.regions.clear();
-        for pr in &profile.regions {
+        for pr in profile.regions.iter().filter(|r| active_macs.contains(&r.bulb_mac)) {
             let region = pr.to_region(self.next_region_id, frame_w, frame_h);
             self.next_region_id += 1;
             self.regions.push(region);
@@ -978,6 +985,10 @@ impl Cocuyo {
         // Refresh settings screen state
         self.settings = settings::Settings::new(&self.config);
         self.mark_config_dirty();
+        // Flush immediately so a crash/restart after profile switch retains
+        // the applied settings (this can be triggered from the menu pick_list
+        // without any window close).
+        self.flush_config();
         Task::none()
     }
 
