@@ -64,4 +64,39 @@ fn main() {
     // Tray icon (32x32 raw RGBA)
     let pixmap = render_svg(tray_svg, 32);
     save_raw_rgba(&pixmap, &out.join("icon-tray-32.rgba"));
+
+    // Windows executable icon (.ico embedded via resource file)
+    #[cfg(target_os = "windows")]
+    {
+        let ico_path = out.join("cocuyo.ico");
+        let mut icon_dir = ico::IconDir::new(ico::ResourceType::Icon);
+        for &size in &[16u32, 32, 48, 64, 128, 256] {
+            let pixmap = render_svg(square_svg, size);
+            // tiny-skia is premultiplied; unpremultiply for ICO
+            let src = pixmap.data();
+            let mut rgba = Vec::with_capacity(src.len());
+            for pixel in src.chunks_exact(4) {
+                let (r, g, b, a) = (pixel[0], pixel[1], pixel[2], pixel[3]);
+                if a == 0 {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                } else {
+                    let a_f = a as f32 / 255.0;
+                    rgba.push((r as f32 / a_f).round().min(255.0) as u8);
+                    rgba.push((g as f32 / a_f).round().min(255.0) as u8);
+                    rgba.push((b as f32 / a_f).round().min(255.0) as u8);
+                    rgba.push(a);
+                }
+            }
+            let image = ico::IconImage::from_rgba_data(size, size, rgba);
+            icon_dir.add_entry(
+                ico::IconDirEntry::encode(&image).expect("Failed to encode ICO entry"),
+            );
+        }
+        let file = std::fs::File::create(&ico_path).expect("Failed to create .ico file");
+        icon_dir.write(file).expect("Failed to write .ico file");
+
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon(ico_path.to_str().expect("ico path is not valid UTF-8"));
+        res.compile().expect("Failed to compile Windows resource");
+    }
 }
