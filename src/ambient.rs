@@ -183,12 +183,8 @@ pub async fn dispatch_bulb_colors(targets: Vec<(IpAddr, BulbColor, u8)>) {
     send_colors_to_bulbs(targets).await;
 }
 
-/// Per-bulb exponential moving average smoother for sampled colors.
-///
-/// Interpolates between the current smoothed color and the new sample each
-/// dispatch cycle, reducing flickering and jarring transitions on the bulbs.
-/// The smoothing factor (alpha) controls responsiveness: lower = smoother but
-/// slower to react, higher = more responsive but less smooth.
+/// EMA blend factor at the 150ms reference interval. Lower = smoother but
+/// less responsive; higher = more responsive but flickers more.
 const SMOOTH_ALPHA: f32 = 0.35;
 
 pub struct ColorSmoother {
@@ -204,20 +200,18 @@ impl ColorSmoother {
         }
     }
 
-    /// Apply smoothing to a region's sampled color. Returns the smoothed RGB.
-    /// If this is the first sample for a bulb, snaps directly to the target.
     pub fn smooth(&mut self, mac: &str, target: (u8, u8, u8)) -> (u8, u8, u8) {
         let tf = (target.0 as f32, target.1 as f32, target.2 as f32);
 
-        // Scale alpha by time since last update to keep smoothing consistent
-        // regardless of update interval. At 150ms intervals alpha ≈ SMOOTH_ALPHA.
+        // Scale alpha by time since last update so smoothing feels the same
+        // regardless of the configured dispatch interval; reference is 150ms.
         let alpha = if let Some(last) = self.last_update {
             let dt = last.elapsed().as_secs_f32();
-            // Normalize to 150ms reference interval
             (1.0 - (1.0 - SMOOTH_ALPHA).powf(dt / 0.15)).clamp(0.0, 1.0)
         } else {
-            1.0 // first frame: snap
+            1.0
         };
+        self.last_update = Some(Instant::now());
 
         let smoothed = if let Some(cur) = self.state.get_mut(mac) {
             let next = (
@@ -229,7 +223,7 @@ impl ColorSmoother {
             next
         } else {
             self.state.insert(mac.to_owned(), tf);
-            tf // first sample for this bulb: snap
+            tf
         };
 
         (
@@ -239,12 +233,11 @@ impl ColorSmoother {
         )
     }
 
-    /// Call after each dispatch cycle to update the timestamp.
-    pub fn mark_updated(&mut self) {
-        self.last_update = Some(Instant::now());
+    /// Drop entries for bulbs no longer in use so state doesn't grow unbounded.
+    pub fn retain<F: FnMut(&str) -> bool>(&mut self, mut keep: F) {
+        self.state.retain(|k, _| keep(k));
     }
 
-    /// Clear all smoother state (e.g. when ambient stops).
     pub fn clear(&mut self) {
         self.state.clear();
         self.last_update = None;
@@ -569,7 +562,6 @@ mod tests {
     fn smoother_clear_resets_state() {
         let mut s = ColorSmoother::new();
         s.smooth("AA:BB", (100, 100, 100));
-        s.mark_updated();
         s.clear();
         // After clear, next sample should snap
         let result = s.smooth("AA:BB", (200, 50, 0));

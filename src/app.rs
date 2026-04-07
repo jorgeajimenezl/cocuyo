@@ -497,7 +497,10 @@ impl Cocuyo {
                         }
 
                         self.perf_stats.record_frame_arrival();
-                        self.last_frame_size = Some((frame.width(), frame.height()));
+                        let size = (frame.width(), frame.height());
+                        if self.last_frame_size != Some(size) {
+                            self.last_frame_size = Some(size);
+                        }
                         self.current_frame = Some(frame);
                         let frame = self.current_frame.as_ref().unwrap();
 
@@ -962,21 +965,16 @@ impl Cocuyo {
             return Task::none();
         };
 
-        // Apply ambient settings
         self.config.bulb_update_interval_ms = profile.bulb_update_interval_ms;
         self.config.min_brightness_percent = profile.min_brightness_percent;
         self.config.white_color_temp = profile.white_color_temp;
 
-        // Update selected bulbs (and sync to config for persistence).
-        // Note: set_selected_bulbs filters to currently discovered bulbs, so
-        // a profile MAC that isn't known will be silently dropped here.
+        // set_selected_bulbs drops MACs that aren't currently discovered, so
+        // filter regions by what actually stuck to avoid orphan regions.
         self.bulb_setup
             .set_selected_bulbs(profile.selected_bulb_macs.iter().cloned());
         self.save_bulb_config();
 
-        // Rebuild regions from profile, skipping any whose bulb_mac was
-        // filtered out above so we don't end up with orphan regions targeting
-        // bulbs that aren't selected/known.
         let active_macs = self.bulb_setup.selected_bulbs().clone();
         let (frame_w, frame_h) = self.current_or_last_frame_size();
 
@@ -990,12 +988,10 @@ impl Cocuyo {
 
         self.active_profile_name = Some(name.to_string());
 
-        // Refresh settings screen state
         self.settings = settings::Settings::new(&self.config);
+        // Profile switches from the menu pick_list never trigger a window
+        // close, so flush now instead of waiting for the usual save points.
         self.mark_config_dirty();
-        // Flush immediately so a crash/restart after profile switch retains
-        // the applied settings (this can be triggered from the menu pick_list
-        // without any window close).
         self.flush_config();
         Task::none()
     }
@@ -1043,24 +1039,36 @@ impl Cocuyo {
     }
 
     fn dispatch_to_bulbs(&mut self) -> Task<Message> {
-        // Apply color smoothing if enabled
-        if self.config.smooth_transitions {
+        // Preview overlay reads sampled_color as ground truth, so restore it
+        // after smoothing for the build call.
+        let originals: Option<Vec<Option<(u8, u8, u8)>>> = if self.config.smooth_transitions {
+            let snap: Vec<_> = self.regions.iter().map(|r| r.sampled_color).collect();
             for region in &mut self.regions {
                 if let Some(rgb) = region.sampled_color {
                     region.sampled_color =
                         Some(self.color_smoother.smooth(&region.bulb_mac, rgb));
                 }
             }
-            self.color_smoother.mark_updated();
-        }
+            Some(snap)
+        } else {
+            None
+        };
 
-        if let Some((targets, new_entries)) = crate::ambient::build_bulb_targets(
+        let result = crate::ambient::build_bulb_targets(
             &self.regions,
             self.bulb_setup.discovered_bulbs(),
             self.config.min_brightness_percent,
             self.config.white_color_temp,
             &self.last_sent_colors,
-        ) {
+        );
+
+        if let Some(orig) = originals {
+            for (region, o) in self.regions.iter_mut().zip(orig) {
+                region.sampled_color = o;
+            }
+        }
+
+        if let Some((targets, new_entries)) = result {
             for (mac, color, brightness) in new_entries {
                 self.last_sent_colors.insert(mac, (color, brightness));
             }
@@ -1081,6 +1089,7 @@ impl Cocuyo {
     fn sync_regions_to_bulbs(&mut self) {
         let selected_macs: Vec<String> = self.bulb_setup.selected_bulbs().iter().cloned().collect();
         self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
+        self.color_smoother.retain(|mac| selected_macs.iter().any(|m| m == mac));
 
         if let Some(sel) = self.selected_region {
             if !self.regions.iter().any(|r| r.id == sel) {
