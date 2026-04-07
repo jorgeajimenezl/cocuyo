@@ -108,19 +108,19 @@ jobs:
 
       - name: Attest build provenance (Linux/macOS)
         if: runner.os != 'Windows'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ matrix.artifact }}.tar.gz
 
       - name: Attest build provenance (macOS DMG)
         if: runner.os == 'macOS'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ matrix.artifact }}.dmg
 
       - name: Attest build provenance (Windows)
         if: runner.os == 'Windows'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ matrix.artifact }}.zip
 
