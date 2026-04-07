@@ -375,6 +375,7 @@ impl Cocuyo {
                 self.is_ambient_active = true;
                 self.last_bulb_update = None;
                 self.last_sent_colors.clear();
+                self.color_smoother.clear();
                 self.tray
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
@@ -428,6 +429,7 @@ impl Cocuyo {
                             self.is_recording = false;
                             self.is_ambient_active = false;
                             self.last_sent_colors.clear();
+                            self.color_smoother.clear();
                             self.recording_cmd_tx = None;
                             self.current_frame = None;
                             self.tray.update_menu_text(

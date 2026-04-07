@@ -158,6 +158,7 @@ mod tests {
         assert_eq!(config.white_color_temp, 6500);
         assert_eq!(config.capture_resolution_scale, 100);
         assert!(config.minimize_to_tray);
+        assert!(config.smooth_transitions);
     }
 
     #[test]
