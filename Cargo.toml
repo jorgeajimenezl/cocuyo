@@ -4,7 +4,7 @@ version = "0.5.2"
 edition = "2024"
 
 [features]
-default = ["tray"]
+default = []
 tray = ["dep:tray-icon"]
 
 [profile.release]
