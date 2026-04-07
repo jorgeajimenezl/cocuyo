@@ -497,8 +497,8 @@ mod tests {
     fn matching_region_produces_target() {
         let regions = [make_region("AA:BB", Some((255, 0, 0)))];
         let bulbs = [make_bulb("AA:BB")];
-        let (targets, _) =
-            build_bulb_targets(&regions, &bulbs, 10, 6500, &HashMap::new()).expect("should have targets");
+        let (targets, _) = build_bulb_targets(&regions, &bulbs, 10, 6500, &HashMap::new())
+            .expect("should have targets");
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0, "192.168.1.100".parse::<IpAddr>().unwrap());
     }

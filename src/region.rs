@@ -152,8 +152,14 @@ mod tests {
     fn wider_frame_letterboxed() {
         // 16:9 frame in a square widget → letterboxed (offset_y > 0, offset_x == 0)
         let layout = ContainLayout::compute(1920, 1080, rect(0.0, 0.0, 800.0, 800.0));
-        assert!(layout.offset_x.abs() < 1e-3, "no horizontal offset for wider frame");
-        assert!(layout.offset_y > 1.0, "should have vertical offset (letterbox)");
+        assert!(
+            layout.offset_x.abs() < 1e-3,
+            "no horizontal offset for wider frame"
+        );
+        assert!(
+            layout.offset_y > 1.0,
+            "should have vertical offset (letterbox)"
+        );
         assert!((layout.rendered_w - 800.0).abs() < 1e-3, "full width used");
         assert!(layout.rendered_h < 800.0, "height smaller than bounds");
     }
@@ -162,8 +168,14 @@ mod tests {
     fn taller_frame_pillarboxed() {
         // 9:16 frame in a square widget → pillarboxed (offset_x > 0, offset_y == 0)
         let layout = ContainLayout::compute(1080, 1920, rect(0.0, 0.0, 800.0, 800.0));
-        assert!(layout.offset_x > 1.0, "should have horizontal offset (pillarbox)");
-        assert!(layout.offset_y.abs() < 1e-3, "no vertical offset for taller frame");
+        assert!(
+            layout.offset_x > 1.0,
+            "should have horizontal offset (pillarbox)"
+        );
+        assert!(
+            layout.offset_y.abs() < 1e-3,
+            "no vertical offset for taller frame"
+        );
         assert!(layout.rendered_w < 800.0, "width smaller than bounds");
         assert!((layout.rendered_h - 800.0).abs() < 1e-3, "full height used");
     }
@@ -203,7 +215,10 @@ mod tests {
         // Point clearly outside the rendered area
         let (fx, fy) = widget_to_frame_unclamped(-100.0, -100.0, bounds, 1920, 1080);
         // Should return values (negative) without returning None
-        assert!(fx < 0.0 || fy < 0.0, "unclamped should allow out-of-bounds coords");
+        assert!(
+            fx < 0.0 || fy < 0.0,
+            "unclamped should allow out-of-bounds coords"
+        );
     }
 
     #[test]
@@ -217,16 +232,18 @@ mod tests {
         let widget_rect = frame_to_widget(&region, bounds, fw, fh);
 
         // Convert the top-left corner of the widget rect back to frame space
-        let (fx, fy) = widget_to_frame(
-            widget_rect.x,
-            widget_rect.y,
-            bounds,
-            fw,
-            fh,
-        )
-        .expect("widget rect corner should map back to frame");
+        let (fx, fy) = widget_to_frame(widget_rect.x, widget_rect.y, bounds, fw, fh)
+            .expect("widget rect corner should map back to frame");
 
-        assert!((fx - region.x).abs() < 2.0, "x round-trip: got {fx}, expected {}", region.x);
-        assert!((fy - region.y).abs() < 2.0, "y round-trip: got {fy}, expected {}", region.y);
+        assert!(
+            (fx - region.x).abs() < 2.0,
+            "x round-trip: got {fx}, expected {}",
+            region.x
+        );
+        assert!(
+            (fy - region.y).abs() < 2.0,
+            "y round-trip: got {fy}, expected {}",
+            region.y
+        );
     }
 }

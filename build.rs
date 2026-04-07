@@ -95,9 +95,8 @@ fn main() {
                 }
             }
             let image = ico::IconImage::from_rgba_data(size, size, rgba);
-            icon_dir.add_entry(
-                ico::IconDirEntry::encode(&image).expect("Failed to encode ICO entry"),
-            );
+            icon_dir
+                .add_entry(ico::IconDirEntry::encode(&image).expect("Failed to encode ICO entry"));
         }
         let file = std::fs::File::create(&ico_path).expect("Failed to create .ico file");
         icon_dir.write(file).expect("Failed to write .ico file");

@@ -88,7 +88,10 @@ impl SamplingWorker {
                                 .collect()
                         }
                     };
-                    let _ = request.result_tx.send(SamplingResult { colors, gpu_time_ms });
+                    let _ = request.result_tx.send(SamplingResult {
+                        colors,
+                        gpu_time_ms,
+                    });
                     idle_flag.store(true, Ordering::Release);
                 }
                 info!("GPU sampler worker thread exiting");
@@ -328,7 +331,8 @@ fn classify_regions(regions: &[RegionParams]) -> ClassifiedRegions {
 }
 
 fn clamp_region(rp: &RegionParams, width: u32, height: u32) -> Option<Params> {
-    let (x0, y0, x1, y1) = super::clamp_region_bounds(rp.x, rp.y, rp.width, rp.height, width, height)?;
+    let (x0, y0, x1, y1) =
+        super::clamp_region_bounds(rp.x, rp.y, rp.width, rp.height, width, height)?;
     Some(Params { x0, y0, x1, y1 })
 }
 
@@ -846,16 +850,15 @@ impl GpuSampler {
                 // Re-import on the sampler thread (safe — not inside winit event handler).
                 // We need an owned wgpu::Texture for PendingCopy.
                 // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
-                let (imported, wgpu_format) =
-                    screencapturekit::metal::autoreleasepool(|| unsafe {
-                        crate::platform::macos::metal_import::import_iosurface_texture(
-                            &self.device,
-                            surface,
-                            *width,
-                            *height,
-                        )
-                    })
-                    .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
+                let (imported, wgpu_format) = screencapturekit::metal::autoreleasepool(|| unsafe {
+                    crate::platform::macos::metal_import::import_iosurface_texture(
+                        &self.device,
+                        surface,
+                        *width,
+                        *height,
+                    )
+                })
+                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
 
                 self.ensure_texture(*width, *height, wgpu_format);
                 let view = create_non_srgb_view(

@@ -159,7 +159,11 @@ mod tests {
         ema.update(100.0); // first: sets directly
         ema.update(200.0); // second: 0.05 * 200 + 0.95 * 100 = 105
         let expected = 0.05 * 200.0 + 0.95 * 100.0;
-        assert!((ema.get() - expected).abs() < 1e-10, "got {}, expected {expected}", ema.get());
+        assert!(
+            (ema.get() - expected).abs() < 1e-10,
+            "got {}, expected {expected}",
+            ema.get()
+        );
     }
 
     #[test]
@@ -190,6 +194,9 @@ mod tests {
         let fp3 = stats.fingerprint();
 
         // At least one change should produce a different fingerprint
-        assert!(fp1 != fp2 || fp2 != fp3, "fingerprint should change when metrics change");
+        assert!(
+            fp1 != fp2 || fp2 != fp3,
+            "fingerprint should change when metrics change"
+        );
     }
 }

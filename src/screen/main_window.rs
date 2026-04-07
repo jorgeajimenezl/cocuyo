@@ -71,8 +71,10 @@ pub fn view<'a>(
     // Left panel: video preview + region overlay + perf HUD
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video: Element<'a, Message> =
-                shader(VideoScene::new(Some(f))).width(Fill).height(Fill).into();
+            let video: Element<'a, Message> = shader(VideoScene::new(Some(f)))
+                .width(Fill)
+                .height(Fill)
+                .into();
 
             let mut layers: Vec<Element<'a, Message>> = vec![video];
 

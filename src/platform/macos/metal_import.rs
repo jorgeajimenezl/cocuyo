@@ -92,7 +92,9 @@ pub unsafe fn import_iosurface_texture(
         }
 
         // RenderTarget is needed because wgpu maps COPY_SRC to it on Metal (used by GPU sampler).
-        let _: () = unsafe { msg_send![&*descriptor, setUsage: MTL_TEXTURE_USAGE_SHADER_READ_RENDER_TARGET] };
+        let _: () = unsafe {
+            msg_send![&*descriptor, setUsage: MTL_TEXTURE_USAGE_SHADER_READ_RENDER_TARGET]
+        };
         // IOSurface-backed textures require shared storage mode.
         let _: () = unsafe { msg_send![&*descriptor, setStorageMode: MTL_STORAGE_MODE_SHARED] };
 
@@ -111,8 +113,7 @@ pub unsafe fn import_iosurface_texture(
 
         // Convert raw pointer to metal::Texture.
         // msg_send returns a retained object (+1); from_ptr takes ownership.
-        let metal_texture =
-            unsafe { metal::Texture::from_ptr(metal_texture_ptr as *mut _) };
+        let metal_texture = unsafe { metal::Texture::from_ptr(metal_texture_ptr as *mut _) };
 
         // Wrap as a wgpu_hal texture.
         unsafe {
@@ -148,9 +149,8 @@ pub unsafe fn import_iosurface_texture(
         view_formats: alt_view_slice,
     };
 
-    let wgpu_texture = unsafe {
-        device.create_texture_from_hal::<wgpu_hal::api::Metal>(hal_texture, &wgpu_desc)
-    };
+    let wgpu_texture =
+        unsafe { device.create_texture_from_hal::<wgpu_hal::api::Metal>(hal_texture, &wgpu_desc) };
 
     debug!(width, height, "IOSurface imported via Metal");
 

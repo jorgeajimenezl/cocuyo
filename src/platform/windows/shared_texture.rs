@@ -84,7 +84,9 @@ fn read_texture_pixels(
         device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
     }
     let staging = staging.ok_or_else(|| {
-        SharedTextureError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(-1)))
+        SharedTextureError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(
+            -1,
+        )))
     })?;
 
     unsafe {
@@ -102,10 +104,7 @@ fn read_texture_pixels(
 
     for y in 0..height as usize {
         let src = unsafe {
-            std::slice::from_raw_parts(
-                (mapped.pData as *const u8).add(y * row_pitch),
-                row_bytes,
-            )
+            std::slice::from_raw_parts((mapped.pData as *const u8).add(y * row_pitch), row_bytes)
         };
         bgra[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(src);
     }

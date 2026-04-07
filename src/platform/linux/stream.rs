@@ -43,14 +43,19 @@ pub async fn open_portal() -> ashpd::Result<(
         )
         .await?;
 
-    let response = proxy.start(&session, None, Default::default()).await?.response()?;
+    let response = proxy
+        .start(&session, None, Default::default())
+        .await?
+        .response()?;
     let stream = response
         .streams()
         .first()
         .expect("no stream found / selected")
         .to_owned();
 
-    let fd = proxy.open_pipe_wire_remote(&session, Default::default()).await?;
+    let fd = proxy
+        .open_pipe_wire_remote(&session, Default::default())
+        .await?;
 
     Ok((stream, fd, session))
 }

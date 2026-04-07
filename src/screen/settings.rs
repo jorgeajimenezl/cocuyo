@@ -1,5 +1,5 @@
-use iced::widget::{rule, scrollable};
 use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, tooltip};
+use iced::widget::{rule, scrollable};
 use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
@@ -267,9 +267,11 @@ impl Settings {
                 .on_toggle(Message::ShowPerfOverlayToggled),
         );
         col = col.push(
-            text("Show capture FPS, sampling time, and bulb dispatch latency on the video preview.")
-                .size(12)
-                .color(theme::TEXT_DIM),
+            text(
+                "Show capture FPS, sampling time, and bulb dispatch latency on the video preview.",
+            )
+            .size(12)
+            .color(theme::TEXT_DIM),
         );
 
         col

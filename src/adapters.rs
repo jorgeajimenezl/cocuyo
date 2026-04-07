@@ -41,16 +41,17 @@ pub fn enumerate_adapters() -> Vec<GpuAdapter> {
         backends,
         ..Default::default()
     });
-    let adapters: Vec<GpuAdapter> = futures::executor::block_on(instance.enumerate_adapters(backends))
-    .into_iter()
-    .map(|adapter| {
-        let info = adapter.get_info();
-        GpuAdapter {
-            name: info.name,
-            backend: info.backend,
-        }
-    })
-    .collect();
+    let adapters: Vec<GpuAdapter> =
+        futures::executor::block_on(instance.enumerate_adapters(backends))
+            .into_iter()
+            .map(|adapter| {
+                let info = adapter.get_info();
+                GpuAdapter {
+                    name: info.name,
+                    backend: info.backend,
+                }
+            })
+            .collect();
 
     adapters
 }
