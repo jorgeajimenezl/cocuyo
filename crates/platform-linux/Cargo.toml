@@ -1,0 +1,21 @@
+[package]
+name = "cocuyo-platform-linux"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cocuyo-core = { path = "../core" }
+wgpu.workspace = true
+wgpu-hal = { workspace = true, features = ["vulkan"] }
+tracing.workspace = true
+tokio.workspace = true
+iced = { workspace = true, features = ["wayland"] }
+ash.workspace = true
+ashpd.workspace = true
+drm-fourcc.workspace = true
+gstreamer.workspace = true
+gstreamer-allocators.workspace = true
+gstreamer-app.workspace = true
+gstreamer-video.workspace = true
+nix.workspace = true
+pipewire.workspace = true

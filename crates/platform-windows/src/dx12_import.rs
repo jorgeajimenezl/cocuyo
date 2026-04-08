@@ -1,7 +1,7 @@
 use tracing::debug;
 use windows::Win32::Foundation::HANDLE;
 
-use crate::frame::ImportGuard;
+use cocuyo_core::frame::ImportGuard;
 
 static IMPORT_GUARD: ImportGuard = ImportGuard::new();
 
@@ -95,7 +95,7 @@ pub unsafe fn import_shared_texture(
     };
     // HAL guard dropped — device lock released.
 
-    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let non_srgb = cocuyo_core::texture_format::non_srgb_equivalent(wgpu_format);
     let alt_view_arr = (non_srgb != wgpu_format).then_some([non_srgb]);
     let alt_view_slice: &[wgpu::TextureFormat] =
         alt_view_arr.as_ref().map_or(&[], |a| a.as_slice());

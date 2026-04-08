@@ -3,16 +3,20 @@ pub mod gpu;
 mod max;
 mod min;
 mod palette;
+pub mod region;
 
 pub use average::Average;
 pub use max::Max;
 pub use min::Min;
 pub use palette::Palette;
+pub use region::{
+    ContainLayout, Region, frame_to_widget, widget_to_frame, widget_to_frame_unclamped,
+};
 
 use std::fmt;
 use std::sync::Arc;
 
-use crate::frame::FrameData;
+use cocuyo_core::FrameData;
 
 /// Trait for sampling strategies that extract a single RGB color from a
 /// rectangular region of BGRA pixel data.

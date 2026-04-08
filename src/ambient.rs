@@ -142,7 +142,7 @@ pub async fn discover_bulbs() -> Vec<BulbInfo> {
 /// and a list of `(mac, color, brightness)` entries the caller should insert into
 /// `last_sent` after a successful dispatch.
 pub fn build_bulb_targets(
-    regions: &[crate::region::Region],
+    regions: &[cocuyo_sampling::Region],
     bulbs: &[BulbInfo],
     min_brightness: u8,
     white_temp: u16,
@@ -361,8 +361,8 @@ pub async fn restore_bulb_states(states: Vec<SavedBulbState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::region::Region;
-    use crate::sampling::BoxedStrategy;
+    use cocuyo_sampling::BoxedStrategy;
+    use cocuyo_sampling::Region;
 
     fn make_region(mac: &str, color: Option<(u8, u8, u8)>) -> Region {
         Region {

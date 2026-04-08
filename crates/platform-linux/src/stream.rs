@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
-use crate::frame::FrameData;
+use cocuyo_core::frame::FrameData;
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,

@@ -4,12 +4,13 @@ use iced::widget::{
 use iced::window;
 use iced::{Center, Color, Fill, Length};
 
-use crate::app::{Message, RecordingState};
+use crate::app::Message;
 use crate::config::Profile;
-use crate::frame::FrameData;
 use crate::perf_stats::PerfStats;
-use crate::region::Region;
-use crate::sampling;
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::RecordingState;
+use cocuyo_sampling as sampling;
+use cocuyo_sampling::Region;
 use crate::theme;
 use crate::widget::Element;
 use crate::widget::perf_hud::PerfHud;

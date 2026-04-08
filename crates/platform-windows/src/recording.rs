@@ -6,12 +6,12 @@ use iced::futures::Stream;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::app::RecordingState;
-use crate::frame::FrameData;
-use crate::platform::windows::capture_target::CaptureTarget;
-use crate::platform::windows::dx12_import;
-use crate::platform::windows::shared_texture::HeldFrame;
-use crate::recording::{RecordingCommand, RecordingEvent};
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
+use cocuyo_core::windows::HeldFrame;
+
+use crate::capture_target::CaptureTarget;
+use crate::dx12_import;
 
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::Dxgi::{

@@ -1,7 +1,7 @@
 use iced::widget::{button, center, column, container, row, rule, scrollable, text};
 use iced::{Center, Fill, Task};
 
-use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
+use cocuyo_platform_windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
 use crate::theme;
 
 use windows::Win32::Foundation::HWND;

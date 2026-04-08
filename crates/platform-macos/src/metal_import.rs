@@ -4,7 +4,7 @@ use objc2::{class, msg_send};
 use screencapturekit::cm::IOSurface;
 use tracing::debug;
 
-use crate::frame::ImportGuard;
+use cocuyo_core::frame::ImportGuard;
 
 // Metal API constants
 const MTL_PIXEL_FORMAT_BGRA8_UNORM_SRGB: u64 = 81;
@@ -133,7 +133,7 @@ pub unsafe fn import_iosurface_texture(
     };
     // HAL guard dropped — device lock released.
 
-    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let non_srgb = cocuyo_core::texture_format::non_srgb_equivalent(wgpu_format);
     let alt_view_arr = (non_srgb != wgpu_format).then_some([non_srgb]);
     let alt_view_slice: &[wgpu::TextureFormat] =
         alt_view_arr.as_ref().map_or(&[], |a| a.as_slice());

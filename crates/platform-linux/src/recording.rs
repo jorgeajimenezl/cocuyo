@@ -9,9 +9,8 @@ use tracing::{error, info};
 
 use super::gst_pipeline::GpuBackend;
 use super::stream;
-use crate::app::RecordingState;
-use crate::frame::FrameData;
-use crate::recording::{RecordingCommand, RecordingEvent};
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
 
 pub fn recording_subscription(
     input: &(u64, GpuBackend, u32),

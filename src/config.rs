@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
-use crate::region::Region;
-use crate::sampling::BoxedStrategy;
+use cocuyo_sampling::BoxedStrategy;
+use cocuyo_sampling::Region;
+
 use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

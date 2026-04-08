@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use tracing::info;
 
-use crate::frame::FrameData;
+use cocuyo_core::FrameData;
 
 use super::BoxedStrategy;
 
@@ -815,7 +815,7 @@ impl GpuSampler {
             } => {
                 use std::os::fd::AsRawFd;
                 let (imported, wgpu_format) = unsafe {
-                    crate::platform::linux::vulkan_dmabuf::import_dmabuf_texture(
+                    cocuyo_platform_linux::vulkan_dmabuf::import_dmabuf_texture(
                         &self.device,
                         fd.as_raw_fd(),
                         *width,
@@ -851,7 +851,7 @@ impl GpuSampler {
                 // We need an owned wgpu::Texture for PendingCopy.
                 // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
                 let (imported, wgpu_format) = screencapturekit::metal::autoreleasepool(|| unsafe {
-                    crate::platform::macos::metal_import::import_iosurface_texture(
+                    cocuyo_platform_macos::metal_import::import_iosurface_texture(
                         &self.device,
                         surface,
                         *width,
@@ -883,7 +883,7 @@ impl GpuSampler {
                 use windows::Win32::Foundation::HANDLE;
                 let handle = HANDLE(frame.shared_handle().0 as *mut core::ffi::c_void);
                 let (imported, wgpu_format) = unsafe {
-                    crate::platform::windows::dx12_import::import_shared_texture(
+                    cocuyo_platform_windows::dx12_import::import_shared_texture(
                         &self.device,
                         handle,
                         *width,
@@ -949,7 +949,7 @@ impl GpuSampler {
         };
 
         if needs_recreate {
-            let non_srgb = crate::texture_format::non_srgb_equivalent(format);
+            let non_srgb = cocuyo_core::texture_format::non_srgb_equivalent(format);
             let mut view_formats = vec![];
             if non_srgb != format {
                 view_formats.push(non_srgb);
@@ -983,7 +983,7 @@ fn create_non_srgb_view(
     texture: &wgpu::Texture,
     original_format: wgpu::TextureFormat,
 ) -> wgpu::TextureView {
-    let view_format = crate::texture_format::non_srgb_equivalent(original_format);
+    let view_format = cocuyo_core::texture_format::non_srgb_equivalent(original_format);
     texture.create_view(&wgpu::TextureViewDescriptor {
         format: Some(view_format),
         ..Default::default()

@@ -14,9 +14,8 @@ use screencapturekit::stream::output_type::SCStreamOutputType;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use crate::app::RecordingState;
-use crate::frame::FrameData;
-use crate::recording::{RecordingCommand, RecordingEvent};
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
 
 /// Copy BGRA pixel data, stripping row padding if present.
 pub fn strip_stride_padding(

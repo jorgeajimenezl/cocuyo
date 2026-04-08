@@ -8,13 +8,13 @@ use iced::widget::shader;
 use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
-use crate::frame::FrameData;
+use cocuyo_core::frame::FrameData;
 #[cfg(target_os = "linux")]
-use crate::platform::linux::vulkan_dmabuf;
+use cocuyo_platform_linux::vulkan_dmabuf;
 #[cfg(target_os = "macos")]
-use crate::platform::macos::metal_import;
+use cocuyo_platform_macos::metal_import;
 #[cfg(target_os = "windows")]
-use crate::platform::windows::dx12_import;
+use cocuyo_platform_windows::dx12_import;
 
 /// Scene data passed to the shader widget each frame.
 pub struct VideoScene {
@@ -485,7 +485,7 @@ impl VideoPipeline {
         match result {
             Ok((texture, wgpu_format)) => {
                 let view_format =
-                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -526,7 +526,7 @@ impl VideoPipeline {
         match result {
             Ok((texture, wgpu_format)) => {
                 let view_format =
-                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -565,7 +565,7 @@ impl VideoPipeline {
         match result {
             Ok((texture, wgpu_format)) => {
                 let view_format =
-                    crate::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
@@ -606,7 +606,7 @@ impl VideoPipeline {
             return;
         }
 
-        let format = crate::texture_format::adjust_srgb(
+        let format = cocuyo_core::texture_format::adjust_srgb(
             wgpu::TextureFormat::Bgra8UnormSrgb,
             self.surface_format.is_srgb(),
         );
@@ -650,7 +650,7 @@ impl VideoPipeline {
         frame_height: u32,
         bounds: Rectangle,
     ) {
-        let layout = crate::region::ContainLayout::compute(frame_width, frame_height, bounds);
+        let layout = cocuyo_sampling::ContainLayout::compute(frame_width, frame_height, bounds);
 
         let uniforms = Uniforms {
             scale: [layout.scale_x, layout.scale_y],

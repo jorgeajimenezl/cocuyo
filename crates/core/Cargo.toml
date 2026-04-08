@@ -1,0 +1,23 @@
+[package]
+name = "cocuyo-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wgpu.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true }
+drm-fourcc.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common", "Win32_Foundation",
+] }
+windows-capture.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit.workspace = true

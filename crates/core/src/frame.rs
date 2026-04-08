@@ -10,7 +10,7 @@ use drm_fourcc::DrmFourcc;
 use screencapturekit::cm::IOSurface;
 
 #[cfg(target_os = "windows")]
-use crate::platform::windows::shared_texture;
+use crate::windows as shared_texture;
 
 /// Atomic flag for tracking whether a zero-copy import path is still viable.
 /// Once import fails, the path is disabled until explicitly reset.
@@ -152,7 +152,7 @@ impl FrameData {
                 drm_format,
                 ..
             } => {
-                match crate::platform::linux::dmabuf_handler::read_dmabuf_pixels(
+                match crate::linux::read_dmabuf_pixels(
                     fd.as_raw_fd(),
                     *width,
                     *height,
@@ -180,7 +180,7 @@ impl FrameData {
                 Ok(guard) => {
                     let bpr = surface.bytes_per_row();
                     let src = guard.as_slice();
-                    let bgra = crate::platform::macos::recording::strip_stride_padding(
+                    let bgra = crate::macos::strip_stride_padding(
                         src,
                         *width as usize,
                         *height as usize,
