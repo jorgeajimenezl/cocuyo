@@ -1,4 +1,5 @@
 mod average;
+mod frame_import;
 pub mod gpu;
 mod max;
 mod min;
@@ -6,6 +7,7 @@ mod palette;
 pub mod region;
 
 pub use average::Average;
+pub use frame_import::{GpuImport, ImportError};
 pub use max::Max;
 pub use min::Min;
 pub use palette::Palette;

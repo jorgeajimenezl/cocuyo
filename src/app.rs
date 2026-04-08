@@ -635,7 +635,7 @@ impl Cocuyo {
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
                 crate::screen::main_window::view(
                     window_id,
-                    self.current_frame.as_ref().map(|f| f.as_ref()),
+                    self.current_frame.as_ref(),
                     &self.recording_state,
                     frame_info,
                     self.is_ambient_active,

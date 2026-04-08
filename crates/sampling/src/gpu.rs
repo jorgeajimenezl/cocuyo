@@ -802,110 +802,9 @@ impl GpuSampler {
     /// Import a frame as a GPU texture, returning a view and optional pending
     /// texture copy to be recorded into the caller's command encoder.
     fn import_frame(&mut self, frame: &Arc<FrameData>) -> Result<ImportedFrame, GpuSamplerError> {
+        use crate::frame_import::GpuImport;
+
         match frame.as_ref() {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf {
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
-                ..
-            } => {
-                use std::os::fd::AsRawFd;
-                let (imported, wgpu_format) = unsafe {
-                    cocuyo_platform_linux::vulkan_dmabuf::import_dmabuf_texture(
-                        &self.device,
-                        fd.as_raw_fd(),
-                        *width,
-                        *height,
-                        *drm_format,
-                        *stride,
-                        *offset,
-                    )
-                }
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface {
-                surface,
-                width,
-                height,
-            } => {
-                // Re-import on the sampler thread (safe — not inside winit event handler).
-                // We need an owned wgpu::Texture for PendingCopy.
-                // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
-                let (imported, wgpu_format) = screencapturekit::metal::autoreleasepool(|| unsafe {
-                    cocuyo_platform_macos::metal_import::import_iosurface_texture(
-                        &self.device,
-                        surface,
-                        *width,
-                        *height,
-                    )
-                })
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared {
-                frame,
-                width,
-                height,
-            } => {
-                use windows::Win32::Foundation::HANDLE;
-                let handle = HANDLE(frame.shared_handle().0 as *mut core::ffi::c_void);
-                let (imported, wgpu_format) = unsafe {
-                    cocuyo_platform_windows::dx12_import::import_shared_texture(
-                        &self.device,
-                        handle,
-                        *width,
-                        *height,
-                    )
-                }
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
             FrameData::Cpu {
                 data,
                 width,
@@ -936,6 +835,27 @@ impl GpuSampler {
                 Ok(ImportedFrame {
                     view: create_non_srgb_view(&ct.texture, format),
                     pending_copy: None,
+                })
+            }
+            other => {
+                let (imported, wgpu_format) = other
+                    .import_gpu(&self.device)
+                    .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
+                let width = other.width();
+                let height = other.height();
+
+                self.ensure_texture(width, height, wgpu_format);
+                let view = create_non_srgb_view(
+                    &self.cached_texture.as_ref().unwrap().texture,
+                    wgpu_format,
+                );
+                Ok(ImportedFrame {
+                    view,
+                    pending_copy: Some(PendingCopy {
+                        src: imported,
+                        width,
+                        height,
+                    }),
                 })
             }
         }

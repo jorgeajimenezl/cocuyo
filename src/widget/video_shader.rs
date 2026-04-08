@@ -1,107 +1,19 @@
-#[cfg(target_os = "linux")]
-use std::os::fd::AsRawFd;
 use std::sync::Arc;
 
-#[cfg(target_os = "linux")]
-use drm_fourcc::DrmFourcc;
 use iced::widget::shader;
 use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
 use cocuyo_core::frame::FrameData;
-#[cfg(target_os = "linux")]
-use cocuyo_platform_linux::vulkan_dmabuf;
-#[cfg(target_os = "macos")]
-use cocuyo_platform_macos::metal_import;
-#[cfg(target_os = "windows")]
-use cocuyo_platform_windows::dx12_import;
+use cocuyo_sampling::GpuImport;
 
 /// Scene data passed to the shader widget each frame.
 pub struct VideoScene {
-    frame: Option<FrameInfo>,
-}
-
-/// Extracted frame information for the shader primitive.
-enum FrameInfo {
-    #[cfg(target_os = "linux")]
-    DmaBuf {
-        fd: std::os::fd::RawFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        offset: u32,
-    },
-    #[cfg(target_os = "macos")]
-    IOSurface {
-        surface: screencapturekit::cm::IOSurface,
-        width: u32,
-        height: u32,
-    },
-    #[cfg(target_os = "windows")]
-    D3DShared {
-        shared_handle: isize,
-        width: u32,
-        height: u32,
-    },
-    Cpu {
-        data: Arc<Vec<u8>>,
-        width: u32,
-        height: u32,
-    },
+    frame: Option<Arc<FrameData>>,
 }
 
 impl VideoScene {
-    pub fn new(frame: Option<&FrameData>) -> Self {
-        let frame = frame.map(|f| match f {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf {
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
-                ..
-            } => FrameInfo::DmaBuf {
-                fd: fd.as_raw_fd(),
-                width: *width,
-                height: *height,
-                drm_format: *drm_format,
-                stride: *stride,
-                offset: *offset,
-            },
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface {
-                surface,
-                width,
-                height,
-            } => FrameInfo::IOSurface {
-                surface: surface.clone(),
-                width: *width,
-                height: *height,
-            },
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared {
-                frame,
-                width,
-                height,
-            } => FrameInfo::D3DShared {
-                shared_handle: frame.shared_handle().0 as isize,
-                width: *width,
-                height: *height,
-            },
-            FrameData::Cpu {
-                data,
-                width,
-                height,
-            } => FrameInfo::Cpu {
-                data: Arc::clone(data),
-                width: *width,
-                height: *height,
-            },
-        });
-
+    pub fn new(frame: Option<Arc<FrameData>>) -> Self {
         Self { frame }
     }
 }
@@ -117,53 +29,8 @@ impl<Message> shader::Program<Message> for VideoScene {
         bounds: Rectangle,
     ) -> Self::Primitive {
         match &self.frame {
-            #[cfg(target_os = "linux")]
-            Some(FrameInfo::DmaBuf {
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
-            }) => VideoPrimitive::DmaBuf {
-                fd: *fd,
-                width: *width,
-                height: *height,
-                drm_format: *drm_format,
-                stride: *stride,
-                offset: *offset,
-                bounds,
-            },
-            #[cfg(target_os = "macos")]
-            Some(FrameInfo::IOSurface {
-                surface,
-                width,
-                height,
-            }) => VideoPrimitive::IOSurface {
-                surface: surface.clone(),
-                width: *width,
-                height: *height,
-                bounds,
-            },
-            #[cfg(target_os = "windows")]
-            Some(FrameInfo::D3DShared {
-                shared_handle,
-                width,
-                height,
-            }) => VideoPrimitive::D3DShared {
-                shared_handle: *shared_handle,
-                width: *width,
-                height: *height,
-                bounds,
-            },
-            Some(FrameInfo::Cpu {
-                data,
-                width,
-                height,
-            }) => VideoPrimitive::Cpu {
-                data: Arc::clone(data),
-                width: *width,
-                height: *height,
+            Some(frame) => VideoPrimitive::Frame {
+                frame: Arc::clone(frame),
                 bounds,
             },
             None => VideoPrimitive::Empty,
@@ -174,34 +41,8 @@ impl<Message> shader::Program<Message> for VideoScene {
 /// Primitive that carries per-frame data to the GPU pipeline.
 #[derive(Debug)]
 pub enum VideoPrimitive {
-    #[cfg(target_os = "linux")]
-    DmaBuf {
-        fd: std::os::fd::RawFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        offset: u32,
-        bounds: Rectangle,
-    },
-    #[cfg(target_os = "macos")]
-    IOSurface {
-        surface: screencapturekit::cm::IOSurface,
-        width: u32,
-        height: u32,
-        bounds: Rectangle,
-    },
-    #[cfg(target_os = "windows")]
-    D3DShared {
-        shared_handle: isize,
-        width: u32,
-        height: u32,
-        bounds: Rectangle,
-    },
-    Cpu {
-        data: Arc<Vec<u8>>,
-        width: u32,
-        height: u32,
+    Frame {
+        frame: Arc<FrameData>,
         bounds: Rectangle,
     },
     Empty,
@@ -219,60 +60,8 @@ impl shader::Primitive for VideoPrimitive {
         _viewport: &iced::advanced::graphics::Viewport,
     ) {
         match self {
-            #[cfg(target_os = "linux")]
-            VideoPrimitive::DmaBuf {
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
-                bounds,
-            } => {
-                pipeline.prepare_dmabuf(
-                    device,
-                    queue,
-                    *fd,
-                    *width,
-                    *height,
-                    *drm_format,
-                    *stride,
-                    *offset,
-                    *bounds,
-                );
-            }
-            #[cfg(target_os = "macos")]
-            VideoPrimitive::IOSurface {
-                surface,
-                width,
-                height,
-                bounds,
-            } => {
-                pipeline.prepare_iosurface(device, queue, surface, *width, *height, *bounds);
-            }
-            #[cfg(target_os = "windows")]
-            VideoPrimitive::D3DShared {
-                shared_handle,
-                width,
-                height,
-                bounds,
-            } => {
-                pipeline.prepare_d3d_shared(
-                    device,
-                    queue,
-                    *shared_handle,
-                    *width,
-                    *height,
-                    *bounds,
-                );
-            }
-            VideoPrimitive::Cpu {
-                data,
-                width,
-                height,
-                bounds,
-            } => {
-                pipeline.prepare_cpu(device, queue, data, *width, *height, *bounds);
+            VideoPrimitive::Frame { frame, bounds } => {
+                pipeline.prepare_frame(device, queue, frame, *bounds);
             }
             VideoPrimitive::Empty => {
                 pipeline.current_bind_group = None;
@@ -463,124 +252,47 @@ impl VideoPipeline {
         &self.cached_texture.as_ref().unwrap().texture
     }
 
-    #[cfg(target_os = "linux")]
-    fn prepare_dmabuf(
+    /// Unified frame preparation. CPU frames take the cached-texture upload
+    /// path; everything else goes through the [`GpuImport`] zero-copy import.
+    fn prepare_frame(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        fd: std::os::fd::RawFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        offset: u32,
+        frame: &FrameData,
         bounds: Rectangle,
     ) {
-        let result = unsafe {
-            vulkan_dmabuf::import_dmabuf_texture(
-                device, fd, width, height, drm_format, stride, offset,
-            )
-        };
+        if let FrameData::Cpu {
+            data,
+            width,
+            height,
+        } = frame
+        {
+            self.prepare_cpu(device, queue, data, *width, *height, bounds);
+            return;
+        }
 
-        match result {
+        match frame.import_gpu(device) {
             Ok((texture, wgpu_format)) => {
-                let view_format =
-                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
+                let view_format = cocuyo_core::texture_format::adjust_srgb(
+                    wgpu_format,
+                    self.surface_format.is_srgb(),
+                );
                 let view = texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(view_format),
                     ..Default::default()
                 });
-                self.update_bind_group(device, queue, &view, width, height, bounds);
+                self.update_bind_group(device, queue, &view, frame.width(), frame.height(), bounds);
             }
             Err(e) => {
                 error!(
                     error = %e,
-                    fd,
-                    width,
-                    height,
-                    format = ?drm_format,
-                    "DMA-BUF Vulkan import failed, disabling for future frames"
+                    width = frame.width(),
+                    height = frame.height(),
+                    "frame GPU import failed, disabling path for future frames"
                 );
-                vulkan_dmabuf::mark_dmabuf_import_failed();
+                frame.mark_import_failed();
                 self.current_bind_group = None;
                 self.cached_texture = None;
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn prepare_d3d_shared(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        shared_handle: isize,
-        width: u32,
-        height: u32,
-        bounds: Rectangle,
-    ) {
-        use windows::Win32::Foundation::HANDLE;
-
-        let handle = HANDLE(shared_handle as *mut core::ffi::c_void);
-        let result = unsafe { dx12_import::import_shared_texture(device, handle, width, height) };
-
-        match result {
-            Ok((texture, wgpu_format)) => {
-                let view_format =
-                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
-                let view = texture.create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(view_format),
-                    ..Default::default()
-                });
-                self.update_bind_group(device, queue, &view, width, height, bounds);
-            }
-            Err(e) => {
-                error!(
-                    error = %e,
-                    width,
-                    height,
-                    "D3D shared texture import failed, disabling for future frames"
-                );
-                dx12_import::mark_d3d_shared_import_failed();
-                self.current_bind_group = None;
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn prepare_iosurface(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        surface: &screencapturekit::cm::IOSurface,
-        width: u32,
-        height: u32,
-        bounds: Rectangle,
-    ) {
-        // Wrap Metal/ObjC calls in an autoreleasepool to prevent Cocoa
-        // run-loop re-entrancy panics inside the winit event handler.
-        let result = screencapturekit::metal::autoreleasepool(|| unsafe {
-            metal_import::import_iosurface_texture(device, surface, width, height)
-        });
-
-        match result {
-            Ok((texture, wgpu_format)) => {
-                let view_format =
-                    cocuyo_core::texture_format::adjust_srgb(wgpu_format, self.surface_format.is_srgb());
-                let view = texture.create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(view_format),
-                    ..Default::default()
-                });
-                self.update_bind_group(device, queue, &view, width, height, bounds);
-            }
-            Err(e) => {
-                error!(
-                    error = %e,
-                    width,
-                    height,
-                    "IOSurface Metal import failed, disabling for future frames"
-                );
-                metal_import::mark_iosurface_import_failed();
-                self.current_bind_group = None;
             }
         }
     }

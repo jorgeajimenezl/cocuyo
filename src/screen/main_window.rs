@@ -7,6 +7,8 @@ use iced::{Center, Color, Fill, Length};
 use crate::app::Message;
 use crate::config::Profile;
 use crate::perf_stats::PerfStats;
+use std::sync::Arc;
+
 use cocuyo_core::frame::FrameData;
 use cocuyo_core::recording::RecordingState;
 use cocuyo_sampling as sampling;
@@ -19,7 +21,7 @@ use crate::widget::video_shader::VideoScene;
 
 pub fn view<'a>(
     window_id: window::Id,
-    frame: Option<&FrameData>,
+    frame: Option<&Arc<FrameData>>,
     recording_state: &RecordingState,
     frame_info: Option<(u32, u32)>,
     is_ambient_active: bool,
@@ -72,7 +74,7 @@ pub fn view<'a>(
     // Left panel: video preview + region overlay + perf HUD
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video: Element<'a, Message> = shader(VideoScene::new(Some(f)))
+            let video: Element<'a, Message> = shader(VideoScene::new(Some(Arc::clone(f))))
                 .width(Fill)
                 .height(Fill)
                 .into();
