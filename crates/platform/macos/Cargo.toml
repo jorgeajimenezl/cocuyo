@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocuyo-core = { path = "../core" }
+cocuyo-core = { path = "../../core" }
 wgpu.workspace = true
 wgpu-hal = { workspace = true, features = ["metal"] }
 tracing.workspace = true

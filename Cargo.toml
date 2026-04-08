@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/sampling", "crates/platform-windows", "crates/platform-linux", "crates/platform-macos"]
+members = [".", "crates/core", "crates/sampling", "crates/platform/windows", "crates/platform/linux", "crates/platform/macos"]
 resolver = "3"
 
 [workspace.package]
@@ -74,13 +74,13 @@ dirs = "6.0.0"
 tray-icon = { version = "0.19", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-cocuyo-platform-linux = { path = "crates/platform-linux" }
+cocuyo-platform-linux = { path = "crates/platform/linux" }
 gstreamer.workspace = true
 pipewire.workspace = true
 iced = { workspace = true, features = ["wayland"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-cocuyo-platform-windows = { path = "crates/platform-windows" }
+cocuyo-platform-windows = { path = "crates/platform/windows" }
 windows-capture = { workspace = true }
 windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging",
@@ -89,7 +89,7 @@ windows = { version = "0.62.2", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocuyo-platform-macos = { path = "crates/platform-macos" }
+cocuyo-platform-macos = { path = "crates/platform/macos" }
 
 [build-dependencies]
 resvg = "0.45"
