@@ -60,6 +60,20 @@ Always run `cargo build` and `cargo test` after making changes. Do not consider 
 
 Cocuyo is a cross-platform screen capture application with ambient lighting support. On Linux it captures via PipeWire/Wayland; on Windows it uses the Windows Graphics Capture API; on macOS it uses ScreenCaptureKit. The UI is built with **iced** (v0.14, custom fork) using the wgpu backend with custom window decorations (daemon mode, multi-window). Rust edition is **2024**.
 
+### Workspace Layout
+
+The project is a Cargo workspace. The binary crate `cocuyo` lives at the repo root (`src/`) and depends on path-local sibling crates under `crates/`:
+
+- **`crates/core`** (`cocuyo-core`) — Platform-agnostic frame transport. Owns `FrameData` + per-variant payload types (`HeldFrame` on Windows, IOSurface wrapper on macOS, DMA-BUF read helpers on Linux), `RecordingCommand`/`RecordingEvent`/`RecordingState`, `texture_format` helpers. Takes the heavy target-cfg deps (`windows`, `windows-capture` types, `nix`+`drm-fourcc`, `screencapturekit`) so the binary's translation unit doesn't have to. Stable, cache-hit on incremental builds.
+- **`crates/sampling`** (`cocuyo-sampling`) — `SamplingStrategy` trait, `BoxedStrategy`, all strategies (`Average`/`Max`/`Min`/`Palette`), `GpuSampler` + `SamplingWorker`, WGSL compute shaders, `Region`/`ContainLayout`. Depends on `cocuyo-core` and (target-cfg) the platform crates for GPU texture imports inside `gpu.rs`.
+- **`crates/platform-windows`** (`cocuyo-platform-windows`) — Windows recording subscription, `CaptureTarget`/`PickerTab`/`PickerIntent`, `dx12_import`, `SharedTexturePool`. Owns `windows-capture` and the Direct3D `windows` features.
+- **`crates/platform-linux`** (`cocuyo-platform-linux`) — PipeWire stream, portal session, GStreamer pipeline, Vulkan DMA-BUF import, format tables. Owns `gstreamer*`, `pipewire`, `ashpd`, `ash`, `nix`.
+- **`crates/platform-macos`** (`cocuyo-platform-macos`) — ScreenCaptureKit recording subscription, Metal IOSurface import. Owns `screencapturekit`, `metal`, `objc2`.
+
+The binary crate (`src/`) keeps only what is edited often: `main.rs`, `app.rs`, `config.rs`, `adapters.rs`, `ambient.rs`, `gpu_context.rs`, `perf_stats.rs`, `theme.rs`, `tray.rs`, all of `screen/*` and `widget/*`. Editing UI code only recompiles the binary; the platform/sampling/core crates stay cached. Crate folder names drop the `cocuyo-` prefix (`crates/core`, `crates/sampling`, etc.) but the package names retain it.
+
+Shared dependency versions are centralized in `[workspace.dependencies]` in the root `Cargo.toml`; sub-crates reference them with `.workspace = true`.
+
 ### Data Flow
 
 #### Linux
@@ -98,21 +112,21 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 
 ### Key Components
 
-- **`main.rs`** - Application entry point, loads config, sets wgpu adapter via env vars, initializes GStreamer/PipeWire (Linux), launches iced daemon
-- **`app.rs`** - `Cocuyo` application state, iced message handling, multi-window management (`Main`, `Settings`, `BulbSetup`, `CapturePicker`). Recording state, regions, bulb state, and config owned directly (no mutexes).
-- **`frame.rs`** - Platform-agnostic `FrameData` enum with `DmaBuf` (Linux), `IOSurface` (macOS), `D3DShared` (Windows), and `Cpu` variants
-- **`recording.rs`** - Platform-agnostic recording types (`RecordingCommand`, `RecordingEvent`) with conditional re-exports from platform modules
-- **`config.rs`** - Persistent app configuration via TOML (`~/.config/cocuyo/config.toml`). Stores preferred adapter, backend, saved bulbs, selected bulb MACs, capture settings (fps limit, resolution scale), ambient settings (update interval, brightness, color temp), and UI preferences (minimize to tray, perf overlay).
-- **`adapters.rs`** - GPU adapter enumeration and selection (`GpuAdapter`, `GpuAdapterSelection`)
-- **`ambient.rs`** - WiZ smart bulb discovery, color mapping, state save/restore, frame sampling dispatch
-- **`region.rs`** - Screen capture region definitions and coordinate transformations
-- **`theme.rs`** - Custom iced theme and styling
+- **`main.rs`** (binary) - Application entry point, loads config, sets wgpu adapter via env vars, initializes GStreamer/PipeWire (Linux), launches iced daemon
+- **`app.rs`** (binary) - `Cocuyo` application state, iced message handling, multi-window management (`Main`, `Settings`, `BulbSetup`, `CapturePicker`). Recording state, regions, bulb state, and config owned directly (no mutexes).
+- **`cocuyo-core::frame`** - Platform-agnostic `FrameData` enum with `DmaBuf` (Linux), `IOSurface` (macOS), `D3DShared` (Windows), and `Cpu` variants
+- **`cocuyo-core::recording`** - Platform-agnostic recording types (`RecordingCommand`, `RecordingEvent`, `RecordingState`)
+- **`config.rs`** (binary) - Persistent app configuration via TOML (`~/.config/cocuyo/config.toml`). Stores preferred adapter, backend, saved bulbs, selected bulb MACs, capture settings (fps limit, resolution scale), ambient settings (update interval, brightness, color temp), and UI preferences (minimize to tray, perf overlay).
+- **`adapters.rs`** (binary) - GPU adapter enumeration and selection (`GpuAdapter`, `GpuAdapterSelection`)
+- **`ambient.rs`** (binary) - WiZ smart bulb discovery, color mapping, state save/restore, frame sampling dispatch
+- **`cocuyo-sampling::region`** - Screen capture region definitions and coordinate transformations (`Region`, `ContainLayout`)
+- **`theme.rs`** (binary) - Custom iced theme and styling
 - **`gpu_context.rs`** - Global `OnceLock` storing the wgpu `Device`/`Queue` for use outside the shader widget (set once from `VideoPipeline::new()`)
 - **`tray.rs`** - System tray icon and menu (Windows/macOS only; Linux stub). Menu items: Show/Hide, Start/Stop Ambient, Exit
 - **`perf_stats.rs`** - Performance metrics tracking with EMA smoothing (alpha=0.05): effective FPS, frame interval, sampling time, bulb dispatch duration. Fingerprinting for HUD cache invalidation
 
-#### Sampling Module (`sampling/`)
-- **`mod.rs`** - `SamplingStrategy` trait (with `supports_gpu()` opt-in), `BoxedStrategy` type-erased wrapper (for iced pick_list), `sample_region()` function, `sample_extremum()` unified max/min helper, strategy registry
+#### Sampling Crate (`crates/sampling/` — `cocuyo-sampling`)
+- **`lib.rs`** - `SamplingStrategy` trait (with `supports_gpu()` opt-in), `BoxedStrategy` type-erased wrapper (for iced pick_list), `sample_region()` function, `sample_extremum()` unified max/min helper, strategy registry
 - **`average.rs`** - `Average` strategy: computes mean RGB across sampled pixels (GPU-capable)
 - **`max.rs`** - `Max` strategy: finds brightest pixel by luminance (CPU-only, delegates to `sample_extremum`)
 - **`min.rs`** - `Min` strategy: finds darkest pixel by luminance (CPU-only, delegates to `sample_extremum`)
@@ -135,23 +149,23 @@ Cocuyo is a cross-platform screen capture application with ambient lighting supp
 - **`bulb_setup.rs`** - WiZ bulb discovery and selection UI
 - **`capture_picker.rs`** - Windows-only capture target picker (monitors, windows)
 
-#### Platform: Linux (`platform/linux/`)
+#### Platform: Linux (`crates/platform-linux/` — `cocuyo-platform-linux`)
 - **`recording.rs`** - Linux recording subscription via PipeWire as `iced::Subscription`
 - **`stream.rs`** - PipeWire stream setup, portal session, frame processing pipeline (DMA-BUF and CPU paths). Uses bounded `mpsc::Sender<Arc<FrameData>>` with backpressure.
 - **`gst_pipeline.rs`** - GStreamer video converter with GPU backend detection (CUDA, OpenGL, CPU). `GstVideoConverter` handles appsrc → videoconvert → appsink.
 - **`vulkan_dmabuf.rs`** - Vulkan DMA-BUF import: creates VkImage with external memory, wraps into wgpu texture via `wgpu_hal`
-- **`dmabuf_handler.rs`** - DMA-BUF metadata extraction from PipeWire buffers (fd, stride, format, dimensions, modifier) and pixel reading
+- **`dmabuf_handler.rs`** - DMA-BUF metadata extraction from PipeWire buffers (fd, stride, format, dimensions, modifier). The CPU pixel-read fallback (`read_dmabuf_pixels`) lives in `cocuyo-core::linux`.
 - **`formats.rs`** - Unified video format conversion tables: PipeWire SPA → GStreamer, PipeWire SPA → DRM fourcc, DRM → Vulkan format, DRM → wgpu format, importability check
 
-#### Platform: Windows (`platform/windows/`)
+#### Platform: Windows (`crates/platform-windows/` — `cocuyo-platform-windows`)
 - **`recording.rs`** - Windows recording subscription using `windows-capture` crate
 - **`capture_target.rs`** - `CaptureTarget` enum (Monitor/Window), `PickerTab`, `PickerIntent`
 - **`dx12_import.rs`** - DX12 shared texture import into wgpu
-- **`shared_texture.rs`** - `SharedTexturePool` and `SharedTextureSlot` for GPU-GPU zero-copy frame delivery via shared D3D11 textures with keyed mutexes
+- **`SharedTexturePool`** - `SharedTexturePool` and `SharedTextureSlot` for GPU-GPU zero-copy frame delivery via shared D3D11 textures with keyed mutexes. The `HeldFrame` type that the pool hands out lives in `cocuyo-core::windows` (so `FrameData::D3DShared` is constructible from both crates).
 
-#### Platform: macOS (`platform/macos/`)
+#### Platform: macOS (`crates/platform-macos/` — `cocuyo-platform-macos`)
 - **`recording.rs`** - macOS recording subscription using `screencapturekit` crate. Configurable frame rate and resolution via `capture_resolution_scale`
-- **`metal_import.rs`** - IOSurface import into wgpu texture via Metal HAL (zero-copy)
+- **`metal_import.rs`** - IOSurface import into wgpu texture via Metal HAL (zero-copy). The `strip_stride_padding` helper lives in `cocuyo-core::macos`.
 
 ### Threading Model
 
