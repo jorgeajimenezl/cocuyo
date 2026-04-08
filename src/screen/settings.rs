@@ -76,7 +76,7 @@ impl Settings {
     pub fn new(config: &AppConfig) -> Self {
         #[cfg(target_os = "linux")]
         let (available_backends, selected_backend_index) = {
-            use crate::platform::linux::gst_pipeline;
+            use cocuyo_platform_linux::gst_pipeline;
             use tracing::info;
 
             let detected_backends = gst_pipeline::detect_available_backends();
