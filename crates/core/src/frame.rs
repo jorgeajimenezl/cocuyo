@@ -54,10 +54,10 @@ pub trait GpuFrame: Send + Sync + std::fmt::Debug {
 #[derive(Debug)]
 pub enum FrameData {
     /// A platform-specific zero-copy GPU frame (DMA-BUF, IOSurface, D3D shared texture).
-    Gpu(Arc<dyn GpuFrame>),
+    Gpu(Box<dyn GpuFrame>),
     /// Raw BGRA pixel data already in CPU memory.
     Cpu {
-        data: Arc<Vec<u8>>,
+        data: Vec<u8>,
         width: u32,
         height: u32,
     },
@@ -95,11 +95,7 @@ impl FrameData {
             FrameData::Gpu(g) => {
                 let (width, height) = (g.width(), g.height());
                 match g.read_pixels_bgra() {
-                    Some(bgra_data) => Some(Arc::new(FrameData::Cpu {
-                        data: Arc::new(bgra_data),
-                        width,
-                        height,
-                    })),
+                    Some(data) => Some(Arc::new(FrameData::Cpu { data, width, height })),
                     None => {
                         tracing::error!("Failed to read GPU frame pixels for CPU fallback");
                         None

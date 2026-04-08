@@ -33,7 +33,7 @@ fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<Fra
             let w = surface.width() as u32;
             let h = surface.height() as u32;
             if w > 0 && h > 0 {
-                return Some(Arc::new(FrameData::Gpu(Arc::new(IOSurfaceFrame {
+                return Some(Arc::new(FrameData::Gpu(Box::new(IOSurfaceFrame {
                     surface,
                     width: w,
                     height: h,
@@ -59,7 +59,7 @@ fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<Fra
     let bgra = strip_stride_padding(src, w as usize, h as usize, bpr);
 
     Some(Arc::new(FrameData::Cpu {
-        data: Arc::new(bgra),
+        data: bgra,
         width: w,
         height: h,
     }))

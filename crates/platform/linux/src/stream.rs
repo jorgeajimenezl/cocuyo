@@ -281,7 +281,7 @@ fn try_process_dmabuf(
             );
         });
 
-        return Some(FrameData::Gpu(Arc::new(DmaBufFrame {
+        return Some(FrameData::Gpu(Box::new(DmaBufFrame {
             fd: duped_fd,
             width: dmabuf.width,
             height: dmabuf.height,
@@ -367,7 +367,7 @@ fn try_process_dmabuf_gstreamer(
 
     match converter.pull_bgra_frame() {
         Ok(data) => Some(FrameData::Cpu {
-            data: Arc::new(data),
+            data,
             width: user_data.format.size().width,
             height: user_data.format.size().height,
         }),
@@ -419,7 +419,7 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     };
 
     Some(FrameData::Cpu {
-        data: Arc::new(converted_data),
+        data: converted_data,
         width: user_data.format.size().width,
         height: user_data.format.size().height,
     })

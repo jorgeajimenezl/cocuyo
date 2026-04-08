@@ -63,7 +63,7 @@ impl CaptureHandler {
             (*(raw as *const _ as *const ID3D11Texture2D)).clone()
         };
 
-        let frame_data = Arc::new(FrameData::Gpu(Arc::new(HeldFrame::new(
+        let frame_data = Arc::new(FrameData::Gpu(Box::new(HeldFrame::new(
             held,
             texture_clone,
             shared_handle,
@@ -129,7 +129,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         };
 
         let frame_data = Arc::new(FrameData::Cpu {
-            data: Arc::new(bgra_data),
+            data: bgra_data,
             width,
             height,
         });
