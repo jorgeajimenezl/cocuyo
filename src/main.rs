@@ -51,8 +51,6 @@ fn main() -> iced::Result {
     #[cfg(target_os = "linux")]
     {
         gstreamer::init().expect("Failed to initialize GStreamer");
-        info!("GStreamer initialized");
-
         pipewire::init();
     }
 
