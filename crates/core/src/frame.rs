@@ -1,16 +1,8 @@
-#[cfg(target_os = "linux")]
-use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(target_os = "linux")]
-use drm_fourcc::DrmFourcc;
-
-#[cfg(target_os = "macos")]
-use screencapturekit::cm::IOSurface;
-
-#[cfg(target_os = "windows")]
-use crate::windows as shared_texture;
+/// Boxed error type for GPU import failures.
+pub type ImportError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Atomic flag for tracking whether a zero-copy import path is still viable.
 /// Once import fails, the path is disabled until explicitly reset.
@@ -34,67 +26,36 @@ impl ImportGuard {
     }
 }
 
-impl std::fmt::Debug for FrameData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf {
-                width,
-                height,
-                drm_format,
-                ..
-            } => f
-                .debug_struct("DmaBuf")
-                .field("width", width)
-                .field("height", height)
-                .field("drm_format", drm_format)
-                .finish(),
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface { width, height, .. } => f
-                .debug_struct("IOSurface")
-                .field("width", width)
-                .field("height", height)
-                .finish(),
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared { width, height, .. } => f
-                .debug_struct("D3DShared")
-                .field("width", width)
-                .field("height", height)
-                .finish(),
-            FrameData::Cpu { width, height, .. } => f
-                .debug_struct("Cpu")
-                .field("width", width)
-                .field("height", height)
-                .finish(),
-        }
-    }
+/// Trait implemented by each platform's zero-copy frame type.
+///
+/// Platform crates provide a concrete struct (e.g. `DmaBufFrame`,
+/// `HeldFrame`, `IOSurfaceFrame`) and implement this trait. The binary and
+/// `cocuyo-sampling` interact with frames exclusively through
+/// [`FrameData`] — they never need to match on platform variants.
+pub trait GpuFrame: Send + Sync + std::fmt::Debug {
+    fn width(&self) -> u32;
+    fn height(&self) -> u32;
+
+    /// Import this frame as a wgpu texture, returning the native pixel format.
+    fn import_gpu(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<(wgpu::Texture, wgpu::TextureFormat), ImportError>;
+
+    /// Disable the zero-copy import path globally after a failure.
+    fn mark_import_failed(&self);
+
+    /// Read pixel data from this frame as tightly-packed BGRA bytes, for CPU
+    /// sampling fallbacks. Returns `None` if readback is not possible.
+    fn read_pixels_bgra(&self) -> Option<Vec<u8>>;
 }
 
+/// A captured video frame, either GPU-backed or already on the CPU.
+#[derive(Debug)]
 pub enum FrameData {
-    #[cfg(target_os = "linux")]
-    DmaBuf {
-        fd: OwnedFd,
-        width: u32,
-        height: u32,
-        drm_format: DrmFourcc,
-        stride: u32,
-        #[allow(dead_code)]
-        offset: u32,
-        #[allow(dead_code)]
-        modifier: u64,
-    },
-    #[cfg(target_os = "macos")]
-    IOSurface {
-        surface: IOSurface,
-        width: u32,
-        height: u32,
-    },
-    #[cfg(target_os = "windows")]
-    D3DShared {
-        frame: shared_texture::HeldFrame,
-        width: u32,
-        height: u32,
-    },
+    /// A platform-specific zero-copy GPU frame (DMA-BUF, IOSurface, D3D shared texture).
+    Gpu(Arc<dyn GpuFrame>),
+    /// Raw BGRA pixel data already in CPU memory.
     Cpu {
         data: Arc<Vec<u8>>,
         width: u32,
@@ -105,115 +66,46 @@ pub enum FrameData {
 impl FrameData {
     pub fn width(&self) -> u32 {
         match self {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf { width, .. } => *width,
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface { width, .. } => *width,
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared { width, .. } => *width,
+            FrameData::Gpu(g) => g.width(),
             FrameData::Cpu { width, .. } => *width,
         }
     }
 
     pub fn height(&self) -> u32 {
         match self {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf { height, .. } => *height,
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface { height, .. } => *height,
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared { height, .. } => *height,
+            FrameData::Gpu(g) => g.height(),
             FrameData::Cpu { height, .. } => *height,
         }
     }
 
-    /// Returns a reference to the BGRA pixel data, if available.
+    /// Returns a reference to the BGRA pixel data for `Cpu` frames.
+    /// GPU frames return `None` — use [`convert_to_cpu`] for readback.
     pub fn pixels(&self) -> Option<&[u8]> {
         match self {
             FrameData::Cpu { data, .. } => Some(data.as_slice()),
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf { .. } => None,
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface { .. } => None,
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared { .. } => None,
+            FrameData::Gpu(_) => None,
         }
     }
 
+    /// Convert this frame to a `Cpu` variant. For `Cpu` frames the Arc is
+    /// cloned cheaply. For `Gpu` frames the platform impl reads back pixel data.
     pub fn convert_to_cpu(self: &Arc<Self>) -> Option<Arc<FrameData>> {
         match self.as_ref() {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf {
-                fd,
-                width,
-                height,
-                stride,
-                offset,
-                drm_format,
-                ..
-            } => {
-                match crate::linux::read_dmabuf_pixels(
-                    fd.as_raw_fd(),
-                    *width,
-                    *height,
-                    *stride,
-                    *offset,
-                    *drm_format,
-                ) {
-                    Ok(bgra_data) => Some(Arc::new(FrameData::Cpu {
+            FrameData::Cpu { .. } => Some(self.clone()),
+            FrameData::Gpu(g) => {
+                let (width, height) = (g.width(), g.height());
+                match g.read_pixels_bgra() {
+                    Some(bgra_data) => Some(Arc::new(FrameData::Cpu {
                         data: Arc::new(bgra_data),
-                        width: *width,
-                        height: *height,
+                        width,
+                        height,
                     })),
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to convert DmaBuf to BGRA");
+                    None => {
+                        tracing::error!("Failed to read GPU frame pixels for CPU fallback");
                         None
                     }
                 }
             }
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface {
-                surface,
-                width,
-                height,
-            } => match surface.lock_read_only() {
-                Ok(guard) => {
-                    let bpr = surface.bytes_per_row();
-                    let src = guard.as_slice();
-                    let bgra = crate::macos::strip_stride_padding(
-                        src,
-                        *width as usize,
-                        *height as usize,
-                        bpr,
-                    );
-                    Some(Arc::new(FrameData::Cpu {
-                        data: Arc::new(bgra),
-                        width: *width,
-                        height: *height,
-                    }))
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to lock IOSurface for CPU readback");
-                    None
-                }
-            },
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared {
-                frame,
-                width,
-                height,
-            } => match frame.read_pixels() {
-                Ok(bgra_data) => Some(Arc::new(FrameData::Cpu {
-                    data: Arc::new(bgra_data),
-                    width: *width,
-                    height: *height,
-                })),
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to read shared texture pixels");
-                    None
-                }
-            },
-            FrameData::Cpu { .. } => Some(self.clone()),
         }
     }
 }

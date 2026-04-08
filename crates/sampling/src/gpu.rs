@@ -802,8 +802,6 @@ impl GpuSampler {
     /// Import a frame as a GPU texture, returning a view and optional pending
     /// texture copy to be recorded into the caller's command encoder.
     fn import_frame(&mut self, frame: &Arc<FrameData>) -> Result<ImportedFrame, GpuSamplerError> {
-        use crate::frame_import::GpuImport;
-
         match frame.as_ref() {
             FrameData::Cpu {
                 data,
@@ -837,12 +835,12 @@ impl GpuSampler {
                     pending_copy: None,
                 })
             }
-            other => {
-                let (imported, wgpu_format) = other
+            FrameData::Gpu(gpu) => {
+                let (imported, wgpu_format) = gpu
                     .import_gpu(&self.device)
                     .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-                let width = other.width();
-                let height = other.height();
+                let width = gpu.width();
+                let height = gpu.height();
 
                 self.ensure_texture(width, height, wgpu_format);
                 let view = create_non_srgb_view(

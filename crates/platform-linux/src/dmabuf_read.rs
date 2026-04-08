@@ -1,7 +1,7 @@
-//! Linux DMA-BUF pixel readback helpers used by `FrameData::convert_to_cpu`.
+//! DMA-BUF pixel readback helpers (moved from `cocuyo-core::linux`).
 //!
-//! Extracted from the heavier `dmabuf_handler` module that lives in
-//! `cocuyo-platform-linux` so that `cocuyo-core` does not need PipeWire.
+//! Used by [`super::dmabuf_frame::DmaBufFrame::read_pixels_bgra`] as the
+//! CPU fallback when GPU sampling strategies need raw pixel data.
 
 use std::num::NonZeroUsize;
 use std::os::fd::{BorrowedFd, RawFd};

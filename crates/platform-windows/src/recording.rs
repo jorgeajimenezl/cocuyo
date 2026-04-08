@@ -8,7 +8,8 @@ use tracing::{error, info, warn};
 
 use cocuyo_core::frame::FrameData;
 use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
-use cocuyo_core::windows::HeldFrame;
+
+use crate::held_frame::HeldFrame;
 
 use crate::capture_target::CaptureTarget;
 use crate::dx12_import;
@@ -62,11 +63,13 @@ impl CaptureHandler {
             (*(raw as *const _ as *const ID3D11Texture2D)).clone()
         };
 
-        let frame_data = Arc::new(FrameData::D3DShared {
-            frame: HeldFrame::new(held, texture_clone, shared_handle, width, height),
+        let frame_data = Arc::new(FrameData::Gpu(Arc::new(HeldFrame::new(
+            held,
+            texture_clone,
+            shared_handle,
             width,
             height,
-        });
+        ))));
 
         match self.frame_tx.try_send(frame_data) {
             Ok(()) => true,

@@ -647,14 +647,9 @@ dependencies = [
 name = "cocuyo-core"
 version = "0.5.3"
 dependencies = [
- "drm-fourcc",
- "nix 0.29.0",
- "screencapturekit",
  "tokio",
  "tracing",
  "wgpu",
- "windows",
- "windows-capture",
 ]
 
 [[package]]
@@ -714,15 +709,11 @@ version = "0.5.3"
 dependencies = [
  "bytemuck",
  "cocuyo-core",
- "cocuyo-platform-linux",
- "cocuyo-platform-macos",
- "cocuyo-platform-windows",
  "futures",
  "iced",
  "tokio",
  "tracing",
  "wgpu",
- "windows",
 ]
 
 [[package]]

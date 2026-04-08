@@ -12,6 +12,7 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use super::dmabuf_frame::DmaBufFrame;
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
@@ -280,7 +281,7 @@ fn try_process_dmabuf(
             );
         });
 
-        return Some(FrameData::DmaBuf {
+        return Some(FrameData::Gpu(Arc::new(DmaBufFrame {
             fd: duped_fd,
             width: dmabuf.width,
             height: dmabuf.height,
@@ -288,7 +289,7 @@ fn try_process_dmabuf(
             stride: dmabuf.stride,
             offset: dmabuf.offset,
             modifier: dmabuf.modifier,
-        });
+        })));
     }
 
     // Non-importable format or non-linear modifier: use GStreamer conversion

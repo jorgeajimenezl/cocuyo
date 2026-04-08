@@ -11,13 +11,3 @@ tracing.workspace = true
 iced.workspace = true
 tokio.workspace = true
 futures.workspace = true
-
-[target.'cfg(target_os = "windows")'.dependencies]
-cocuyo-platform-windows = { path = "../platform-windows" }
-windows = { version = "0.62.2", features = ["Win32_Foundation"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-cocuyo-platform-linux = { path = "../platform-linux" }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-cocuyo-platform-macos = { path = "../platform-macos" }

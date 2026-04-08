@@ -5,7 +5,6 @@ use iced::{Rectangle, mouse};
 use tracing::{error, warn};
 
 use cocuyo_core::frame::FrameData;
-use cocuyo_sampling::GpuImport;
 
 /// Scene data passed to the shader widget each frame.
 pub struct VideoScene {
@@ -253,7 +252,7 @@ impl VideoPipeline {
     }
 
     /// Unified frame preparation. CPU frames take the cached-texture upload
-    /// path; everything else goes through the [`GpuImport`] zero-copy import.
+    /// path; GPU frames go through the platform's zero-copy import.
     fn prepare_frame(
         &mut self,
         device: &wgpu::Device,
@@ -271,7 +270,11 @@ impl VideoPipeline {
             return;
         }
 
-        match frame.import_gpu(device) {
+        let FrameData::Gpu(gpu) = frame else {
+            return;
+        };
+
+        match gpu.import_gpu(device) {
             Ok((texture, wgpu_format)) => {
                 let view_format = cocuyo_core::texture_format::adjust_srgb(
                     wgpu_format,
@@ -281,7 +284,7 @@ impl VideoPipeline {
                     format: Some(view_format),
                     ..Default::default()
                 });
-                self.update_bind_group(device, queue, &view, frame.width(), frame.height(), bounds);
+                self.update_bind_group(device, queue, &view, gpu.width(), gpu.height(), bounds);
             }
             Err(e) => {
                 error!(
@@ -290,7 +293,7 @@ impl VideoPipeline {
                     height = frame.height(),
                     "frame GPU import failed, disabling path for future frames"
                 );
-                frame.mark_import_failed();
+                gpu.mark_import_failed();
                 self.current_bind_group = None;
                 self.cached_texture = None;
             }
