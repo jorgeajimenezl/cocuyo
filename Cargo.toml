@@ -9,7 +9,7 @@ edition = "2024"
 [workspace.dependencies]
 wgpu = { version = "28", default-features = false, features = ["std", "wgsl"] }
 wgpu-types = { version = "28", default-features = false, features = ["serde"] }
-iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "99c17020435a8c9b3fae855644e740fd82871518", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
+iced = { git = "https://github.com/jorgeajimenezl/iced.git", rev = "034bf587e626b80112fa41c7309c2cbf79c306a8", default-features = false, features = ["wgpu", "tokio", "image", "advanced", "canvas"] }
 tokio = { version = "1.41", default-features = false, features = [ "rt-multi-thread", "macros", "sync", "time" ] }
 tracing = "0.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
