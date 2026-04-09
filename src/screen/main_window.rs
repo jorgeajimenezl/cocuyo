@@ -416,7 +416,6 @@ impl MainWindow {
 
     pub fn view<'a>(
         &'a self,
-        window_id: window::Id,
         config: &'a AppConfig,
         bulb_setup: &'a BulbSetup,
     ) -> Element<'a, Message> {
@@ -693,8 +692,6 @@ impl MainWindow {
             .padding(5)
             .width(Fill)
             .style(theme::status_bar_container);
-
-        let _ = window_id;
 
         column![
             menu_bar,

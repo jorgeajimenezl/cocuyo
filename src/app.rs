@@ -252,7 +252,7 @@ impl Cocuyo {
         let screen_content = match self.windows.get(&window_id) {
             Some(WindowKind::Main) => self
                 .main
-                .view(window_id, &self.config, &self.bulb_setup)
+                .view(&self.config, &self.bulb_setup)
                 .map(Message::MainWindow),
             Some(WindowKind::Settings) => self.settings.view().map(Message::Settings),
             Some(WindowKind::BulbSetup) => self.bulb_setup.view().map(Message::BulbSetup),
