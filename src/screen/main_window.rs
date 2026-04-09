@@ -717,10 +717,9 @@ impl MainWindow {
 
     /// Called by app after BulbSetup changes to keep regions in sync.
     pub fn sync_regions_to_bulbs(&mut self, bulb_setup: &BulbSetup) {
-        let selected_macs: Vec<String> = bulb_setup.selected_bulbs().iter().cloned().collect();
-        self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
-        self.color_smoother
-            .retain(|mac| selected_macs.iter().any(|m| m == mac));
+        let selected = bulb_setup.selected_bulbs();
+        self.regions.retain(|r| selected.contains(&r.bulb_mac));
+        self.color_smoother.retain(|mac| selected.contains(mac));
 
         if let Some(sel) = self.selected_region
             && !self.regions.iter().any(|r| r.id == sel)
@@ -728,9 +727,11 @@ impl MainWindow {
             self.selected_region = None;
         }
 
+        let mut selected_macs: Vec<&String> = selected.iter().collect();
+        selected_macs.sort_unstable();
         let num_total = selected_macs.len();
         for (i, mac) in selected_macs.iter().enumerate() {
-            if self.regions.iter().any(|r| r.bulb_mac == *mac) {
+            if self.regions.iter().any(|r| r.bulb_mac == **mac) {
                 continue;
             }
 
@@ -751,7 +752,7 @@ impl MainWindow {
                 y: (cy - default_h / 2.0).clamp(0.0, frame_h - default_h),
                 width: default_w,
                 height: default_h,
-                bulb_mac: mac.clone(),
+                bulb_mac: mac.to_string(),
                 sampled_color: None,
                 strategy: BoxedStrategy::default(),
             };
