@@ -39,9 +39,7 @@ impl CaptureHandler {
             return false;
         }
 
-        // Safety: COM ABI is stable across windows crate versions.
         let source_texture: &ID3D11Texture2D = frame.as_raw_texture();
-
         let shared_handle = match create_shared_handle_from_texture(source_texture) {
             Ok(h) => h,
             Err(e) => {
@@ -53,13 +51,8 @@ impl CaptureHandler {
 
         // Hold the capture frame so WGC doesn't reclaim the buffer slot.
         let held = frame.hold_capture_frame();
-
-        // Safety: COM ABI is stable; clone AddRefs so the texture outlives the callback.
-        let texture_clone: ID3D11Texture2D = unsafe {
-            let raw = frame.as_raw_texture();
-            (*(raw as *const _ as *const ID3D11Texture2D)).clone()
-        };
-
+        let texture_clone: ID3D11Texture2D = frame.as_raw_texture().clone();
+        
         let frame_data = Arc::new(FrameData::Gpu(Box::new(HeldFrame::new(
             held,
             texture_clone,

@@ -6,6 +6,7 @@ pub type ImportError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Atomic flag for tracking whether a zero-copy import path is still viable.
 /// Once import fails, the path is disabled until explicitly reset.
+#[derive(Default)]
 pub struct ImportGuard(AtomicBool);
 
 impl ImportGuard {
