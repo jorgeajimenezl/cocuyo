@@ -206,13 +206,11 @@ pub fn recording_subscription(
                 frame = frame_rx.recv() => {
                     match frame {
                         Some(frame) => {
-                            if let Some(interval) = frame_interval {
-                                if let Some(last) = last_forwarded {
-                                    if last.elapsed() < interval {
+                            if let Some(interval) = frame_interval
+                                && let Some(last) = last_forwarded
+                                    && last.elapsed() < interval {
                                         continue;
                                     }
-                                }
-                            }
                             last_forwarded = Some(Instant::now());
                             if output.send(RecordingEvent::Frame(frame)).await.is_err() {
                                 break;

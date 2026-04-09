@@ -11,3 +11,6 @@ tracing.workspace = true
 iced.workspace = true
 tokio.workspace = true
 futures.workspace = true
+
+[lints]
+workspace = true

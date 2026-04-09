@@ -19,3 +19,6 @@ gstreamer-app.workspace = true
 gstreamer-video.workspace = true
 nix.workspace = true
 pipewire.workspace = true
+
+[lints]
+workspace = true

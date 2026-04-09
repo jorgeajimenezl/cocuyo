@@ -14,3 +14,6 @@ screencapturekit.workspace = true
 metal.workspace = true
 objc2.workspace = true
 foreign-types.workspace = true
+
+[lints]
+workspace = true
