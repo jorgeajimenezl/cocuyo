@@ -524,9 +524,9 @@ impl Cocuyo {
         use crate::screen::profile_dialog::ProfileDialogEvent;
         match event {
             ProfileDialogEvent::Save(name) => {
-                self.main
-                    .save_profile(&name, &mut self.config, &self.bulb_setup);
-                self.mark_config_dirty();
+                if self.main.save_profile(&name, &mut self.config, &self.bulb_setup) {
+                    self.mark_config_dirty();
+                }
                 Task::none()
             }
             ProfileDialogEvent::Load(name) => {

@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 use iced::widget::{
     button, center, column, container, pick_list, row, rule, scrollable, shader, stack, text,
 };
-use iced::window;
 use iced::{Center, Color, Fill, Length, Subscription, Task};
 use tokio::sync::mpsc;
 
@@ -278,7 +277,13 @@ impl MainWindow {
                             self.color_smoother.clear();
                             self.recording_cmd_tx = None;
                             self.current_frame = None;
-                            return (Task::none(), Some(Event::TrayMenuDirty));
+                            self.recording_state = state;
+                            let event = if let Some(states) = self.saved_bulb_states.take() {
+                                Some(Event::RestoreBulbStates(states))
+                            } else {
+                                Some(Event::TrayMenuDirty)
+                            };
+                            return (Task::none(), event);
                         }
                         self.recording_state = state;
                     }
@@ -868,6 +873,7 @@ impl MainWindow {
         self.session_id += 1;
         self.recording_fps_limit = config.capture_fps_limit;
         self.recording_resolution_scale = config.capture_resolution_scale;
+        self.recording_state = RecordingState::Starting;
     }
 
     fn current_or_last_frame_size(&self) -> (f32, f32) {
