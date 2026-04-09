@@ -52,7 +52,7 @@ impl CaptureHandler {
         // Hold the capture frame so WGC doesn't reclaim the buffer slot.
         let held = frame.hold_capture_frame();
         let texture_clone: ID3D11Texture2D = frame.as_raw_texture().clone();
-        
+
         let frame_data = Arc::new(FrameData::Gpu(Box::new(HeldFrame::new(
             held,
             texture_clone,

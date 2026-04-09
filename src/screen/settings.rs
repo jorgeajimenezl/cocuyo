@@ -4,9 +4,9 @@ use iced::{Fill, Task, padding};
 
 use crate::adapters::{self, GpuAdapter, GpuAdapterSelection};
 use crate::config::AppConfig;
+use crate::theme;
 #[cfg(target_os = "linux")]
 use cocuyo_platform_linux::gst_pipeline::GpuBackend;
-use crate::theme;
 
 type Element<'a> = iced::Element<'a, Message, iced::Theme, iced::Renderer>;
 

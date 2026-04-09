@@ -97,7 +97,11 @@ impl FrameData {
             FrameData::Gpu(g) => {
                 let (width, height) = (g.width(), g.height());
                 match g.read_pixels_bgra() {
-                    Some(data) => Some(Arc::new(FrameData::Cpu { data, width, height })),
+                    Some(data) => Some(Arc::new(FrameData::Cpu {
+                        data,
+                        width,
+                        height,
+                    })),
                     None => {
                         tracing::error!("Failed to read GPU frame pixels for CPU fallback");
                         None

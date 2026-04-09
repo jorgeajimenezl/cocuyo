@@ -9,15 +9,15 @@ use crate::config::Profile;
 use crate::perf_stats::PerfStats;
 use std::sync::Arc;
 
-use cocuyo_core::frame::FrameData;
-use cocuyo_core::recording::RecordingState;
-use cocuyo_sampling as sampling;
-use cocuyo_sampling::Region;
 use crate::theme;
 use crate::widget::Element;
 use crate::widget::perf_hud::PerfHud;
 use crate::widget::region_overlay::RegionOverlay;
 use crate::widget::video_shader::VideoScene;
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::RecordingState;
+use cocuyo_sampling as sampling;
+use cocuyo_sampling::Region;
 
 pub fn view<'a>(
     window_id: window::Id,

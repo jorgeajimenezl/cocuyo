@@ -7,8 +7,8 @@ use iced::widget::canvas::{Action, Cache, Canvas, Event, Geometry, Path, Stroke,
 use iced::{Color, Point, Rectangle, Size, Theme};
 
 use crate::app::Message;
-use cocuyo_sampling::region;
 use cocuyo_sampling::Region;
+use cocuyo_sampling::region;
 
 const HANDLE_SIZE: f32 = 8.0;
 const MIN_REGION_SIZE: f32 = 10.0;

@@ -41,7 +41,12 @@ impl GpuFrame for IOSurfaceFrame {
         // ObjC objects, and to avoid Cocoa run-loop re-entrancy when invoked
         // from inside the winit event handler.
         screencapturekit::metal::autoreleasepool(|| unsafe {
-            crate::metal_import::import_iosurface_texture(device, &self.surface, self.width, self.height)
+            crate::metal_import::import_iosurface_texture(
+                device,
+                &self.surface,
+                self.width,
+                self.height,
+            )
         })
         .map_err(|e| {
             crate::metal_import::mark_iosurface_import_failed();
