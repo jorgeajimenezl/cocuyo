@@ -1,0 +1,16 @@
+[package]
+name = "cocuyo-sampling"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cocuyo-core = { path = "../core" }
+wgpu.workspace = true
+bytemuck.workspace = true
+tracing.workspace = true
+iced.workspace = true
+tokio.workspace = true
+futures.workspace = true
+
+[lints]
+workspace = true

@@ -1,9 +1,16 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
-use crate::app::RecordingState;
 use crate::frame::FrameData;
+
+/// Recording lifecycle state, owned by the application but emitted as part of
+/// `RecordingEvent::StateChanged` from the platform recording subscriptions.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecordingState {
+    Idle,
+    Starting,
+    Recording,
+    Error(String),
+}
 
 /// Commands sent from the app to the recording subscription.
 #[derive(Debug)]
@@ -15,16 +22,7 @@ pub enum RecordingCommand {
 #[derive(Debug, Clone)]
 pub enum RecordingEvent {
     /// The subscription is ready and provides a command sender for control.
-    Ready(mpsc::Sender<RecordingCommand>),
+    Ready(tokio::sync::mpsc::Sender<RecordingCommand>),
     StateChanged(RecordingState),
     Frame(Arc<FrameData>),
 }
-
-#[cfg(target_os = "linux")]
-pub use crate::platform::linux::recording::recording_subscription;
-
-#[cfg(target_os = "macos")]
-pub use crate::platform::macos::recording::recording_subscription;
-
-#[cfg(target_os = "windows")]
-pub use crate::platform::windows::recording::recording_subscription;

@@ -33,7 +33,7 @@ pub struct BulbSetupState {
 impl BulbSetupState {
     pub fn new(config: &AppConfig) -> Self {
         let saved_bulbs = config.saved_bulbs.clone();
-        let selected_macs: Vec<String> = config.selected_bulb_macs.iter().cloned().collect();
+        let selected_macs: Vec<String> = config.selected_bulb_macs.to_vec();
 
         // Only keep selections that correspond to known bulbs
         let valid_selections: HashSet<String> = selected_macs

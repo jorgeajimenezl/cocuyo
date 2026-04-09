@@ -1,6 +1,6 @@
 use iced::Rectangle;
 
-use crate::sampling::BoxedStrategy;
+use crate::BoxedStrategy;
 
 #[derive(Debug, Clone)]
 pub struct Region {

@@ -5,7 +5,7 @@ use drm_fourcc::DrmFourcc;
 use tracing::debug;
 
 use super::formats;
-use crate::frame::ImportGuard;
+use cocuyo_core::frame::ImportGuard;
 
 static IMPORT_GUARD: ImportGuard = ImportGuard::new();
 
@@ -78,7 +78,7 @@ pub unsafe fn import_dmabuf_texture(
     // vkAllocateMemory with VkImportMemoryFdInfoKHR transfers fd ownership to Vulkan.
     let import_fd = nix::unistd::dup(fd).map_err(DmaBufImportError::FdDupFailed)?;
 
-    let non_srgb = crate::texture_format::non_srgb_equivalent(wgpu_format);
+    let non_srgb = cocuyo_core::texture_format::non_srgb_equivalent(wgpu_format);
     let alt_format = (non_srgb != wgpu_format).then_some(non_srgb);
     let view_formats_arr = alt_format.map(|f| [f]);
     let view_formats_slice: &[wgpu::TextureFormat] =

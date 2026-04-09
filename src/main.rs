@@ -8,15 +8,9 @@ mod adapters;
 mod ambient;
 mod app;
 mod config;
-mod frame;
 mod gpu_context;
 mod perf_stats;
-mod platform;
-mod recording;
-mod region;
-mod sampling;
 mod screen;
-mod texture_format;
 mod theme;
 mod tray;
 mod widget;
@@ -57,8 +51,6 @@ fn main() -> iced::Result {
     #[cfg(target_os = "linux")]
     {
         gstreamer::init().expect("Failed to initialize GStreamer");
-        info!("GStreamer initialized");
-
         pipewire::init();
     }
 

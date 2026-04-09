@@ -4,21 +4,24 @@ use iced::widget::{
 use iced::window;
 use iced::{Center, Color, Fill, Length};
 
-use crate::app::{Message, RecordingState};
+use crate::app::Message;
 use crate::config::Profile;
-use crate::frame::FrameData;
 use crate::perf_stats::PerfStats;
-use crate::region::Region;
-use crate::sampling;
+use std::sync::Arc;
+
 use crate::theme;
 use crate::widget::Element;
 use crate::widget::perf_hud::PerfHud;
 use crate::widget::region_overlay::RegionOverlay;
 use crate::widget::video_shader::VideoScene;
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::RecordingState;
+use cocuyo_sampling as sampling;
+use cocuyo_sampling::Region;
 
 pub fn view<'a>(
     window_id: window::Id,
-    frame: Option<&FrameData>,
+    frame: Option<&Arc<FrameData>>,
     recording_state: &RecordingState,
     frame_info: Option<(u32, u32)>,
     is_ambient_active: bool,
@@ -71,7 +74,7 @@ pub fn view<'a>(
     // Left panel: video preview + region overlay + perf HUD
     let preview_area: Element<'a, Message> = match (frame, frame_info) {
         (Some(f), Some((fw, fh))) => {
-            let video: Element<'a, Message> = shader(VideoScene::new(Some(f)))
+            let video: Element<'a, Message> = shader(VideoScene::new(Some(Arc::clone(f))))
                 .width(Fill)
                 .height(Fill)
                 .into();

@@ -1,3 +1,9 @@
+//! [`HeldFrame`] — the Windows zero-copy GPU frame type (moved from `cocuyo-core::windows`).
+//!
+//! Holds a WGC captured texture alive via NT shared handle so the binary and
+//! sampling crate can import it into wgpu through [`GpuFrame`] without knowing
+//! any D3D details.
+
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC,
@@ -5,6 +11,8 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows_capture::HeldCaptureFrame;
+
+use cocuyo_core::frame::{GpuFrame, ImportError};
 
 /// A captured frame ready for DX12 import via NT shared handle.
 ///
@@ -20,6 +28,15 @@ pub struct HeldFrame {
 
 unsafe impl Send for HeldFrame {}
 unsafe impl Sync for HeldFrame {}
+
+impl std::fmt::Debug for HeldFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeldFrame")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
 
 impl HeldFrame {
     pub fn new(
@@ -52,6 +69,40 @@ impl Drop for HeldFrame {
         unsafe {
             let _ = CloseHandle(self.shared_handle);
         }
+    }
+}
+
+impl GpuFrame for HeldFrame {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn import_gpu(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<(wgpu::Texture, wgpu::TextureFormat), ImportError> {
+        unsafe {
+            crate::dx12_import::import_shared_texture(
+                device,
+                self.shared_handle,
+                self.width,
+                self.height,
+            )
+        }
+        .map_err(|e| {
+            crate::dx12_import::mark_d3d_shared_import_failed();
+            Box::new(e) as ImportError
+        })
+    }
+
+    fn read_pixels_bgra(&self) -> Option<Vec<u8>> {
+        self.read_pixels()
+            .map_err(|e| tracing::error!(error = %e, "shared texture pixel readback failed"))
+            .ok()
     }
 }
 

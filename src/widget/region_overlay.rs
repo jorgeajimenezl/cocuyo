@@ -7,7 +7,8 @@ use iced::widget::canvas::{Action, Cache, Canvas, Event, Geometry, Path, Stroke,
 use iced::{Color, Point, Rectangle, Size, Theme};
 
 use crate::app::Message;
-use crate::region::{self, Region};
+use cocuyo_sampling::Region;
+use cocuyo_sampling::region;
 
 const HANDLE_SIZE: f32 = 8.0;
 const MIN_REGION_SIZE: f32 = 10.0;
@@ -161,29 +162,27 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
             };
         }
 
-        let Some(pos) = cursor.position_in(bounds) else {
-            return None;
-        };
+        let pos = cursor.position_in(bounds)?;
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 // Check if clicking on a handle of the selected region
-                if let Some(sel_id) = self.selected_region {
-                    if let Some(region) = self.regions.iter().find(|r| r.id == sel_id) {
-                        let wrect = region::frame_to_widget(
-                            region,
-                            bounds,
-                            self.frame_width,
-                            self.frame_height,
-                        );
-                        if let Some(handle) = hit_test_handle(wrect, pos) {
-                            state.interaction = Interaction::Resizing {
-                                region_id: sel_id,
-                                handle,
-                            };
-                            state.cache.clear();
-                            return Some(Action::capture());
-                        }
+                if let Some(sel_id) = self.selected_region
+                    && let Some(region) = self.regions.iter().find(|r| r.id == sel_id)
+                {
+                    let wrect = region::frame_to_widget(
+                        region,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    );
+                    if let Some(handle) = hit_test_handle(wrect, pos) {
+                        state.interaction = Interaction::Resizing {
+                            region_id: sel_id,
+                            handle,
+                        };
+                        state.cache.clear();
+                        return Some(Action::capture());
                     }
                 }
 
@@ -454,24 +453,24 @@ impl canvas::Program<Message, Theme> for RegionOverlay<'_> {
             },
             Interaction::None => {
                 // Check handles of selected region
-                if let Some(sel_id) = self.selected_region {
-                    if let Some(region) = self.regions.iter().find(|r| r.id == sel_id) {
-                        let wrect = region::frame_to_widget(
-                            region,
-                            bounds,
-                            self.frame_width,
-                            self.frame_height,
-                        );
-                        if let Some(handle) = hit_test_handle(wrect, pos) {
-                            return match handle {
-                                Handle::TopLeft | Handle::BottomRight => {
-                                    mouse::Interaction::ResizingDiagonallyDown
-                                }
-                                Handle::TopRight | Handle::BottomLeft => {
-                                    mouse::Interaction::ResizingDiagonallyUp
-                                }
-                            };
-                        }
+                if let Some(sel_id) = self.selected_region
+                    && let Some(region) = self.regions.iter().find(|r| r.id == sel_id)
+                {
+                    let wrect = region::frame_to_widget(
+                        region,
+                        bounds,
+                        self.frame_width,
+                        self.frame_height,
+                    );
+                    if let Some(handle) = hit_test_handle(wrect, pos) {
+                        return match handle {
+                            Handle::TopLeft | Handle::BottomRight => {
+                                mouse::Interaction::ResizingDiagonallyDown
+                            }
+                            Handle::TopRight | Handle::BottomLeft => {
+                                mouse::Interaction::ResizingDiagonallyUp
+                            }
+                        };
                     }
                 }
 

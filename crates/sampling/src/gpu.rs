@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use tracing::info;
 
-use crate::frame::FrameData;
+use cocuyo_core::FrameData;
 
 use super::BoxedStrategy;
 
@@ -285,7 +285,7 @@ impl std::fmt::Display for GpuSamplerError {
 /// Round `size` up to the next multiple of `alignment`.
 fn aligned_stride(size: usize, alignment: u32) -> usize {
     let align = alignment as usize;
-    (size + align - 1) / align * align
+    size.div_ceil(align) * align
 }
 
 /// Slot assignment tuple: (params_slot, result_slot, region_index).
@@ -776,19 +776,13 @@ impl GpuSampler {
         }
 
         // CPU fallback for unsupported strategies
-        if !classified.cpu_indices.is_empty() {
-            if let Some(cpu_frame) = frame.convert_to_cpu() {
-                for &i in &classified.cpu_indices {
-                    let rp = &regions[i];
-                    results[i] = super::sample_region(
-                        &cpu_frame,
-                        rp.x,
-                        rp.y,
-                        rp.width,
-                        rp.height,
-                        &rp.strategy,
-                    );
-                }
+        if !classified.cpu_indices.is_empty()
+            && let Some(cpu_frame) = frame.convert_to_cpu()
+        {
+            for &i in &classified.cpu_indices {
+                let rp = &regions[i];
+                results[i] =
+                    super::sample_region(&cpu_frame, rp.x, rp.y, rp.width, rp.height, &rp.strategy);
             }
         }
 
@@ -803,109 +797,6 @@ impl GpuSampler {
     /// texture copy to be recorded into the caller's command encoder.
     fn import_frame(&mut self, frame: &Arc<FrameData>) -> Result<ImportedFrame, GpuSamplerError> {
         match frame.as_ref() {
-            #[cfg(target_os = "linux")]
-            FrameData::DmaBuf {
-                fd,
-                width,
-                height,
-                drm_format,
-                stride,
-                offset,
-                ..
-            } => {
-                use std::os::fd::AsRawFd;
-                let (imported, wgpu_format) = unsafe {
-                    crate::platform::linux::vulkan_dmabuf::import_dmabuf_texture(
-                        &self.device,
-                        fd.as_raw_fd(),
-                        *width,
-                        *height,
-                        *drm_format,
-                        *stride,
-                        *offset,
-                    )
-                }
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
-            #[cfg(target_os = "macos")]
-            FrameData::IOSurface {
-                surface,
-                width,
-                height,
-            } => {
-                // Re-import on the sampler thread (safe — not inside winit event handler).
-                // We need an owned wgpu::Texture for PendingCopy.
-                // Wrap in autoreleasepool to prevent ObjC object leaks from Metal calls.
-                let (imported, wgpu_format) = screencapturekit::metal::autoreleasepool(|| unsafe {
-                    crate::platform::macos::metal_import::import_iosurface_texture(
-                        &self.device,
-                        surface,
-                        *width,
-                        *height,
-                    )
-                })
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
-            #[cfg(target_os = "windows")]
-            FrameData::D3DShared {
-                frame,
-                width,
-                height,
-            } => {
-                use windows::Win32::Foundation::HANDLE;
-                let handle = HANDLE(frame.shared_handle().0 as *mut core::ffi::c_void);
-                let (imported, wgpu_format) = unsafe {
-                    crate::platform::windows::dx12_import::import_shared_texture(
-                        &self.device,
-                        handle,
-                        *width,
-                        *height,
-                    )
-                }
-                .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
-
-                self.ensure_texture(*width, *height, wgpu_format);
-                let view = create_non_srgb_view(
-                    &self.cached_texture.as_ref().unwrap().texture,
-                    wgpu_format,
-                );
-                Ok(ImportedFrame {
-                    view,
-                    pending_copy: Some(PendingCopy {
-                        src: imported,
-                        width: *width,
-                        height: *height,
-                    }),
-                })
-            }
             FrameData::Cpu {
                 data,
                 width,
@@ -938,6 +829,27 @@ impl GpuSampler {
                     pending_copy: None,
                 })
             }
+            FrameData::Gpu(gpu) => {
+                let (imported, wgpu_format) = gpu
+                    .import_gpu(&self.device)
+                    .map_err(|e| GpuSamplerError::ImportFailed(e.to_string()))?;
+                let width = gpu.width();
+                let height = gpu.height();
+
+                self.ensure_texture(width, height, wgpu_format);
+                let view = create_non_srgb_view(
+                    &self.cached_texture.as_ref().unwrap().texture,
+                    wgpu_format,
+                );
+                Ok(ImportedFrame {
+                    view,
+                    pending_copy: Some(PendingCopy {
+                        src: imported,
+                        width,
+                        height,
+                    }),
+                })
+            }
         }
     }
 
@@ -949,7 +861,7 @@ impl GpuSampler {
         };
 
         if needs_recreate {
-            let non_srgb = crate::texture_format::non_srgb_equivalent(format);
+            let non_srgb = cocuyo_core::texture_format::non_srgb_equivalent(format);
             let mut view_formats = vec![];
             if non_srgb != format {
                 view_formats.push(non_srgb);
@@ -983,7 +895,7 @@ fn create_non_srgb_view(
     texture: &wgpu::Texture,
     original_format: wgpu::TextureFormat,
 ) -> wgpu::TextureView {
-    let view_format = crate::texture_format::non_srgb_equivalent(original_format);
+    let view_format = cocuyo_core::texture_format::non_srgb_equivalent(original_format);
     texture.create_view(&wgpu::TextureViewDescriptor {
         format: Some(view_format),
         ..Default::default()

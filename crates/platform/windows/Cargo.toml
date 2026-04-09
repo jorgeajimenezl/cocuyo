@@ -1,0 +1,21 @@
+[package]
+name = "cocuyo-platform-windows"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+cocuyo-core = { path = "../../core" }
+wgpu.workspace = true
+wgpu-hal = { workspace = true, features = ["dx12"] }
+tracing.workspace = true
+tokio.workspace = true
+iced.workspace = true
+windows-capture.workspace = true
+windows = { version = "0.62.2", features = [
+    "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common",
+    "Win32_Foundation",
+] }
+
+[lints]
+workspace = true

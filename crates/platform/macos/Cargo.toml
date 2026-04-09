@@ -1,0 +1,19 @@
+[package]
+name = "cocuyo-platform-macos"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocuyo-core = { path = "../../core" }
+wgpu.workspace = true
+wgpu-hal = { workspace = true, features = ["metal"] }
+tracing.workspace = true
+tokio.workspace = true
+iced.workspace = true
+screencapturekit.workspace = true
+metal.workspace = true
+objc2.workspace = true
+foreign-types.workspace = true
+
+[lints]
+workspace = true

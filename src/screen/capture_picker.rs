@@ -1,8 +1,8 @@
 use iced::widget::{button, center, column, container, row, rule, scrollable, text};
 use iced::{Center, Fill, Task};
 
-use crate::platform::windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
 use crate::theme;
+use cocuyo_platform_windows::capture_target::{CaptureTarget, PickerIntent, PickerTab};
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
@@ -67,7 +67,7 @@ impl CapturePicker {
             .unwrap_or_default()
             .into_iter()
             .filter(|w| w.title().map(|t| !t.is_empty()).unwrap_or(false))
-            .filter(|w| is_window_active(w))
+            .filter(is_window_active)
             .collect();
 
         Self {

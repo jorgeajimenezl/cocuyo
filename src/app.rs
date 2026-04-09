@@ -8,12 +8,13 @@ use iced::window;
 use iced::{Fill, Size, Subscription, Task, Theme};
 use tokio::sync::mpsc;
 
+use cocuyo_core::frame::FrameData;
+use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
+use cocuyo_sampling::BoxedStrategy;
+use cocuyo_sampling::Region;
+
 use crate::ambient::SavedBulbState;
 use crate::config::AppConfig;
-use crate::frame::FrameData;
-use crate::recording::{self, RecordingCommand, RecordingEvent};
-use crate::region::Region;
-use crate::sampling::BoxedStrategy;
 use crate::screen::WindowKind;
 use crate::screen::bulb_setup;
 use crate::screen::settings;
@@ -36,18 +37,10 @@ const DEFAULT_FRAME_SIZE: (f32, f32) = (1920.0, 1080.0);
 
 #[cfg(target_os = "windows")]
 use {
-    crate::platform::windows::capture_target::{CaptureTarget, PickerIntent},
     crate::screen::capture_picker,
+    cocuyo_platform_windows::capture_target::{CaptureTarget, PickerIntent},
     iced::window::settings::{PlatformSpecific, platform::CornerPreference},
 };
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RecordingState {
-    Idle,
-    Starting,
-    Recording,
-    Error(String),
-}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -86,7 +79,7 @@ pub enum Message {
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
 
-    GpuSamplingComplete(crate::sampling::gpu::SamplingResult),
+    GpuSamplingComplete(cocuyo_sampling::gpu::SamplingResult),
 
     BulbDispatchComplete(f64),
 
@@ -120,7 +113,7 @@ pub struct Cocuyo {
     selected_region: Option<usize>,
 
     // GPU sampling worker
-    sampling_worker: Option<crate::sampling::gpu::SamplingWorker>,
+    sampling_worker: Option<cocuyo_sampling::gpu::SamplingWorker>,
 
     // Color smoother for transitions
     color_smoother: crate::ambient::ColorSmoother,
@@ -262,13 +255,13 @@ impl Cocuyo {
             Message::StartRecording => {
                 #[cfg(target_os = "linux")]
                 {
-                    crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    cocuyo_platform_linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     self.begin_recording();
                     Task::none()
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    crate::platform::macos::metal_import::reset_iosurface_import_failed();
+                    cocuyo_platform_macos::metal_import::reset_iosurface_import_failed();
                     self.begin_recording();
                     Task::none()
                 }
@@ -426,19 +419,20 @@ impl Cocuyo {
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
                 // Lazily spawn GPU sampling worker when ambient starts
-                if self.sampling_worker.is_none() && !self.config.force_cpu_sampling {
-                    if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
-                        self.sampling_worker = Some(crate::sampling::gpu::SamplingWorker::spawn(
-                            device.clone(),
-                            queue.clone(),
-                        ));
-                    }
+                if self.sampling_worker.is_none()
+                    && !self.config.force_cpu_sampling
+                    && let Some((device, queue)) = crate::gpu_context::get_gpu_context()
+                {
+                    self.sampling_worker = Some(cocuyo_sampling::gpu::SamplingWorker::spawn(
+                        device.clone(),
+                        queue.clone(),
+                    ));
                 }
                 if !self.is_recording {
                     #[cfg(target_os = "linux")]
-                    crate::platform::linux::vulkan_dmabuf::reset_dmabuf_import_failed();
+                    cocuyo_platform_linux::vulkan_dmabuf::reset_dmabuf_import_failed();
                     #[cfg(target_os = "windows")]
-                    crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
+                    cocuyo_platform_windows::dx12_import::reset_d3d_shared_import_failed();
                     self.begin_recording();
                 }
                 Task::none()
@@ -516,7 +510,7 @@ impl Cocuyo {
                                 // Note: last_bulb_update is set in GpuSamplingComplete,
                                 // not here, to avoid throttle drift when GPU is slow.
                                 if let Some(ref worker) = self.sampling_worker {
-                                    use crate::sampling::gpu::{RegionParams, SendResult};
+                                    use cocuyo_sampling::gpu::{RegionParams, SendResult};
                                     if worker.is_idle() {
                                         let params: Vec<RegionParams> = self
                                             .regions
@@ -555,7 +549,7 @@ impl Cocuyo {
                                     let sampling_frame = frame.convert_to_cpu();
                                     if let Some(ref sf) = sampling_frame {
                                         for region in &mut self.regions {
-                                            region.sampled_color = crate::sampling::sample_region(
+                                            region.sampled_color = cocuyo_sampling::sample_region(
                                                 sf,
                                                 region.x,
                                                 region.y,
@@ -642,7 +636,7 @@ impl Cocuyo {
                 let frame_info = self.current_frame.as_ref().map(|f| (f.width(), f.height()));
                 crate::screen::main_window::view(
                     window_id,
-                    self.current_frame.as_ref().map(|f| f.as_ref()),
+                    self.current_frame.as_ref(),
                     &self.recording_state,
                     frame_info,
                     self.is_ambient_active,
@@ -717,7 +711,7 @@ impl Cocuyo {
 
         Subscription::run_with(
             (self.session_id, backend, self.recording_fps_limit),
-            recording::recording_subscription,
+            cocuyo_platform_linux::recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
     }
@@ -729,7 +723,7 @@ impl Cocuyo {
             .expect("capture_target must be set before recording");
         Subscription::run_with(
             (self.session_id, target, self.recording_fps_limit),
-            recording::recording_subscription,
+            cocuyo_platform_windows::recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
     }
@@ -742,7 +736,7 @@ impl Cocuyo {
                 self.recording_fps_limit,
                 self.recording_resolution_scale,
             ),
-            recording::recording_subscription,
+            cocuyo_platform_macos::recording::recording_subscription,
         )
         .map(Message::RecordingEvent)
     }
@@ -867,7 +861,7 @@ impl Cocuyo {
 
                 match intent {
                     PickerIntent::StartRecording => {
-                        crate::platform::windows::dx12_import::reset_d3d_shared_import_failed();
+                        cocuyo_platform_windows::dx12_import::reset_d3d_shared_import_failed();
                         self.begin_recording();
                         close_task
                     }
@@ -1023,10 +1017,10 @@ impl Cocuyo {
 
     fn graceful_shutdown(&mut self) -> Task<Message> {
         self.flush_config();
-        if self.is_ambient_active || self.is_recording {
-            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                let _ = cmd_tx.try_send(RecordingCommand::Stop);
-            }
+        if (self.is_ambient_active || self.is_recording)
+            && let Some(cmd_tx) = self.recording_cmd_tx.take()
+        {
+            let _ = cmd_tx.try_send(RecordingCommand::Stop);
         }
         if let Some(states) = self.saved_bulb_states.take() {
             Task::perform(crate::ambient::restore_bulb_states(states), |()| {
@@ -1086,10 +1080,10 @@ impl Cocuyo {
         self.color_smoother
             .retain(|mac| selected_macs.iter().any(|m| m == mac));
 
-        if let Some(sel) = self.selected_region {
-            if !self.regions.iter().any(|r| r.id == sel) {
-                self.selected_region = None;
-            }
+        if let Some(sel) = self.selected_region
+            && !self.regions.iter().any(|r| r.id == sel)
+        {
+            self.selected_region = None;
         }
 
         let num_total = selected_macs.len();

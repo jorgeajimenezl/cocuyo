@@ -12,10 +12,11 @@ use pw::{properties::properties, spa};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use super::dmabuf_frame::DmaBufFrame;
 use super::dmabuf_handler;
 use super::gst_pipeline::{self, GpuBackend};
 use super::vulkan_dmabuf;
-use crate::frame::FrameData;
+use cocuyo_core::frame::FrameData;
 
 pub struct UserData {
     pub format: spa::param::video::VideoInfoRaw,
@@ -280,7 +281,7 @@ fn try_process_dmabuf(
             );
         });
 
-        return Some(FrameData::DmaBuf {
+        return Some(FrameData::Gpu(Box::new(DmaBufFrame {
             fd: duped_fd,
             width: dmabuf.width,
             height: dmabuf.height,
@@ -288,7 +289,7 @@ fn try_process_dmabuf(
             stride: dmabuf.stride,
             offset: dmabuf.offset,
             modifier: dmabuf.modifier,
-        });
+        })));
     }
 
     // Non-importable format or non-linear modifier: use GStreamer conversion
@@ -366,7 +367,7 @@ fn try_process_dmabuf_gstreamer(
 
     match converter.pull_bgra_frame() {
         Ok(data) => Some(FrameData::Cpu {
-            data: Arc::new(data),
+            data,
             width: user_data.format.size().width,
             height: user_data.format.size().height,
         }),
@@ -418,7 +419,7 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     };
 
     Some(FrameData::Cpu {
-        data: Arc::new(converted_data),
+        data: converted_data,
         width: user_data.format.size().width,
         height: user_data.format.size().height,
     })

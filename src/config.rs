@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::warn;
 
-use crate::region::Region;
-use crate::sampling::BoxedStrategy;
+use cocuyo_sampling::BoxedStrategy;
+use cocuyo_sampling::Region;
+
 use crate::{adapters::GpuAdapter, ambient::BulbInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,11 +164,11 @@ impl AppConfig {
             warn!("Cannot resolve config directory");
             return;
         };
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                warn!("Failed to create config dir: {}", e);
-                return;
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            warn!("Failed to create config dir: {}", e);
+            return;
         }
         match toml::to_string_pretty(self) {
             Ok(content) => {
