@@ -40,6 +40,7 @@ edition.workspace = true
 [features]
 default = []
 tray = ["dep:tray-icon"]
+iced-debug = ["iced/debug"]
 
 [profile.release]
 opt-level = "s"

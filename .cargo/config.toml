@@ -1,3 +1,6 @@
+[alias]
+dev = "run --features iced-debug"
+
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-Wl,-rpath,/Library/Developer/CommandLineTools/usr/lib/swift/macosx", "-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
 
