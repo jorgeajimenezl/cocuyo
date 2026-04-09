@@ -45,7 +45,7 @@ Verify wgpu API names against source or docs before using — they change across
 Cross-platform screen capture + ambient lighting app. UI built with **iced** (custom fork, wgpu backend).
 
 Cargo workspace — binary at `src/`, platform-agnostic crates under `crates/`:
-- **`cocuyo-core`** — `FrameData` (`Cpu | Gpu(Arc<dyn GpuFrame>)`), `GpuFrame` trait, `ImportGuard`. Only deps: `wgpu`, `tracing`, `tokio`.
+- **`cocuyo-core`** — `FrameData` (`Cpu | Gpu(Box<dyn GpuFrame>)`), `GpuFrame` trait, `ImportGuard`. Only deps: `wgpu`, `tracing`, `tokio`.
 - **`cocuyo-sampling`** — sampling strategies, `GpuSampler`/`SamplingWorker`, WGSL shaders. No platform deps.
 - **`cocuyo-platform-linux/windows/macos`** — platform recording + `impl GpuFrame` for `DmaBufFrame` / `HeldFrame` / `IOSurfaceFrame`.
 
