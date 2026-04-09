@@ -7,6 +7,7 @@ edition.workspace = true
 wgpu.workspace = true
 tracing.workspace = true
 tokio = { workspace = true }
+futures.workspace = true
 
 [lints]
 workspace = true

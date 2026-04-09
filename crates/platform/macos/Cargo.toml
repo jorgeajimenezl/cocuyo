@@ -9,7 +9,7 @@ wgpu.workspace = true
 wgpu-hal = { workspace = true, features = ["metal"] }
 tracing.workspace = true
 tokio.workspace = true
-iced.workspace = true
+futures.workspace = true
 screencapturekit.workspace = true
 metal.workspace = true
 objc2.workspace = true

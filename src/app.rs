@@ -7,7 +7,7 @@ use iced::{Fill, Size, Subscription, Task, Theme};
 
 use crate::config::AppConfig;
 use crate::screen::WindowKind;
-use crate::screen::{bulb_setup, main_window, settings, profile_dialog};
+use crate::screen::{bulb_setup, main_window, profile_dialog, settings};
 use crate::widget::Element;
 
 const MAIN_WINDOW_SIZE: Size = Size::new(1200.0, 750.0);
@@ -524,7 +524,10 @@ impl Cocuyo {
         use crate::screen::profile_dialog::ProfileDialogEvent;
         match event {
             ProfileDialogEvent::Save(name) => {
-                if self.main.save_profile(&name, &mut self.config, &self.bulb_setup) {
+                if self
+                    .main
+                    .save_profile(&name, &mut self.config, &self.bulb_setup)
+                {
                     self.mark_config_dirty();
                 }
                 Task::none()

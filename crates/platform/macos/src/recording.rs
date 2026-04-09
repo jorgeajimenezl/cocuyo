@@ -1,8 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use iced::futures::Stream;
+use futures::Stream;
 use screencapturekit::async_api::AsyncSCContentSharingPicker;
 use screencapturekit::async_api::AsyncSCStream;
 use screencapturekit::content_sharing_picker::{
@@ -11,11 +10,14 @@ use screencapturekit::content_sharing_picker::{
 use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::output_type::SCStreamOutputType;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
 use cocuyo_core::frame::FrameData;
-use cocuyo_core::recording::{RecordingCommand, RecordingEvent, RecordingState};
+use cocuyo_core::recording::RecordingEvent;
+use cocuyo_core::recording_driver::{
+    BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,
+};
 
 use crate::iosurface_frame::{IOSurfaceFrame, strip_stride_padding};
 
@@ -65,163 +67,130 @@ fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<Fra
     }))
 }
 
-pub fn recording_subscription(
-    input: &(u64, u32, u32),
-) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
-    let fps_limit = input.1;
-    let resolution_scale = input.2;
+struct MacOsBackend {
+    resolution_scale: u32,
+    fps_limit: u32,
+}
 
-    Box::pin(iced::stream::channel(2, async move |mut output| {
-        use iced::futures::SinkExt;
+impl RecordingBackend for MacOsBackend {
+    fn start(&mut self) -> Pin<Box<dyn Future<Output = StartOutcome> + Send + '_>> {
+        let resolution_scale = self.resolution_scale;
+        let fps_limit = self.fps_limit;
+        Box::pin(async move {
+            info!("Showing macOS content sharing picker");
 
-        let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecordingCommand>(1);
-        output.send(RecordingEvent::Ready(cmd_tx)).await.ok();
+            let mut picker_config = SCContentSharingPickerConfiguration::new();
+            picker_config.set_allowed_picker_modes(&[
+                SCContentSharingPickerMode::SingleDisplay,
+                SCContentSharingPickerMode::SingleWindow,
+            ]);
 
-        output
-            .send(RecordingEvent::StateChanged(RecordingState::Starting))
-            .await
-            .ok();
+            let outcome = AsyncSCContentSharingPicker::show(&picker_config).await;
 
-        info!("Showing macOS content sharing picker");
-
-        let mut picker_config = SCContentSharingPickerConfiguration::new();
-        picker_config.set_allowed_picker_modes(&[
-            SCContentSharingPickerMode::SingleDisplay,
-            SCContentSharingPickerMode::SingleWindow,
-        ]);
-
-        let outcome = AsyncSCContentSharingPicker::show(&picker_config).await;
-
-        let result = match outcome {
-            SCPickerOutcome::Picked(result) => result,
-            SCPickerOutcome::Cancelled => {
-                info!("macOS content picker cancelled by user");
-                output
-                    .send(RecordingEvent::StateChanged(RecordingState::Idle))
-                    .await
-                    .ok();
-                std::future::pending::<()>().await;
-                return;
-            }
-            SCPickerOutcome::Error(msg) => {
-                warn!("macOS content picker error: {}", msg);
-                output
-                    .send(RecordingEvent::StateChanged(RecordingState::Error(msg)))
-                    .await
-                    .ok();
-                std::future::pending::<()>().await;
-                return;
-            }
-        };
-
-        let filter = result.filter();
-        let (pixel_width, pixel_height) = result.pixel_size();
-        info!(
-            width = pixel_width,
-            height = pixel_height,
-            "macOS content picker selection received"
-        );
-
-        // Configure capture stream
-        let scale = resolution_scale.max(25).min(100);
-        let scaled_w = if scale >= 100 {
-            pixel_width
-        } else {
-            (pixel_width as u64 * scale as u64 / 100) as u32
-        };
-        let scaled_h = if scale >= 100 {
-            pixel_height
-        } else {
-            (pixel_height as u64 * scale as u64 / 100) as u32
-        };
-
-        let fps = if fps_limit == 0 { 60 } else { fps_limit };
-        let config = SCStreamConfiguration::new()
-            .with_width(scaled_w)
-            .with_height(scaled_h)
-            .with_pixel_format(PixelFormat::BGRA)
-            .with_shows_cursor(false)
-            .with_fps(fps);
-
-        let stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
-
-        if let Err(e) = stream.start_capture() {
-            let msg = format!("Failed to start macOS capture: {e}");
-            warn!("{}", msg);
-            output
-                .send(RecordingEvent::StateChanged(RecordingState::Error(msg)))
-                .await
-                .ok();
-            std::future::pending::<()>().await;
-            return;
-        }
-
-        output
-            .send(RecordingEvent::StateChanged(RecordingState::Recording))
-            .await
-            .ok();
-
-        info!("macOS screen capture started");
-
-        // Frame rate gating (same pattern as Linux/Windows)
-        let frame_interval: Option<Duration> = if fps_limit == 0 {
-            None
-        } else {
-            Some(Duration::from_secs_f64(1.0 / fps_limit as f64))
-        };
-        let mut last_forwarded: Option<Instant> = None;
-
-        loop {
-            tokio::select! {
-                sample = stream.next() => {
-                    let Some(sample) = sample else {
-                        // Stream ended
-                        info!("macOS capture stream ended");
-                        break;
-                    };
-
-                    // FPS gating
-                    if let Some(interval) = frame_interval {
-                        if let Some(last) = last_forwarded {
-                            if last.elapsed() < interval {
-                                continue;
-                            }
-                        }
-                    }
-                    last_forwarded = Some(Instant::now());
-
-                    let Some(pixel_buffer) = sample.image_buffer() else {
-                        continue;
-                    };
-
-                    let Some(frame) = build_frame(&pixel_buffer) else {
-                        continue;
-                    };
-
-                    if output.send(RecordingEvent::Frame(frame)).await.is_err() {
-                        break;
-                    }
+            let result = match outcome {
+                SCPickerOutcome::Picked(result) => result,
+                SCPickerOutcome::Cancelled => {
+                    info!("macOS content picker cancelled by user");
+                    return StartOutcome::Cancelled;
                 }
-                cmd = cmd_rx.recv() => {
-                    match cmd {
-                        Some(RecordingCommand::Stop) | None => {
-                            info!("Stop command received, shutting down macOS capture");
+                SCPickerOutcome::Error(msg) => {
+                    warn!("macOS content picker error: {}", msg);
+                    return StartOutcome::Failed(msg);
+                }
+            };
+
+            let filter = result.filter();
+            let (pixel_width, pixel_height) = result.pixel_size();
+            info!(
+                width = pixel_width,
+                height = pixel_height,
+                "macOS content picker selection received"
+            );
+
+            let scale = resolution_scale.max(25).min(100);
+            let scaled_w = if scale >= 100 {
+                pixel_width
+            } else {
+                (pixel_width as u64 * scale as u64 / 100) as u32
+            };
+            let scaled_h = if scale >= 100 {
+                pixel_height
+            } else {
+                (pixel_height as u64 * scale as u64 / 100) as u32
+            };
+
+            let fps = if fps_limit == 0 { 60 } else { fps_limit };
+            let config = SCStreamConfiguration::new()
+                .with_width(scaled_w)
+                .with_height(scaled_h)
+                .with_pixel_format(PixelFormat::BGRA)
+                .with_shows_cursor(false)
+                .with_fps(fps);
+
+            let stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
+
+            if let Err(e) = stream.start_capture() {
+                return StartOutcome::Failed(format!("Failed to start macOS capture: {e}"));
+            }
+
+            info!("macOS screen capture started");
+
+            let (frame_tx, frame_rx) = mpsc::channel::<Arc<FrameData>>(2);
+            let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+
+            let reader = tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = &mut stop_rx => {
                             if let Err(e) = stream.stop_capture() {
                                 warn!("Capture stop error: {:?}", e);
                             }
                             break;
                         }
+                        sample = stream.next() => {
+                            let Some(sample) = sample else {
+                                info!("macOS capture stream ended");
+                                break;
+                            };
+                            let Some(pixel_buffer) = sample.image_buffer() else {
+                                continue;
+                            };
+                            let Some(frame) = build_frame(&pixel_buffer) else {
+                                continue;
+                            };
+                            if frame_tx.send(frame).await.is_err() {
+                                if let Err(e) = stream.stop_capture() {
+                                    warn!("Capture stop error: {:?}", e);
+                                }
+                                break;
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
 
-        output
-            .send(RecordingEvent::StateChanged(RecordingState::Idle))
-            .await
-            .ok();
+            let shutdown: ShutdownHook = Box::new(move || {
+                Box::pin(async move {
+                    let _ = stop_tx.send(());
+                    let _ = reader.await;
+                })
+            });
 
-        // Keep alive so the subscription isn't restarted
-        std::future::pending::<()>().await;
-    }))
+            StartOutcome::Started(BackendHandles { frame_rx, shutdown })
+        })
+    }
+}
+
+pub fn recording_subscription(
+    input: &(u64, u32, u32),
+) -> Pin<Box<dyn Stream<Item = RecordingEvent> + Send>> {
+    let fps_limit = input.1;
+    let resolution_scale = input.2;
+    run_recording(
+        fps_limit,
+        MacOsBackend {
+            resolution_scale,
+            fps_limit,
+        },
+    )
 }
