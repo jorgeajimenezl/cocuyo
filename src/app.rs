@@ -69,7 +69,7 @@ pub struct Cocuyo {
 
     // Other screens
     settings: settings::Settings,
-    bulb_setup: bulb_setup::BulbSetupState,
+    bulb_setup: bulb_setup::BulbSetup,
     profile_dialog: Option<crate::screen::profile_dialog::ProfileDialog>,
 
     // Windows-specific
@@ -87,7 +87,7 @@ pub struct Cocuyo {
 impl Cocuyo {
     pub fn new(config: AppConfig, tray: &'static crate::tray::TrayState) -> (Self, Task<Message>) {
         let mut main = main_window::MainWindow::new();
-        let bulb_setup = bulb_setup::BulbSetupState::new(&config);
+        let bulb_setup = bulb_setup::BulbSetup::new(&config);
         main.sync_regions_to_bulbs(&bulb_setup);
 
         let app = Self {

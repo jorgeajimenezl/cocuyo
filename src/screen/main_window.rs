@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::ambient::{BulbColor, ColorSmoother, SavedBulbState};
 use crate::config::AppConfig;
 use crate::perf_stats::PerfStats;
-use crate::screen::bulb_setup::BulbSetupState;
+use crate::screen::bulb_setup::BulbSetup;
 use crate::theme;
 use crate::widget::Element;
 use crate::widget::perf_hud::PerfHud;
@@ -161,7 +161,7 @@ impl MainWindow {
         &mut self,
         msg: Message,
         config: &AppConfig,
-        bulb_setup: &BulbSetupState,
+        bulb_setup: &BulbSetup,
     ) -> (Task<Message>, Option<Event>) {
         match msg {
             Message::StartRecording => {
@@ -418,7 +418,7 @@ impl MainWindow {
         &'a self,
         window_id: window::Id,
         config: &'a AppConfig,
-        bulb_setup: &'a BulbSetupState,
+        bulb_setup: &'a BulbSetup,
     ) -> Element<'a, Message> {
         let has_selected_bulbs = bulb_setup.has_selected_bulbs();
         let selected_count = bulb_setup.selected_bulbs().len();
@@ -714,7 +714,7 @@ impl MainWindow {
     }
 
     /// Called by app after BulbSetup changes to keep regions in sync.
-    pub fn sync_regions_to_bulbs(&mut self, bulb_setup: &BulbSetupState) {
+    pub fn sync_regions_to_bulbs(&mut self, bulb_setup: &BulbSetup) {
         let selected_macs: Vec<String> = bulb_setup.selected_bulbs().iter().cloned().collect();
         self.regions.retain(|r| selected_macs.contains(&r.bulb_mac));
         self.color_smoother
@@ -774,7 +774,7 @@ impl MainWindow {
         &mut self,
         intent: PickerIntent,
         config: &AppConfig,
-        bulb_setup: &BulbSetupState,
+        bulb_setup: &BulbSetup,
     ) -> Task<Message> {
         match intent {
             PickerIntent::StartRecording => {
@@ -807,7 +807,7 @@ impl MainWindow {
         &mut self,
         name: &str,
         config: &mut AppConfig,
-        bulb_setup: &BulbSetupState,
+        bulb_setup: &BulbSetup,
     ) -> bool {
         if self.last_frame_size.is_none() {
             tracing::warn!("Refusing to save profile {name:?}: no frame captured yet");
@@ -844,7 +844,7 @@ impl MainWindow {
         &mut self,
         name: &str,
         config: &AppConfig,
-        bulb_setup: &mut BulbSetupState,
+        bulb_setup: &mut BulbSetup,
     ) {
         let Some(profile) = config.profiles.iter().find(|p| p.name == name).cloned() else {
             return;
@@ -885,7 +885,7 @@ impl MainWindow {
     fn dispatch_to_bulbs(
         &mut self,
         config: &AppConfig,
-        bulb_setup: &BulbSetupState,
+        bulb_setup: &BulbSetup,
     ) -> Task<Message> {
         // Preview overlay reads sampled_color as ground truth, so restore it
         // after smoothing for the build call.

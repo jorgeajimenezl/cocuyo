@@ -24,13 +24,13 @@ pub enum BulbSetupEvent {
     BulbsDiscovered,
 }
 
-pub struct BulbSetupState {
+pub struct BulbSetup {
     discovered_bulbs: Vec<BulbInfo>,
     selected_bulbs: HashSet<String>,
     is_scanning: bool,
 }
 
-impl BulbSetupState {
+impl BulbSetup {
     pub fn new(config: &AppConfig) -> Self {
         let saved_bulbs = config.saved_bulbs.clone();
         let selected_macs: Vec<String> = config.selected_bulb_macs.to_vec();
