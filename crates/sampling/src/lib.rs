@@ -265,8 +265,6 @@ pub fn sample_region(
 mod tests {
     use super::*;
 
-    use std::sync::Arc;
-
     /// Helper to create a CPU FrameData from raw BGRA bytes.
     fn cpu_frame(data: Vec<u8>, width: u32, height: u32) -> FrameData {
         FrameData::Cpu {
