@@ -30,7 +30,7 @@ jobs:
             artifact: cocuyo-macos-aarch64
             binary: cocuyo
             features: tray
-          - os: macos-latest
+          - os: macos-26-intel
             target: x86_64-apple-darwin
             artifact: cocuyo-macos-x86_64
             binary: cocuyo
