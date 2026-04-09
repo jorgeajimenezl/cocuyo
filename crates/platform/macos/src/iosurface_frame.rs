@@ -43,11 +43,10 @@ impl GpuFrame for IOSurfaceFrame {
         screencapturekit::metal::autoreleasepool(|| unsafe {
             crate::metal_import::import_iosurface_texture(device, &self.surface, self.width, self.height)
         })
-        .map_err(|e| Box::new(e) as ImportError)
-    }
-
-    fn mark_import_failed(&self) {
-        crate::metal_import::mark_iosurface_import_failed();
+        .map_err(|e| {
+            crate::metal_import::mark_iosurface_import_failed();
+            Box::new(e) as ImportError
+        })
     }
 
     fn read_pixels_bgra(&self) -> Option<Vec<u8>> {

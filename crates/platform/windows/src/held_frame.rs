@@ -93,11 +93,10 @@ impl GpuFrame for HeldFrame {
                 self.height,
             )
         }
-        .map_err(|e| Box::new(e) as ImportError)
-    }
-
-    fn mark_import_failed(&self) {
-        crate::dx12_import::mark_d3d_shared_import_failed();
+        .map_err(|e| {
+            crate::dx12_import::mark_d3d_shared_import_failed();
+            Box::new(e) as ImportError
+        })
     }
 
     fn read_pixels_bgra(&self) -> Option<Vec<u8>> {

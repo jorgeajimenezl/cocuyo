@@ -293,7 +293,6 @@ impl VideoPipeline {
                     height = frame.height(),
                     "frame GPU import failed, disabling path for future frames"
                 );
-                gpu.mark_import_failed();
                 self.current_bind_group = None;
                 self.cached_texture = None;
             }

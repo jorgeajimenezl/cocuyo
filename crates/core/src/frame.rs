@@ -37,13 +37,14 @@ pub trait GpuFrame: Send + Sync + std::fmt::Debug {
     fn height(&self) -> u32;
 
     /// Import this frame as a wgpu texture, returning the native pixel format.
+    ///
+    /// On a permanent failure the implementation is responsible for disabling
+    /// its own zero-copy path (e.g. via an `ImportGuard`) before returning the
+    /// error, so callers don't need to know about platform-level state.
     fn import_gpu(
         &self,
         device: &wgpu::Device,
     ) -> Result<(wgpu::Texture, wgpu::TextureFormat), ImportError>;
-
-    /// Disable the zero-copy import path globally after a failure.
-    fn mark_import_failed(&self);
 
     /// Read pixel data from this frame as tightly-packed BGRA bytes, for CPU
     /// sampling fallbacks. Returns `None` if readback is not possible.
