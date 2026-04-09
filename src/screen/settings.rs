@@ -45,6 +45,73 @@ pub enum Event {
     SmoothTransitionsChanged(bool),
 }
 
+/// Describes side-effects that `app.rs` must apply after a settings event.
+#[derive(Default)]
+pub struct SettingsEffect {
+    /// Clear `main.active_profile_name` (config value diverged from profile).
+    pub clears_profile: bool,
+    /// Call `main.notify_settings_changed` (runtime behaviour must update).
+    pub notify_main: bool,
+    /// Save config immediately instead of just marking it dirty.
+    pub save_immediately: bool,
+    /// Spawn a new app instance and exit.
+    pub restart: bool,
+}
+
+impl Event {
+    /// Apply this event to `config` and return the required side-effects.
+    pub fn apply(self, config: &mut AppConfig) -> SettingsEffect {
+        match self {
+            #[cfg(target_os = "linux")]
+            Event::BackendChanged(key) => {
+                config.preferred_backend = key;
+                SettingsEffect { save_immediately: true, ..Default::default() }
+            }
+            Event::AdapterChanged(preferred) => {
+                config.preferred_adapter = preferred;
+                SettingsEffect { save_immediately: true, ..Default::default() }
+            }
+            Event::RestartApp => SettingsEffect { restart: true, ..Default::default() },
+            Event::ForceCpuSamplingChanged(val) => {
+                config.force_cpu_sampling = val;
+                SettingsEffect { notify_main: true, ..Default::default() }
+            }
+            Event::BulbUpdateIntervalChanged(ms) => {
+                config.bulb_update_interval_ms = ms;
+                SettingsEffect { clears_profile: true, ..Default::default() }
+            }
+            Event::MinBrightnessChanged(pct) => {
+                config.min_brightness_percent = pct;
+                SettingsEffect { clears_profile: true, ..Default::default() }
+            }
+            Event::WhiteColorTempChanged(temp) => {
+                config.white_color_temp = temp;
+                SettingsEffect { clears_profile: true, ..Default::default() }
+            }
+            Event::MinimizeToTrayChanged(val) => {
+                config.minimize_to_tray = val;
+                SettingsEffect::default()
+            }
+            Event::CaptureFpsLimitChanged(fps) => {
+                config.capture_fps_limit = fps;
+                SettingsEffect::default()
+            }
+            Event::CaptureResolutionScaleChanged(scale) => {
+                config.capture_resolution_scale = scale;
+                SettingsEffect::default()
+            }
+            Event::ShowPerfOverlayChanged(val) => {
+                config.show_perf_overlay = val;
+                SettingsEffect::default()
+            }
+            Event::SmoothTransitionsChanged(val) => {
+                config.smooth_transitions = val;
+                SettingsEffect { notify_main: true, ..Default::default() }
+            }
+        }
+    }
+}
+
 pub struct Settings {
     #[cfg(target_os = "linux")]
     available_backends: Vec<GpuBackend>,

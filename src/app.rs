@@ -442,73 +442,23 @@ impl Cocuyo {
     }
 
     fn handle_settings_event(&mut self, event: settings::Event) -> Task<Message> {
-        match event {
-            #[cfg(target_os = "linux")]
-            settings::Event::BackendChanged(config_key) => {
-                self.config.preferred_backend = config_key;
-                self.config.save();
-                Task::none()
-            }
-            settings::Event::AdapterChanged(preferred) => {
-                self.config.preferred_adapter = preferred;
-                self.config.save();
-                Task::none()
-            }
-            settings::Event::RestartApp => {
-                self.spawn_new_instance();
-                iced::exit()
-            }
-            settings::Event::ForceCpuSamplingChanged(val) => {
-                self.config.force_cpu_sampling = val;
-                self.mark_config_dirty();
-                self.main.notify_settings_changed(&self.config);
-                Task::none()
-            }
-            settings::Event::BulbUpdateIntervalChanged(ms) => {
-                self.config.bulb_update_interval_ms = ms;
-                self.main.active_profile_name = None;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::MinBrightnessChanged(pct) => {
-                self.config.min_brightness_percent = pct;
-                self.main.active_profile_name = None;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::WhiteColorTempChanged(temp) => {
-                self.config.white_color_temp = temp;
-                self.main.active_profile_name = None;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::MinimizeToTrayChanged(val) => {
-                self.config.minimize_to_tray = val;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::CaptureFpsLimitChanged(fps) => {
-                self.config.capture_fps_limit = fps;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::CaptureResolutionScaleChanged(scale) => {
-                self.config.capture_resolution_scale = scale;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::ShowPerfOverlayChanged(val) => {
-                self.config.show_perf_overlay = val;
-                self.mark_config_dirty();
-                Task::none()
-            }
-            settings::Event::SmoothTransitionsChanged(val) => {
-                self.config.smooth_transitions = val;
-                self.main.notify_settings_changed(&self.config);
-                self.mark_config_dirty();
-                Task::none()
-            }
+        let effect = event.apply(&mut self.config);
+        if effect.restart {
+            self.spawn_new_instance();
+            return iced::exit();
         }
+        if effect.clears_profile {
+            self.main.active_profile_name = None;
+        }
+        if effect.notify_main {
+            self.main.notify_settings_changed(&self.config);
+        }
+        if effect.save_immediately {
+            self.config.save();
+        } else {
+            self.mark_config_dirty();
+        }
+        Task::none()
     }
 
     fn spawn_new_instance(&self) {
