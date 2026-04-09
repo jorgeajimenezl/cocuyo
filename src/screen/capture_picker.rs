@@ -52,7 +52,7 @@ fn is_window_active(w: &Window) -> bool {
     true
 }
 
-pub struct CapturePicker {
+pub struct CapturePickerDialog {
     monitors: Vec<Monitor>,
     windows: Vec<Window>,
     selected: Option<CaptureTarget>,
@@ -60,7 +60,7 @@ pub struct CapturePicker {
     intent: PickerIntent,
 }
 
-impl CapturePicker {
+impl CapturePickerDialog {
     pub fn new(intent: PickerIntent) -> Self {
         let monitors = Monitor::enumerate().unwrap_or_default();
         let windows = Window::enumerate()

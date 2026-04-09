@@ -6,7 +6,7 @@ use iced::widget::canvas;
 use iced::widget::canvas::{Action, Cache, Canvas, Event, Geometry, Path, Stroke, Text};
 use iced::{Color, Point, Rectangle, Size, Theme};
 
-use crate::app::Message;
+use crate::screen::main_window::Message;
 use cocuyo_sampling::Region;
 use cocuyo_sampling::region;
 

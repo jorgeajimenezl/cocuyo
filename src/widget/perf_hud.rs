@@ -5,8 +5,8 @@ use iced::widget::canvas;
 use iced::widget::canvas::{Cache, Canvas, Geometry, Path, Text};
 use iced::{Point, Rectangle, Size, Theme};
 
-use crate::app::Message;
 use crate::perf_stats::PerfStats;
+use crate::screen::main_window::Message;
 use crate::theme;
 
 const HUD_PADDING: f32 = 8.0;
