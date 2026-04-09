@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "bytemuck",
  "cocuyo-core",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "tokio",
  "tracing",
@@ -654,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-linux"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "ash",
  "ashpd",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-macos"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "cocuyo-core",
  "foreign-types",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-windows"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "cocuyo-core",
  "iced",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-sampling"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "bytemuck",
  "cocuyo-core",
