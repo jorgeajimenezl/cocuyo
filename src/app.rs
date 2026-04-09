@@ -72,7 +72,7 @@ pub struct Cocuyo {
 
     // Windows-specific
     #[cfg(target_os = "windows")]
-    capture_picker: Option<capture_picker::CapturePicker>,
+    capture_picker_dialog: Option<capture_picker::CapturePickerDialog>,
     #[cfg(target_os = "windows")]
     capture_target: Option<CaptureTarget>,
 
@@ -104,7 +104,7 @@ impl Cocuyo {
             tray,
             tray_hide_requested: false,
             #[cfg(target_os = "windows")]
-            capture_picker: None,
+            capture_picker_dialog: None,
             #[cfg(target_os = "windows")]
             capture_target: None,
             config,
@@ -137,7 +137,7 @@ impl Cocuyo {
                 let kind = self.windows.remove(&id);
                 #[cfg(target_os = "windows")]
                 if kind == Some(WindowKind::CapturePicker) {
-                    self.capture_picker = None;
+                    self.capture_picker_dialog = None;
                     return Task::none();
                 }
                 if kind == Some(WindowKind::ProfileDialog) {
@@ -210,7 +210,7 @@ impl Cocuyo {
             }
             #[cfg(target_os = "windows")]
             Message::CapturePicker(msg) => {
-                let Some(picker) = self.capture_picker.as_mut() else {
+                let Some(picker) = self.capture_picker_dialog.as_mut() else {
                     return Task::none();
                 };
                 let (task, event) = picker.update(msg);
@@ -290,7 +290,7 @@ impl Cocuyo {
             }
             #[cfg(target_os = "windows")]
             Some(WindowKind::CapturePicker) => {
-                if let Some(ref picker) = self.capture_picker {
+                if let Some(ref picker) = self.capture_picker_dialog {
                     picker.view().map(Message::CapturePicker)
                 } else {
                     iced::widget::space().into()
@@ -400,7 +400,7 @@ impl Cocuyo {
             }
             #[cfg(target_os = "windows")]
             main_window::Event::OpenCapturePicker(intent) => {
-                self.capture_picker = Some(capture_picker::CapturePicker::new(intent));
+                self.capture_picker_dialog = Some(capture_picker::CapturePickerDialog::new(intent));
                 let parent = self.find_window_id(WindowKind::Main);
                 self.open_window(
                     WindowKind::CapturePicker,
@@ -564,7 +564,7 @@ impl Cocuyo {
             capture_picker::Event::TargetSelected(target, intent) => {
                 self.capture_target = Some(target);
                 let close_task = self.close_window_by_kind(WindowKind::CapturePicker);
-                self.capture_picker = None;
+                self.capture_picker_dialog = None;
 
                 let main_task = self
                     .main
@@ -574,7 +574,7 @@ impl Cocuyo {
                 Task::batch([close_task, main_task])
             }
             capture_picker::Event::Cancelled => {
-                self.capture_picker = None;
+                self.capture_picker_dialog = None;
                 self.close_window_by_kind(WindowKind::CapturePicker)
             }
         }
