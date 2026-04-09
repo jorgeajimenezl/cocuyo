@@ -268,7 +268,7 @@ mod tests {
     /// Helper to create a CPU FrameData from raw BGRA bytes.
     fn cpu_frame(data: Vec<u8>, width: u32, height: u32) -> FrameData {
         FrameData::Cpu {
-            data: data,
+            data,
             width,
             height,
         }

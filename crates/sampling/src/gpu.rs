@@ -285,7 +285,7 @@ impl std::fmt::Display for GpuSamplerError {
 /// Round `size` up to the next multiple of `alignment`.
 fn aligned_stride(size: usize, alignment: u32) -> usize {
     let align = alignment as usize;
-    (size + align - 1) / align * align
+    size.div_ceil(align) * align
 }
 
 /// Slot assignment tuple: (params_slot, result_slot, region_index).
@@ -776,19 +776,13 @@ impl GpuSampler {
         }
 
         // CPU fallback for unsupported strategies
-        if !classified.cpu_indices.is_empty() {
-            if let Some(cpu_frame) = frame.convert_to_cpu() {
-                for &i in &classified.cpu_indices {
-                    let rp = &regions[i];
-                    results[i] = super::sample_region(
-                        &cpu_frame,
-                        rp.x,
-                        rp.y,
-                        rp.width,
-                        rp.height,
-                        &rp.strategy,
-                    );
-                }
+        if !classified.cpu_indices.is_empty()
+            && let Some(cpu_frame) = frame.convert_to_cpu()
+        {
+            for &i in &classified.cpu_indices {
+                let rp = &regions[i];
+                results[i] =
+                    super::sample_region(&cpu_frame, rp.x, rp.y, rp.width, rp.height, &rp.strategy);
             }
         }
 

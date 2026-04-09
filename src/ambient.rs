@@ -161,10 +161,10 @@ pub fn build_bulb_targets(
         };
         let (color, brightness) = map_to_bulb_color(r, g, b, min_brightness, white_temp);
 
-        if let Some(prev) = last_sent.get(mac) {
-            if !color_changed(prev, &(color.clone(), brightness)) {
-                continue;
-            }
+        if let Some(prev) = last_sent.get(mac)
+            && !color_changed(prev, &(color.clone(), brightness))
+        {
+            continue;
         }
 
         new_entries.push((mac.clone(), color.clone(), brightness));
@@ -340,17 +340,17 @@ pub async fn restore_bulb_states(states: Vec<SavedBulbState>) {
                 payload.brightness(&br);
             }
 
-            if payload.is_valid() {
-                if let Err(e) = light.set(&payload).await {
-                    tracing::warn!(error = %e, ip = %state.ip, "Failed to restore bulb state");
-                }
+            if payload.is_valid()
+                && let Err(e) = light.set(&payload).await
+            {
+                tracing::warn!(error = %e, ip = %state.ip, "Failed to restore bulb state");
             }
 
             // If the bulb was off, turn it off after restoring settings
-            if !state.was_on {
-                if let Err(e) = light.set_power(&wiz_lights_rs::PowerMode::Off).await {
-                    tracing::warn!(error = %e, ip = %state.ip, "Failed to turn off bulb");
-                }
+            if !state.was_on
+                && let Err(e) = light.set_power(&wiz_lights_rs::PowerMode::Off).await
+            {
+                tracing::warn!(error = %e, ip = %state.ip, "Failed to turn off bulb");
             }
         })
         .collect();

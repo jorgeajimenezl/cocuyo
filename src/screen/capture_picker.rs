@@ -67,7 +67,7 @@ impl CapturePicker {
             .unwrap_or_default()
             .into_iter()
             .filter(|w| w.title().map(|t| !t.is_empty()).unwrap_or(false))
-            .filter(|w| is_window_active(w))
+            .filter(is_window_active)
             .collect();
 
         Self {

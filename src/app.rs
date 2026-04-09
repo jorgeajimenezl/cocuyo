@@ -419,13 +419,14 @@ impl Cocuyo {
                     .update_menu_text(self.find_window_id(WindowKind::Main).is_some(), true);
 
                 // Lazily spawn GPU sampling worker when ambient starts
-                if self.sampling_worker.is_none() && !self.config.force_cpu_sampling {
-                    if let Some((device, queue)) = crate::gpu_context::get_gpu_context() {
-                        self.sampling_worker = Some(cocuyo_sampling::gpu::SamplingWorker::spawn(
-                            device.clone(),
-                            queue.clone(),
-                        ));
-                    }
+                if self.sampling_worker.is_none()
+                    && !self.config.force_cpu_sampling
+                    && let Some((device, queue)) = crate::gpu_context::get_gpu_context()
+                {
+                    self.sampling_worker = Some(cocuyo_sampling::gpu::SamplingWorker::spawn(
+                        device.clone(),
+                        queue.clone(),
+                    ));
                 }
                 if !self.is_recording {
                     #[cfg(target_os = "linux")]
@@ -1016,10 +1017,10 @@ impl Cocuyo {
 
     fn graceful_shutdown(&mut self) -> Task<Message> {
         self.flush_config();
-        if self.is_ambient_active || self.is_recording {
-            if let Some(cmd_tx) = self.recording_cmd_tx.take() {
-                let _ = cmd_tx.try_send(RecordingCommand::Stop);
-            }
+        if (self.is_ambient_active || self.is_recording)
+            && let Some(cmd_tx) = self.recording_cmd_tx.take()
+        {
+            let _ = cmd_tx.try_send(RecordingCommand::Stop);
         }
         if let Some(states) = self.saved_bulb_states.take() {
             Task::perform(crate::ambient::restore_bulb_states(states), |()| {
@@ -1079,10 +1080,10 @@ impl Cocuyo {
         self.color_smoother
             .retain(|mac| selected_macs.iter().any(|m| m == mac));
 
-        if let Some(sel) = self.selected_region {
-            if !self.regions.iter().any(|r| r.id == sel) {
-                self.selected_region = None;
-            }
+        if let Some(sel) = self.selected_region
+            && !self.regions.iter().any(|r| r.id == sel)
+        {
+            self.selected_region = None;
         }
 
         let num_total = selected_macs.len();
