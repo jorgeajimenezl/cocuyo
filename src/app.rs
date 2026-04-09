@@ -7,9 +7,7 @@ use iced::{Fill, Size, Subscription, Task, Theme};
 
 use crate::config::AppConfig;
 use crate::screen::WindowKind;
-use crate::screen::bulb_setup;
-use crate::screen::main_window;
-use crate::screen::settings;
+use crate::screen::{bulb_setup, main_window, settings, profile_dialog};
 use crate::widget::Element;
 
 const MAIN_WINDOW_SIZE: Size = Size::new(1200.0, 750.0);
@@ -48,7 +46,7 @@ pub enum Message {
     MainWindow(main_window::Message),
     Settings(settings::Message),
     BulbSetup(bulb_setup::Message),
-    ProfileDialog(crate::screen::profile_dialog::Message),
+    ProfileDialog(profile_dialog::Message),
     #[cfg(target_os = "windows")]
     CapturePicker(capture_picker::Message),
 
@@ -70,7 +68,7 @@ pub struct Cocuyo {
     // Other screens
     settings: settings::Settings,
     bulb_setup: bulb_setup::BulbSetup,
-    profile_dialog: Option<crate::screen::profile_dialog::ProfileDialog>,
+    profile_dialog: Option<profile_dialog::ProfileDialog>,
 
     // Windows-specific
     #[cfg(target_os = "windows")]
