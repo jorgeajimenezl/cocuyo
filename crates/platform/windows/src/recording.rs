@@ -40,10 +40,7 @@ impl CaptureHandler {
         }
 
         // Safety: COM ABI is stable across windows crate versions.
-        let source_texture: &ID3D11Texture2D = unsafe {
-            let raw = frame.as_raw_texture();
-            &*(raw as *const _ as *const ID3D11Texture2D)
-        };
+        let source_texture: &ID3D11Texture2D = frame.as_raw_texture();
 
         let shared_handle = match create_shared_handle_from_texture(source_texture) {
             Ok(h) => h,
