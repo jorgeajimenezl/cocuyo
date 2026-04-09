@@ -9,7 +9,7 @@ use ashpd::desktop::{
 };
 use pipewire as pw;
 use pw::{properties::properties, spa};
-use tokio::sync::mpsc;
+use futures::channel::mpsc;
 use tracing::{debug, error, info, warn};
 
 use super::dmabuf_frame::DmaBufFrame;
@@ -425,15 +425,15 @@ fn try_process_cpu(buffer: &mut pw::buffer::Buffer, user_data: &mut UserData) ->
     })
 }
 
-fn send_frame(frame: FrameData, user_data: &UserData) -> bool {
+fn send_frame(frame: FrameData, user_data: &mut UserData) -> bool {
     let frame = Arc::new(frame);
     match user_data.frame_sender.try_send(frame) {
         Ok(()) => true,
-        Err(mpsc::error::TrySendError::Full(_)) => {
+        Err(e) if e.is_full() => {
             // Backpressure: drop frame
             false
         }
-        Err(mpsc::error::TrySendError::Closed(_)) => {
+        Err(_) => {
             // Receiver dropped — stop the mainloop
             user_data.mainloop.quit();
             false

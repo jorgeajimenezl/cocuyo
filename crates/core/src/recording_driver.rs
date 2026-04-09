@@ -29,10 +29,15 @@ pub type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// (either because the user issued `Stop` or the capture source ended).
 pub type ShutdownHook = Box<dyn FnOnce() -> ShutdownFuture + Send>;
 
+/// Stream of captured frames produced by a backend.
+pub type FrameStream = Pin<Box<dyn Stream<Item = Arc<FrameData>> + Send>>;
+
 /// Everything the driver needs from a backend once setup has succeeded.
 pub struct BackendHandles {
-    /// Channel receiving frames from the platform capture thread/task.
-    pub frame_rx: mpsc::Receiver<Arc<FrameData>>,
+    /// Frames produced by the platform capture source. The driver polls
+    /// this directly — backends are free to return any `Stream`, whether
+    /// it's a channel receiver or a direct adapter over the capture API.
+    pub frames: FrameStream,
     /// Cleanup hook (stop capture, join threads, close sessions).
     pub shutdown: ShutdownHook,
 }
@@ -95,7 +100,7 @@ pub fn run_recording<B: RecordingBackend>(
         };
 
         let BackendHandles {
-            mut frame_rx,
+            mut frames,
             shutdown,
         } = handles;
         let mut shutdown = Some(shutdown);
@@ -114,7 +119,7 @@ pub fn run_recording<B: RecordingBackend>(
 
         loop {
             tokio::select! {
-                frame = frame_rx.recv() => {
+                frame = frames.next() => {
                     match frame {
                         Some(frame) => {
                             if let Some(interval) = frame_interval
@@ -135,7 +140,9 @@ pub fn run_recording<B: RecordingBackend>(
                     match cmd {
                         Some(RecordingCommand::Stop) | None => {
                             info!("Stop command received, shutting down recording");
-                            drop(frame_rx);
+                            // Drop the frame stream so the capture source notices
+                            // (e.g. channel closes, Arc refcount drops).
+                            drop(frames);
                             if let Some(sd) = shutdown.take() {
                                 sd().await;
                             }

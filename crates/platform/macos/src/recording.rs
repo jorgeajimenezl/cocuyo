@@ -1,16 +1,19 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use futures::Stream;
+use futures::stream::StreamExt;
+use screencapturekit::CVPixelBuffer;
 use screencapturekit::async_api::AsyncSCContentSharingPicker;
 use screencapturekit::async_api::AsyncSCStream;
+use screencapturekit::cm::CMSampleBuffer;
 use screencapturekit::content_sharing_picker::{
     SCContentSharingPickerConfiguration, SCContentSharingPickerMode, SCPickerOutcome,
 };
 use screencapturekit::stream::configuration::SCStreamConfiguration;
 use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::output_type::SCStreamOutputType;
-use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
 use cocuyo_core::frame::FrameData;
@@ -65,6 +68,26 @@ fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<Fra
         width: w,
         height: h,
     }))
+}
+
+/// Thin `futures::Stream` adapter over `AsyncSCStream`.
+///
+/// `AsyncSCStream` already owns the callback-to-async bridge internally
+/// (the ObjC sample callback pushes into a `Mutex<VecDeque>` and wakes the
+/// current waker). Because `NextSample` is stateless — all its state lives
+/// in the `Arc<Mutex<...>>` shared with the sender — we can construct a
+/// fresh one on every `poll_next` without losing waker registration.
+struct ScFrameStream {
+    inner: Arc<AsyncSCStream>,
+}
+
+impl Stream for ScFrameStream {
+    type Item = CMSampleBuffer;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut fut = self.inner.next();
+        Pin::new(&mut fut).poll(cx)
+    }
 }
 
 struct MacOsBackend {
@@ -127,56 +150,40 @@ impl RecordingBackend for MacOsBackend {
                 .with_shows_cursor(false)
                 .with_fps(fps);
 
-            let stream = AsyncSCStream::new(&filter, &config, 2, SCStreamOutputType::Screen);
+            let sc_stream = Arc::new(AsyncSCStream::new(
+                &filter,
+                &config,
+                2,
+                SCStreamOutputType::Screen,
+            ));
 
-            if let Err(e) = stream.start_capture() {
+            if let Err(e) = sc_stream.start_capture() {
                 return StartOutcome::Failed(format!("Failed to start macOS capture: {e}"));
             }
 
             info!("macOS screen capture started");
 
-            let (frame_tx, frame_rx) = mpsc::channel::<Arc<FrameData>>(2);
-            let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
-
-            let reader = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = &mut stop_rx => {
-                            if let Err(e) = stream.stop_capture() {
-                                warn!("Capture stop error: {:?}", e);
-                            }
-                            break;
-                        }
-                        sample = stream.next() => {
-                            let Some(sample) = sample else {
-                                info!("macOS capture stream ended");
-                                break;
-                            };
-                            let Some(pixel_buffer) = sample.image_buffer() else {
-                                continue;
-                            };
-                            let Some(frame) = build_frame(&pixel_buffer) else {
-                                continue;
-                            };
-                            if frame_tx.send(frame).await.is_err() {
-                                if let Err(e) = stream.stop_capture() {
-                                    warn!("Capture stop error: {:?}", e);
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
+            // Zero-hop frame pipeline: driver polls SCKit's internal
+            // Mutex<VecDeque> directly, no intermediate channel or task.
+            let sc_for_shutdown = Arc::clone(&sc_stream);
+            let frames = ScFrameStream { inner: sc_stream }
+                .filter_map(|sample: CMSampleBuffer| async move {
+                    let pb: CVPixelBuffer = sample.image_buffer()?;
+                    build_frame(&pb)
+                });
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {
-                    let _ = stop_tx.send(());
-                    let _ = reader.await;
+                    if let Err(e) = sc_for_shutdown.stop_capture() {
+                        warn!("Capture stop error: {:?}", e);
+                    }
                 })
             });
 
-            StartOutcome::Started(BackendHandles { frame_rx, shutdown })
+            StartOutcome::Started(BackendHandles {
+                frames: Box::pin(frames),
+                shutdown,
+            })
         })
     }
 }

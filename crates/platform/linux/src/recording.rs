@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::Stream;
-use tokio::sync::mpsc;
+use futures::channel::mpsc;
 use tracing::{error, info};
 
 use super::gst_pipeline::GpuBackend;
@@ -59,7 +59,10 @@ impl RecordingBackend for LinuxBackend {
                 })
             });
 
-            StartOutcome::Started(BackendHandles { frame_rx, shutdown })
+            StartOutcome::Started(BackendHandles {
+                frames: Box::pin(frame_rx),
+                shutdown,
+            })
         })
     }
 }

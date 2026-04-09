@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Stream;
-use tokio::sync::mpsc;
+use futures::channel::mpsc;
 use tracing::{info, warn};
 
 use cocuyo_core::frame::FrameData;
@@ -64,11 +64,9 @@ impl CaptureHandler {
             height,
         ))));
 
-        match self.frame_tx.try_send(frame_data) {
-            Ok(()) => true,
-            Err(mpsc::error::TrySendError::Full(_)) => true,
-            Err(mpsc::error::TrySendError::Closed(_)) => true,
-        }
+        // futures::channel::mpsc::Sender::try_send — drop on full/closed.
+        let _ = self.frame_tx.try_send(frame_data);
+        true
     }
 }
 
@@ -127,10 +125,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             height,
         });
 
-        match self.frame_tx.try_send(frame_data) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {}
-            Err(mpsc::error::TrySendError::Closed(_)) => {
+        if let Err(e) = self.frame_tx.try_send(frame_data) {
+            if e.is_disconnected() {
                 capture_control.stop();
             }
         }
@@ -196,7 +192,10 @@ impl RecordingBackend for WindowsBackend {
                 })
             });
 
-            StartOutcome::Started(BackendHandles { frame_rx, shutdown })
+            StartOutcome::Started(BackendHandles {
+                frames: Box::pin(frame_rx),
+                shutdown,
+            })
         })
     }
 }
