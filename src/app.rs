@@ -167,46 +167,26 @@ impl Cocuyo {
             Message::MaximizeWindow(id) => window::maximize(id, true),
             Message::MainWindow(msg) => {
                 let (task, event) = self.main.update(msg, &self.config, &self.bulb_setup);
-                let task = task.map(Message::MainWindow);
-                if let Some(event) = event {
-                    let event_task = self.handle_main_window_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
-                }
+                let event_task = event.map(|e| self.handle_main_window_event(e));
+                Self::merge_tasks(task, Message::MainWindow, event_task)
             }
             Message::Settings(msg) => {
                 let (task, event) = self.settings.update(msg);
-                let task = task.map(Message::Settings);
-                if let Some(event) = event {
-                    let event_task = self.handle_settings_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
-                }
+                let event_task = event.map(|e| self.handle_settings_event(e));
+                Self::merge_tasks(task, Message::Settings, event_task)
             }
             Message::BulbSetup(msg) => {
                 let (task, event) = self.bulb_setup.update(msg);
-                let task = task.map(Message::BulbSetup);
-                if let Some(event) = event {
-                    let event_task = self.handle_bulb_setup_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
-                }
+                let event_task = event.map(|e| self.handle_bulb_setup_event(e));
+                Self::merge_tasks(task, Message::BulbSetup, event_task)
             }
             Message::ProfileDialog(msg) => {
                 let Some(dialog) = self.profile_dialog.as_mut() else {
                     return Task::none();
                 };
                 let (task, event) = dialog.update(msg);
-                let task = task.map(Message::ProfileDialog);
-                if let Some(event) = event {
-                    let event_task = self.handle_profile_dialog_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
-                }
+                let event_task = event.map(|e| self.handle_profile_dialog_event(e));
+                Self::merge_tasks(task, Message::ProfileDialog, event_task)
             }
             #[cfg(target_os = "windows")]
             Message::CapturePicker(msg) => {
@@ -214,13 +194,8 @@ impl Cocuyo {
                     return Task::none();
                 };
                 let (task, event) = picker.update(msg);
-                let task = task.map(Message::CapturePicker);
-                if let Some(event) = event {
-                    let event_task = self.handle_capture_picker_event(event);
-                    Task::batch([task, event_task])
-                } else {
-                    task
-                }
+                let event_task = event.map(|e| self.handle_capture_picker_event(e));
+                Self::merge_tasks(task, Message::CapturePicker, event_task)
             }
             Message::TrayEvent(action) => {
                 use crate::tray::TrayAction;
@@ -357,6 +332,18 @@ impl Cocuyo {
         self.main
             .build_recording_subscription()
             .map(Message::MainWindow)
+    }
+
+    fn merge_tasks<Msg: Send + 'static>(
+        inner: Task<Msg>,
+        wrap: impl Fn(Msg) -> Message + Send + 'static,
+        event_task: Option<Task<Message>>,
+    ) -> Task<Message> {
+        let task = inner.map(wrap);
+        match event_task {
+            Some(ev) => Task::batch([task, ev]),
+            None => task,
+        }
     }
 
     // --- Event handlers for delegated screens ---
