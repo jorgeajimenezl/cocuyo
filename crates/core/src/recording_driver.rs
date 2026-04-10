@@ -203,11 +203,11 @@ pub fn channel<T>(
 mod tests {
     use std::future::Future;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    use futures::channel::mpsc as futures_mpsc;
     use futures::StreamExt as _;
+    use futures::channel::mpsc as futures_mpsc;
 
     use super::*;
     use crate::errors::RecordingError;
@@ -272,7 +272,10 @@ mod tests {
         ));
 
         frame_tx.try_send(cpu_frame()).unwrap();
-        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::Frame(_)
+        ));
 
         cmd_tx.send(RecordingCommand::Stop).await.unwrap();
 
@@ -289,7 +292,10 @@ mod tests {
     async fn test_cancelled_backend() {
         let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Cancelled)));
 
-        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Ready(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::Ready(_)
+        ));
         assert!(matches!(
             stream.next().await.unwrap(),
             RecordingEvent::StateChanged(RecordingState::Starting)
@@ -300,22 +306,24 @@ mod tests {
         ));
 
         // After Idle the driver calls `pending()` — next poll must not resolve.
-        let timed_out = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            stream.next(),
-        )
-        .await;
-        assert!(timed_out.is_err(), "stream should be pending after Cancelled");
+        let timed_out =
+            tokio::time::timeout(std::time::Duration::from_millis(50), stream.next()).await;
+        assert!(
+            timed_out.is_err(),
+            "stream should be pending after Cancelled"
+        );
     }
 
     /// Backend returns `Failed` → Ready, Starting, Error(msg) events. Stream
     /// stays alive afterwards.
     #[tokio::test]
     async fn test_failed_backend() {
-        let mut stream =
-            run_recording(0, MockBackend(Some(StartOutcome::Failed("oops".into()))));
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Failed("oops".into()))));
 
-        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Ready(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::Ready(_)
+        ));
         assert!(matches!(
             stream.next().await.unwrap(),
             RecordingEvent::StateChanged(RecordingState::Starting)
@@ -328,11 +336,8 @@ mod tests {
             ev
         );
 
-        let timed_out = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            stream.next(),
-        )
-        .await;
+        let timed_out =
+            tokio::time::timeout(std::time::Duration::from_millis(50), stream.next()).await;
         assert!(timed_out.is_err(), "stream should be pending after Failed");
     }
 
@@ -360,7 +365,10 @@ mod tests {
 
         // First frame — always forwarded (last_forwarded is None).
         frame_tx.try_send(cpu_frame()).unwrap();
-        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::Frame(_)
+        ));
 
         // Two more frames sent immediately — both within the 1-second interval.
         frame_tx.try_send(cpu_frame()).unwrap();
@@ -457,7 +465,10 @@ mod tests {
 
         for _ in 0..3 {
             frame_tx.try_send(cpu_frame()).unwrap();
-            assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+            assert!(matches!(
+                stream.next().await.unwrap(),
+                RecordingEvent::Frame(_)
+            ));
         }
     }
 }

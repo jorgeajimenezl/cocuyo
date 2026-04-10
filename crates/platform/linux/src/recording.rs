@@ -8,8 +8,8 @@ use tracing::{error, info};
 
 use super::gst_pipeline::GpuBackend;
 use super::stream;
-use cocuyo_core::frame::FrameData;
 use cocuyo_core::errors::RecordingError;
+use cocuyo_core::frame::FrameData;
 use cocuyo_core::recording::RecordingEvent;
 use cocuyo_core::recording_driver::{
     BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,

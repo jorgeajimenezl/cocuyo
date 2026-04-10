@@ -16,8 +16,8 @@ use screencapturekit::stream::configuration::pixel_format::PixelFormat;
 use screencapturekit::stream::output_type::SCStreamOutputType;
 use tracing::{info, warn};
 
-use cocuyo_core::frame::FrameData;
 use cocuyo_core::errors::RecordingError;
+use cocuyo_core::frame::FrameData;
 use cocuyo_core::recording::RecordingEvent;
 use cocuyo_core::recording_driver::{
     BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,
