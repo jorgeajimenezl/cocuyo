@@ -7,6 +7,7 @@ use futures::channel::mpsc;
 use tracing::{info, warn};
 
 use cocuyo_core::frame::FrameData;
+use cocuyo_core::errors::RecordingError;
 use cocuyo_core::recording::RecordingEvent;
 use cocuyo_core::recording_driver::{
     BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,
@@ -183,13 +184,14 @@ impl RecordingBackend for WindowsBackend {
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {
-                    let _ = tokio::task::spawn_blocking(move || {
-                        if let Err(e) = capture_control.stop() {
+                    match tokio::task::spawn_blocking(move || capture_control.stop()).await {
+                        Ok(Ok(())) => None,
+                        Ok(Err(e)) => {
                             warn!("Capture stop error: {:?}", e);
+                            Some(RecordingError::StreamFailed(format!("{e:?}")))
                         }
-                    })
-                    .await;
-                    None
+                        Err(_) => Some(RecordingError::ThreadPanicked),
+                    }
                 })
             });
 

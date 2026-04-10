@@ -17,6 +17,7 @@ use screencapturekit::stream::output_type::SCStreamOutputType;
 use tracing::{info, warn};
 
 use cocuyo_core::frame::FrameData;
+use cocuyo_core::errors::RecordingError;
 use cocuyo_core::recording::RecordingEvent;
 use cocuyo_core::recording_driver::{
     BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,
@@ -175,10 +176,13 @@ impl RecordingBackend for MacOsBackend {
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {
-                    if let Err(e) = sc_for_shutdown.stop_capture() {
-                        warn!("Capture stop error: {:?}", e);
+                    match sc_for_shutdown.stop_capture() {
+                        Ok(()) => None,
+                        Err(e) => {
+                            warn!("Capture stop error: {:?}", e);
+                            Some(RecordingError::StreamFailed(format!("{e:?}")))
+                        }
                     }
-                    None
                 })
             });
 
