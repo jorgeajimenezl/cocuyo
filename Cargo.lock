@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "bytemuck",
  "cocuyo-core",
@@ -654,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-core"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "futures",
  "thiserror 2.0.18",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-linux"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "ash",
  "ashpd",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-macos"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "cocuyo-core",
  "foreign-types",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-platform-windows"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "cocuyo-core",
  "futures",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "cocuyo-sampling"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "bytemuck",
  "cocuyo-core",

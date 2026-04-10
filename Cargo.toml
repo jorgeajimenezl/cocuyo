@@ -3,7 +3,7 @@ members = [".", "crates/core", "crates/sampling", "crates/platform/windows", "cr
 resolver = "3"
 
 [workspace.package]
-version = "0.5.4"
+version = "0.5.5"
 edition = "2024"
 
 [workspace.dependencies]
