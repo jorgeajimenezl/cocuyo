@@ -166,11 +166,12 @@ impl RecordingBackend for MacOsBackend {
             // Zero-hop frame pipeline: driver polls SCKit's internal
             // Mutex<VecDeque> directly, no intermediate channel or task.
             let sc_for_shutdown = Arc::clone(&sc_stream);
-            let frames = ScFrameStream { inner: sc_stream }
-                .filter_map(|sample: CMSampleBuffer| async move {
+            let frames = ScFrameStream { inner: sc_stream }.filter_map(
+                |sample: CMSampleBuffer| async move {
                     let pb: CVPixelBuffer = sample.image_buffer()?;
                     build_frame(&pb)
-                });
+                },
+            );
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {

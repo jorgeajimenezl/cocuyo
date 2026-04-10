@@ -7,9 +7,9 @@ use ashpd::desktop::{
         CursorMode, Screencast, SelectSourcesOptions, SourceType, Stream as ScreencastStream,
     },
 };
+use futures::channel::mpsc;
 use pipewire as pw;
 use pw::{properties::properties, spa};
-use futures::channel::mpsc;
 use tracing::{debug, error, info, warn};
 
 use super::dmabuf_frame::DmaBufFrame;

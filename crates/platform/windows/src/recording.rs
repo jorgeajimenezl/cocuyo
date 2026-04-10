@@ -125,10 +125,10 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             height,
         });
 
-        if let Err(e) = self.frame_tx.try_send(frame_data) {
-            if e.is_disconnected() {
-                capture_control.stop();
-            }
+        if let Err(e) = self.frame_tx.try_send(frame_data)
+            && e.is_disconnected()
+        {
+            capture_control.stop();
         }
 
         Ok(())
