@@ -189,6 +189,7 @@ impl RecordingBackend for WindowsBackend {
                         }
                     })
                     .await;
+                    None
                 })
             });
 

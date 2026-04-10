@@ -9,6 +9,7 @@ use tracing::{error, info};
 use super::gst_pipeline::GpuBackend;
 use super::stream;
 use cocuyo_core::frame::FrameData;
+use cocuyo_core::errors::RecordingError;
 use cocuyo_core::recording::RecordingEvent;
 use cocuyo_core::recording_driver::{
     BackendHandles, RecordingBackend, ShutdownHook, StartOutcome, run_recording,
@@ -46,16 +47,26 @@ impl RecordingBackend for LinuxBackend {
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {
-                    match pw_handle.join() {
-                        Ok(Ok(())) => info!("PipeWire streaming ended"),
-                        Ok(Err(e)) => error!(error = %e, "PipeWire streaming error"),
-                        Err(_) => error!("PipeWire thread panicked"),
-                    }
+                    let stream_error = match pw_handle.join() {
+                        Ok(Ok(())) => {
+                            info!("PipeWire streaming ended");
+                            None
+                        }
+                        Ok(Err(e)) => {
+                            error!(error = %e, "PipeWire streaming error");
+                            Some(RecordingError::StreamFailed(e.to_string()))
+                        }
+                        Err(_) => {
+                            error!("PipeWire thread panicked");
+                            Some(RecordingError::ThreadPanicked)
+                        }
+                    };
                     if let Err(e) = session.close().await {
                         error!(error = %e, "Failed to close portal session");
                     } else {
                         info!("Portal session closed");
                     }
+                    stream_error
                 })
             });
 

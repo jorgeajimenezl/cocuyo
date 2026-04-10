@@ -50,7 +50,7 @@ impl GpuFrame for IOSurfaceFrame {
         })
         .map_err(|e| {
             crate::metal_import::mark_iosurface_import_failed();
-            Box::new(e) as ImportError
+            ImportError::wrap(e)
         })
     }
 

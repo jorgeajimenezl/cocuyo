@@ -178,6 +178,7 @@ impl RecordingBackend for MacOsBackend {
                     if let Err(e) = sc_for_shutdown.stop_capture() {
                         warn!("Capture stop error: {:?}", e);
                     }
+                    None
                 })
             });
 
