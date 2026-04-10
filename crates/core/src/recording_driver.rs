@@ -178,3 +178,231 @@ pub fn channel<T>(
     let runner = stream::once(f(sender)).filter_map(|_| async { None });
     stream::select(receiver, runner)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use futures::channel::mpsc as futures_mpsc;
+    use futures::StreamExt as _;
+
+    use super::*;
+    use crate::frame::FrameData;
+    use crate::recording::{RecordingCommand, RecordingEvent, RecordingState};
+
+    fn cpu_frame() -> Arc<FrameData> {
+        Arc::new(FrameData::Cpu {
+            data: vec![0u8; 4],
+            width: 1,
+            height: 1,
+        })
+    }
+
+    /// Create `BackendHandles` wired to a controllable frame sender and a
+    /// shutdown flag that is set when the hook fires.
+    fn started_handles() -> (
+        futures_mpsc::Sender<Arc<FrameData>>,
+        Arc<AtomicBool>,
+        BackendHandles,
+    ) {
+        let (frame_tx, frame_rx) = futures_mpsc::channel(8);
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&shutdown_called);
+        let handles = BackendHandles {
+            frames: Box::pin(frame_rx),
+            shutdown: Box::new(move || {
+                flag.store(true, Ordering::SeqCst);
+                Box::pin(async {})
+            }),
+        };
+        (frame_tx, shutdown_called, handles)
+    }
+
+    struct MockBackend(Option<StartOutcome>);
+
+    impl RecordingBackend for MockBackend {
+        fn start(&mut self) -> Pin<Box<dyn Future<Output = StartOutcome> + Send + '_>> {
+            let outcome = self.0.take().expect("start() called twice");
+            Box::pin(async move { outcome })
+        }
+    }
+
+    /// Full happy-path: Ready → Starting → Recording → Frame → Stop → Idle.
+    /// Verifies the shutdown hook fires.
+    #[tokio::test]
+    async fn test_successful_lifecycle() {
+        let (mut frame_tx, shutdown_called, handles) = started_handles();
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Started(handles))));
+
+        let RecordingEvent::Ready(cmd_tx) = stream.next().await.unwrap() else {
+            panic!("expected Ready");
+        };
+
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Recording)
+        ));
+
+        frame_tx.try_send(cpu_frame()).unwrap();
+        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+
+        cmd_tx.send(RecordingCommand::Stop).await.unwrap();
+
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Idle)
+        ));
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
+    /// Backend returns `Cancelled` → Ready, Starting, Idle events. Stream
+    /// stays alive (pending) so the subscription isn't restarted.
+    #[tokio::test]
+    async fn test_cancelled_backend() {
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Cancelled)));
+
+        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Ready(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Idle)
+        ));
+
+        // After Idle the driver calls `pending()` — next poll must not resolve.
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            stream.next(),
+        )
+        .await;
+        assert!(timed_out.is_err(), "stream should be pending after Cancelled");
+    }
+
+    /// Backend returns `Failed` → Ready, Starting, Error(msg) events. Stream
+    /// stays alive afterwards.
+    #[tokio::test]
+    async fn test_failed_backend() {
+        let mut stream =
+            run_recording(0, MockBackend(Some(StartOutcome::Failed("oops".into()))));
+
+        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Ready(_)));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+
+        let ev = stream.next().await.unwrap();
+        assert!(
+            matches!(&ev, RecordingEvent::StateChanged(RecordingState::Error(m)) if m == "oops"),
+            "unexpected event: {:?}",
+            ev
+        );
+
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            stream.next(),
+        )
+        .await;
+        assert!(timed_out.is_err(), "stream should be pending after Failed");
+    }
+
+    /// With `fps_limit = 1` (1-second interval), frames sent within the
+    /// interval after the first are dropped and never emitted.
+    #[tokio::test]
+    async fn test_fps_gating() {
+        let (mut frame_tx, _shutdown, handles) = started_handles();
+        // fps_limit = 1 → 1-second interval, so rapid frames 2 & 3 are dropped.
+        let mut stream = run_recording(1, MockBackend(Some(StartOutcome::Started(handles))));
+
+        // Hold cmd_tx so the command channel stays open; dropping it would
+        // cause cmd_rx.recv() to return None and trigger a spurious shutdown.
+        let RecordingEvent::Ready(_cmd_tx) = stream.next().await.unwrap() else {
+            panic!("expected Ready");
+        };
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Recording)
+        ));
+
+        // First frame — always forwarded (last_forwarded is None).
+        frame_tx.try_send(cpu_frame()).unwrap();
+        assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+
+        // Two more frames sent immediately — both within the 1-second interval.
+        frame_tx.try_send(cpu_frame()).unwrap();
+        frame_tx.try_send(cpu_frame()).unwrap();
+
+        // Close the frame stream; driver exits without emitting the gated frames.
+        drop(frame_tx);
+
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Idle)
+        ));
+    }
+
+    /// Dropping the frame sender (no `Stop` command) causes the driver to exit
+    /// the loop naturally, call the shutdown hook, and emit Idle.
+    #[tokio::test]
+    async fn test_stream_ends_when_frames_close() {
+        let (frame_tx, shutdown_called, handles) = started_handles();
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Started(handles))));
+
+        let RecordingEvent::Ready(_cmd_tx) = stream.next().await.unwrap() else {
+            panic!("expected Ready");
+        };
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Recording)
+        ));
+
+        drop(frame_tx); // signals end-of-stream to the driver
+
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Idle)
+        ));
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
+    /// With `fps_limit = 0` every frame is forwarded regardless of timing.
+    #[tokio::test]
+    async fn test_zero_fps_limit_forwards_all() {
+        let (mut frame_tx, _shutdown, handles) = started_handles();
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Started(handles))));
+
+        let RecordingEvent::Ready(_cmd_tx) = stream.next().await.unwrap() else {
+            panic!("expected Ready");
+        };
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Recording)
+        ));
+
+        for _ in 0..3 {
+            frame_tx.try_send(cpu_frame()).unwrap();
+            assert!(matches!(stream.next().await.unwrap(), RecordingEvent::Frame(_)));
+        }
+    }
+}
