@@ -38,9 +38,9 @@ struct CaptureHandler {
 }
 
 impl CaptureHandler {
-    fn try_zero_copy(&mut self, frame: &mut Frame, width: u32, height: u32) -> bool {
+    fn build_zero_copy_frame(&mut self, frame: &mut Frame) -> Option<Arc<FrameData>> {
         if self.zero_copy_failed || !dx12_import::is_d3d_shared_import_available() {
-            return false;
+            return None;
         }
 
         let source_texture: &ID3D11Texture2D = frame.as_raw_texture();
@@ -49,7 +49,7 @@ impl CaptureHandler {
             Err(e) => {
                 warn!(error = %e, "CreateSharedHandle failed on WGC texture, disabling zero-copy");
                 self.zero_copy_failed = true;
-                return false;
+                return None;
             }
         };
 
@@ -57,23 +57,38 @@ impl CaptureHandler {
         let held = frame.hold_capture_frame();
         let texture_clone: ID3D11Texture2D = frame.as_raw_texture().clone();
 
-        let frame_data = Arc::new(FrameData::Gpu(Box::new(HeldFrame::new(
+        Some(Arc::new(FrameData::Gpu(Box::new(HeldFrame::new(
             held,
             texture_clone,
             shared_handle,
-            width,
-            height,
-        ))));
+            frame.width(),
+            frame.height(),
+        )))))
+    }
 
-        // futures::channel::mpsc::Sender::try_send — drop on full/closed.
-        let _ = self.frame_tx.try_send(frame_data);
-        true
+    fn build_cpu_frame(
+        &mut self,
+        frame: &mut Frame,
+    ) -> Result<Arc<FrameData>, windows_capture::frame::Error> {
+        let mut buffer = frame.buffer()?;
+
+        let bgra_data = if buffer.has_padding() {
+            buffer.as_nopadding_buffer(&mut self.nopadding_buf).to_vec()
+        } else {
+            buffer.as_raw_buffer().to_vec()
+        };
+
+        Ok(Arc::new(FrameData::Cpu {
+            data: bgra_data,
+            width: frame.width(),
+            height: frame.height(),
+        }))
     }
 }
 
 fn create_shared_handle_from_texture(
     texture: &ID3D11Texture2D,
-) -> Result<windows::Win32::Foundation::HANDLE, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<windows::Win32::Foundation::HANDLE, windows::core::Error> {
     let dxgi_resource: IDXGIResource1 = texture.cast()?;
     let handle = unsafe {
         dxgi_resource.CreateSharedHandle(
@@ -87,7 +102,7 @@ fn create_shared_handle_from_texture(
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
     type Flags = mpsc::Sender<Arc<FrameData>>;
-    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Error = RecordingError;
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -102,29 +117,12 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        let width = frame.width();
-        let height = frame.height();
-
-        if self.try_zero_copy(frame, width, height) {
-            if self.frame_tx.is_closed() {
-                capture_control.stop();
-            }
-            return Ok(());
-        }
-
-        let mut buffer = frame.buffer()?;
-
-        let bgra_data = if buffer.has_padding() {
-            buffer.as_nopadding_buffer(&mut self.nopadding_buf).to_vec()
-        } else {
-            buffer.as_raw_buffer().to_vec()
+        let frame_data = match self.build_zero_copy_frame(frame) {
+            Some(gpu_frame) => gpu_frame,
+            None => self
+                .build_cpu_frame(frame)
+                .map_err(|e| RecordingError::StreamFailed(e.to_string()))?,
         };
-
-        let frame_data = Arc::new(FrameData::Cpu {
-            data: bgra_data,
-            width,
-            height,
-        });
 
         if let Err(e) = self.frame_tx.try_send(frame_data)
             && e.is_disconnected()

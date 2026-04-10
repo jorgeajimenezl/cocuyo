@@ -18,9 +18,10 @@ impl ImportError {
 #[derive(Debug, Error)]
 pub enum RecordingError {
     /// The capture stream ended with an error (e.g. capture thread failed).
-    #[error("capture stream error: {0}")]
+    #[error("Capture stream error: {0}")]
     StreamFailed(String),
+
     /// The capture thread panicked.
-    #[error("capture thread panicked")]
+    #[error("Capture thread panicked")]
     ThreadPanicked,
 }
