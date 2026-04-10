@@ -150,11 +150,10 @@ pub fn run_recording<B: RecordingBackend>(
                             // Drop the frame stream so the capture source notices
                             // (e.g. channel closes, Arc refcount drops).
                             drop(frames);
-                            if let Some(sd) = shutdown.take() {
-                                if let Some(e) = sd().await {
+                            if let Some(sd) = shutdown.take()
+                                && let Some(e) = sd().await {
                                     error!(error = %e, "Shutdown error after Stop command");
                                 }
-                            }
                             break;
                         }
                     }
