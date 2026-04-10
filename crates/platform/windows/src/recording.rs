@@ -34,12 +34,11 @@ use windows_capture::settings::{
 struct CaptureHandler {
     frame_tx: mpsc::Sender<Arc<FrameData>>,
     nopadding_buf: Vec<u8>,
-    zero_copy_failed: bool,
 }
 
 impl CaptureHandler {
     fn build_zero_copy_frame(&mut self, frame: &mut Frame) -> Option<Arc<FrameData>> {
-        if self.zero_copy_failed || !dx12_import::is_d3d_shared_import_available() {
+        if !dx12_import::is_d3d_shared_import_available() {
             return None;
         }
 
@@ -48,7 +47,7 @@ impl CaptureHandler {
             Ok(h) => h,
             Err(e) => {
                 warn!(error = %e, "CreateSharedHandle failed on WGC texture, disabling zero-copy");
-                self.zero_copy_failed = true;
+                dx12_import::mark_d3d_shared_import_failed();
                 return None;
             }
         };
@@ -108,7 +107,6 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         Ok(Self {
             frame_tx: ctx.flags,
             nopadding_buf: Vec::new(),
-            zero_copy_failed: false,
         })
     }
 
