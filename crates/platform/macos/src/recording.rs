@@ -1,9 +1,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use futures::Stream;
-use futures::stream::StreamExt;
+use futures::stream::{StreamExt, poll_fn};
 use screencapturekit::CVPixelBuffer;
 use screencapturekit::async_api::AsyncSCContentSharingPicker;
 use screencapturekit::async_api::AsyncSCStream;
@@ -71,25 +70,6 @@ fn build_frame(pixel_buffer: &screencapturekit::CVPixelBuffer) -> Option<Arc<Fra
     }))
 }
 
-/// Thin `futures::Stream` adapter over `AsyncSCStream`.
-///
-/// `AsyncSCStream` already owns the callback-to-async bridge internally
-/// (the ObjC sample callback pushes into a `Mutex<VecDeque>` and wakes the
-/// current waker). Because `NextSample` is stateless — all its state lives
-/// in the `Arc<Mutex<...>>` shared with the sender — we can construct a
-/// fresh one on every `poll_next` without losing waker registration.
-struct ScFrameStream {
-    inner: Arc<AsyncSCStream>,
-}
-
-impl Stream for ScFrameStream {
-    type Item = CMSampleBuffer;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut fut = self.inner.next();
-        Pin::new(&mut fut).poll(cx)
-    }
-}
 
 struct MacOsBackend {
     resolution_scale: u32,
@@ -167,12 +147,14 @@ impl RecordingBackend for MacOsBackend {
             // Zero-hop frame pipeline: driver polls SCKit's internal
             // Mutex<VecDeque> directly, no intermediate channel or task.
             let sc_for_shutdown = Arc::clone(&sc_stream);
-            let frames = ScFrameStream { inner: sc_stream }.filter_map(
-                |sample: CMSampleBuffer| async move {
-                    let pb: CVPixelBuffer = sample.image_buffer()?;
-                    build_frame(&pb)
-                },
-            );
+            let frames = poll_fn(move |cx| {
+                let mut fut = sc_stream.next();
+                Pin::new(&mut fut).poll(cx)
+            })
+            .filter_map(|sample: CMSampleBuffer| async move {
+                let pb: CVPixelBuffer = sample.image_buffer()?;
+                build_frame(&pb)
+            });
 
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {

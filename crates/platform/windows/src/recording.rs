@@ -181,12 +181,12 @@ impl RecordingBackend for WindowsBackend {
             let shutdown: ShutdownHook = Box::new(move || {
                 Box::pin(async move {
                     match tokio::task::spawn_blocking(move || capture_control.stop()).await {
-                        Ok(Ok(())) => None,
                         Ok(Err(e)) => {
                             warn!("Capture stop error: {:?}", e);
                             Some(RecordingError::StreamFailed(format!("{e:?}")))
                         }
-                        Err(_) => Some(RecordingError::ThreadPanicked),
+                        Err(e) if e.is_panic() => Some(RecordingError::ThreadPanicked),
+                        _ => None,
                     }
                 })
             });
