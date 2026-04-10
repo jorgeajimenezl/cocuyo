@@ -9,7 +9,7 @@ wgpu.workspace = true
 wgpu-hal = { workspace = true, features = ["dx12"] }
 tracing.workspace = true
 tokio.workspace = true
-iced.workspace = true
+futures.workspace = true
 windows-capture.workspace = true
 windows = { version = "0.62.2", features = [
     "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D12",

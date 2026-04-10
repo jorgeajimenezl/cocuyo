@@ -9,7 +9,7 @@ wgpu.workspace = true
 wgpu-hal = { workspace = true, features = ["vulkan"] }
 tracing.workspace = true
 tokio.workspace = true
-iced = { workspace = true, features = ["wayland"] }
+futures.workspace = true
 ash.workspace = true
 ashpd.workspace = true
 drm-fourcc.workspace = true

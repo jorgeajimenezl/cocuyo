@@ -65,28 +65,49 @@ impl Event {
             #[cfg(target_os = "linux")]
             Event::BackendChanged(key) => {
                 config.preferred_backend = key;
-                SettingsEffect { save_immediately: true, ..Default::default() }
+                SettingsEffect {
+                    save_immediately: true,
+                    ..Default::default()
+                }
             }
             Event::AdapterChanged(preferred) => {
                 config.preferred_adapter = preferred;
-                SettingsEffect { save_immediately: true, ..Default::default() }
+                SettingsEffect {
+                    save_immediately: true,
+                    ..Default::default()
+                }
             }
-            Event::RestartApp => SettingsEffect { restart: true, ..Default::default() },
+            Event::RestartApp => SettingsEffect {
+                restart: true,
+                ..Default::default()
+            },
             Event::ForceCpuSamplingChanged(val) => {
                 config.force_cpu_sampling = val;
-                SettingsEffect { notify_main: true, ..Default::default() }
+                SettingsEffect {
+                    notify_main: true,
+                    ..Default::default()
+                }
             }
             Event::BulbUpdateIntervalChanged(ms) => {
                 config.bulb_update_interval_ms = ms;
-                SettingsEffect { clears_profile: true, ..Default::default() }
+                SettingsEffect {
+                    clears_profile: true,
+                    ..Default::default()
+                }
             }
             Event::MinBrightnessChanged(pct) => {
                 config.min_brightness_percent = pct;
-                SettingsEffect { clears_profile: true, ..Default::default() }
+                SettingsEffect {
+                    clears_profile: true,
+                    ..Default::default()
+                }
             }
             Event::WhiteColorTempChanged(temp) => {
                 config.white_color_temp = temp;
-                SettingsEffect { clears_profile: true, ..Default::default() }
+                SettingsEffect {
+                    clears_profile: true,
+                    ..Default::default()
+                }
             }
             Event::MinimizeToTrayChanged(val) => {
                 config.minimize_to_tray = val;
@@ -106,7 +127,10 @@ impl Event {
             }
             Event::SmoothTransitionsChanged(val) => {
                 config.smooth_transitions = val;
-                SettingsEffect { notify_main: true, ..Default::default() }
+                SettingsEffect {
+                    notify_main: true,
+                    ..Default::default()
+                }
             }
         }
     }

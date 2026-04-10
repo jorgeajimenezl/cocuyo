@@ -843,12 +843,7 @@ impl MainWindow {
 
     /// Apply a loaded profile's region/bulb state. Config fields are mutated
     /// by the caller (app) before this is called.
-    pub fn apply_profile(
-        &mut self,
-        name: &str,
-        config: &AppConfig,
-        bulb_setup: &mut BulbSetup,
-    ) {
+    pub fn apply_profile(&mut self, name: &str, config: &AppConfig, bulb_setup: &mut BulbSetup) {
         let Some(profile) = config.profiles.iter().find(|p| p.name == name).cloned() else {
             return;
         };
@@ -886,11 +881,7 @@ impl MainWindow {
             .unwrap_or(DEFAULT_FRAME_SIZE)
     }
 
-    fn dispatch_to_bulbs(
-        &mut self,
-        config: &AppConfig,
-        bulb_setup: &BulbSetup,
-    ) -> Task<Message> {
+    fn dispatch_to_bulbs(&mut self, config: &AppConfig, bulb_setup: &BulbSetup) -> Task<Message> {
         // Preview overlay reads sampled_color as ground truth, so restore it
         // after smoothing for the build call.
         let originals: Option<Vec<Option<(u8, u8, u8)>>> = if config.smooth_transitions {

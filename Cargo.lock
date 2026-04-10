@@ -656,6 +656,8 @@ dependencies = [
 name = "cocuyo-core"
 version = "0.5.4"
 dependencies = [
+ "futures",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "wgpu",
@@ -669,11 +671,11 @@ dependencies = [
  "ashpd",
  "cocuyo-core",
  "drm-fourcc",
+ "futures",
  "gstreamer",
  "gstreamer-allocators",
  "gstreamer-app",
  "gstreamer-video",
- "iced",
  "nix 0.29.0",
  "pipewire",
  "tokio",
@@ -688,7 +690,7 @@ version = "0.5.4"
 dependencies = [
  "cocuyo-core",
  "foreign-types",
- "iced",
+ "futures",
  "metal",
  "objc2 0.6.4",
  "screencapturekit",
@@ -703,7 +705,7 @@ name = "cocuyo-platform-windows"
 version = "0.5.4"
 dependencies = [
  "cocuyo-core",
- "iced",
+ "futures",
  "tokio",
  "tracing",
  "wgpu",
@@ -3118,7 +3120,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

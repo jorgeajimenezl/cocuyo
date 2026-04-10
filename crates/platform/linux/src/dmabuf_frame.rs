@@ -56,7 +56,7 @@ impl GpuFrame for DmaBufFrame {
         }
         .map_err(|e| {
             crate::vulkan_dmabuf::mark_dmabuf_import_failed();
-            Box::new(e) as ImportError
+            ImportError::wrap(e)
         })
     }
 

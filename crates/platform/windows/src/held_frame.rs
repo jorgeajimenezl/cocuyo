@@ -95,7 +95,7 @@ impl GpuFrame for HeldFrame {
         }
         .map_err(|e| {
             crate::dx12_import::mark_d3d_shared_import_failed();
-            Box::new(e) as ImportError
+            ImportError::wrap(e)
         })
     }
 
