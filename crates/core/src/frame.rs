@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Boxed error type for GPU import failures.
-pub type ImportError = Box<dyn std::error::Error + Send + Sync>;
+pub use crate::errors::ImportError;
 
 /// Atomic flag for tracking whether a zero-copy import path is still viable.
 /// Once import fails, the path is disabled until explicitly reset.

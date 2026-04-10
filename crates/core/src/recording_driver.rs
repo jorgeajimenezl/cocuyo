@@ -19,11 +19,16 @@ use futures::stream::{self, Stream, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+use crate::errors::RecordingError;
 use crate::frame::FrameData;
 use crate::recording::{RecordingCommand, RecordingEvent, RecordingState};
 
 /// Future returned by a backend's shutdown hook.
-pub type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+///
+/// Returns `Some(error)` if the backend detected a streaming error during
+/// cleanup (e.g. the capture thread crashed), or `None` for a clean exit.
+/// The driver emits `RecordingState::Error` vs `Idle` accordingly.
+pub type ShutdownFuture = Pin<Box<dyn Future<Output = Option<RecordingError>> + Send>>;
 
 /// Cleanup closure invoked exactly once when the recording loop exits
 /// (either because the user issued `Stop` or the capture source ended).
@@ -116,6 +121,7 @@ pub fn run_recording<B: RecordingBackend>(
             Some(Duration::from_secs_f64(1.0 / fps_limit as f64))
         };
         let mut last_forwarded: Option<Instant> = None;
+        let mut stopped_by_user = false;
 
         loop {
             tokio::select! {
@@ -140,11 +146,14 @@ pub fn run_recording<B: RecordingBackend>(
                     match cmd {
                         Some(RecordingCommand::Stop) | None => {
                             info!("Stop command received, shutting down recording");
+                            stopped_by_user = true;
                             // Drop the frame stream so the capture source notices
                             // (e.g. channel closes, Arc refcount drops).
                             drop(frames);
                             if let Some(sd) = shutdown.take() {
-                                sd().await;
+                                if let Some(e) = sd().await {
+                                    error!(error = %e, "Shutdown error after Stop command");
+                                }
                             }
                             break;
                         }
@@ -153,12 +162,23 @@ pub fn run_recording<B: RecordingBackend>(
             }
         }
 
-        if let Some(sd) = shutdown.take() {
-            sd().await;
-        }
+        // User-initiated stop is always Idle. Natural stream-end may be an error.
+        let final_state = if stopped_by_user {
+            RecordingState::Idle
+        } else if let Some(sd) = shutdown.take() {
+            match sd().await {
+                Some(e) => {
+                    error!(error = %e, "Recording stopped with error");
+                    RecordingState::Error(e.to_string())
+                }
+                None => RecordingState::Idle,
+            }
+        } else {
+            RecordingState::Idle
+        };
 
         sender
-            .send(RecordingEvent::StateChanged(RecordingState::Idle))
+            .send(RecordingEvent::StateChanged(final_state))
             .await
             .ok();
 
@@ -190,6 +210,7 @@ mod tests {
     use futures::StreamExt as _;
 
     use super::*;
+    use crate::errors::RecordingError;
     use crate::frame::FrameData;
     use crate::recording::{RecordingCommand, RecordingEvent, RecordingState};
 
@@ -215,7 +236,7 @@ mod tests {
             frames: Box::pin(frame_rx),
             shutdown: Box::new(move || {
                 flag.store(true, Ordering::SeqCst);
-                Box::pin(async {})
+                Box::pin(async { None })
             }),
         };
         (frame_tx, shutdown_called, handles)
@@ -380,6 +401,40 @@ mod tests {
             RecordingEvent::StateChanged(RecordingState::Idle)
         ));
         assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
+    /// When the frame stream ends and the shutdown hook returns an error,
+    /// the driver emits `Error` instead of `Idle`.
+    #[tokio::test]
+    async fn test_stream_error_emits_error_state() {
+        let (frame_tx, _flag, mut handles) = started_handles();
+        // Replace the shutdown hook with one that reports an error.
+        handles.shutdown = Box::new(|| {
+            Box::pin(async { Some(RecordingError::StreamFailed("pipe broke".into())) })
+        });
+
+        let mut stream = run_recording(0, MockBackend(Some(StartOutcome::Started(handles))));
+
+        let RecordingEvent::Ready(_cmd_tx) = stream.next().await.unwrap() else {
+            panic!("expected Ready");
+        };
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Starting)
+        ));
+        assert!(matches!(
+            stream.next().await.unwrap(),
+            RecordingEvent::StateChanged(RecordingState::Recording)
+        ));
+
+        drop(frame_tx); // natural end-of-stream triggers shutdown hook
+
+        let ev = stream.next().await.unwrap();
+        assert!(
+            matches!(&ev, RecordingEvent::StateChanged(RecordingState::Error(m)) if m.contains("pipe broke")),
+            "unexpected event: {:?}",
+            ev
+        );
     }
 
     /// With `fps_limit = 0` every frame is forwarded regardless of timing.
