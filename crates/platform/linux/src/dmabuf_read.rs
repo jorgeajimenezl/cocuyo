@@ -1,7 +1,7 @@
-//! DMA-BUF pixel readback helpers (moved from `cocuyo-core::linux`).
+//! DMA-BUF pixel readback via mmap.
 //!
-//! Used by [`super::dmabuf_frame::DmaBufFrame::read_pixels_bgra`] as the
-//! CPU fallback when GPU sampling strategies need raw pixel data.
+//! No PipeWire dependency — used by [`super::dmabuf_frame::DmaBufFrame::read_pixels_bgra`]
+//! as the CPU fallback when GPU sampling strategies need raw pixel data.
 
 use std::num::NonZeroUsize;
 use std::os::fd::{BorrowedFd, RawFd};
@@ -80,17 +80,19 @@ pub fn read_dmabuf_pixels(
             ProtFlags::PROT_READ,
             MapFlags::MAP_SHARED,
             borrowed_fd,
-            0,
+            0, // DMA-BUF mmap offset must be 0; PipeWire chunk offset applied manually
         )
     }
     .map_err(DmaBufReadError::MmapFailed)?;
 
+    // Begin DMA-BUF read sync
     let sync_start_flags: u64 = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
     if let Err(e) = unsafe { dma_buf_ioctl_sync(fd, &sync_start_flags) } {
         let _ = unsafe { munmap(mapped_ptr, map_size) };
         return Err(DmaBufReadError::SyncFailed(e));
     }
 
+    // Copy pixel data, handling stride and format conversion
     let src_base = mapped_ptr.as_ptr() as *const u8;
     let mut bgra = vec![0u8; row_bytes * height as usize];
 
@@ -104,11 +106,12 @@ pub fn read_dmabuf_pixels(
         let dst_row = &mut bgra[y * row_bytes..(y + 1) * row_bytes];
 
         if needs_rgba_swap {
+            // RGBA -> BGRA: swap channels 0 and 2
             for px in 0..width as usize {
                 let si = px * 4;
-                dst_row[si] = src_row[si + 2];
-                dst_row[si + 1] = src_row[si + 1];
-                dst_row[si + 2] = src_row[si];
+                dst_row[si] = src_row[si + 2]; // B <- R position
+                dst_row[si + 1] = src_row[si + 1]; // G
+                dst_row[si + 2] = src_row[si]; // R <- B position
                 dst_row[si + 3] = if has_padding_alpha {
                     255
                 } else {
@@ -125,6 +128,7 @@ pub fn read_dmabuf_pixels(
         }
     }
 
+    // End DMA-BUF read sync (best-effort)
     let sync_end_flags: u64 = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
     let _ = unsafe { dma_buf_ioctl_sync(fd, &sync_end_flags) };
 
